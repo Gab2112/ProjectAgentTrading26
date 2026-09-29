@@ -1,0 +1,19 @@
+# Bytecode e cache di Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Configurazione IDE (PyCharm)
+.idea/
+
+# Se usi o qualcuno usa VS Code
+.vscode/
+
+# Ambienti virtuali
+venv/
+.venv/
+env/
+
+# Dati e file temporanei/log
+*.log
+.DS_Store
