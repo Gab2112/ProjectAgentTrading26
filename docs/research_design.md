@@ -1,24 +1,27 @@
 # Research Design
 
-## LUISS Final Project — v0
+## LUISS Final Project — v1
 
 **Course:** Data-Driven Models for Investment  
-**Status:** Early research-design phase  
-**Purpose of this document:** Define the first coherent research framework.
+**Status:** Working research architecture  
+**Working hypothesis:** Macro / Rates Regimes  
+**Purpose of this document:** Define the current research question, expected software architecture, methodological constraints, and staged development plan.
 
 ---
 
 ## 1. Project Objective
 
-The project aims to develop and rigorously evaluate a **systematic trading strategy** driven by macro-financial information, with a current focus on:
+The project aims to develop and rigorously evaluate a **systematic fixed-income trading system** driven by macro-financial information.
+The current working focus is:
 
 - monetary policy;
 - interest rates;
 - inflation;
 - yield-curve dynamics;
-- fixed-income markets.
+- fixed-income markets;
+- volatility and market-regime dynamics.
 
-The final strategy must convert observable information into discrete trading decisions:
+The system must ultimately convert information available at time t into discrete trading decisions:
 
 ```text
 +1 = Long
@@ -26,140 +29,113 @@ The final strategy must convert observable information into discrete trading dec
 -1 = Short
 ```
 
-The project will be developed progressively, starting from a simple and interpretable baseline and introducing forecasting and machine-learning methods only when they can be tested against that baseline.
+The project will be developed progressively. A simple and interpretable economic baseline will be implemented first. Statistical forecasting, machine-learning models, and an agentic extension will be introduced only after the baseline and validation framework are stable.
 
 The central methodological principle is:
 
-> **Increasing model complexity must justify itself through better out-of-sample performance, robustness, or economic interpretability.**
+> **Increasing model or system complexity must justify itself through better out-of-sample performance, robustness, interpretability, or decision quality.**
 
 ---
 
-## 2. Current Research Direction
+## 2. Working Research Question
 
-The project is currently moving toward a **monetary-policy / rates / fixed-income framework**.
+The current working research question is:
 
-The exact research question is intentionally not fixed yet.
+> **Can combinations of inflation, interest rates, yield-curve shape, and volatility identify recurring macro/rates regimes associated with different optimal fixed-income exposures?**
 
-The current area of interest includes relationships among:
+
+
+It is not treated as fixed and irreversible. If later evidence or group's preferences suggests a better research question, the domain-specific components can be revised while preserving the reusable research infrastructure.
+
+The project therefore distinguishes between:
+
+### Reusable infrastructure
 
 ```text
-Policy rates
-Inflation
-Treasury / government-bond yields
-Yield-curve shape
-Real rates
-Bond prices
-Market volatility
+data acquisition
+data cleaning and alignment
+time-series validation
+backtesting
+performance evaluation
+configuration
+results management
+agent orchestration interfaces
 ```
 
-Possible traded instruments may include government-bond ETFs, bond futures, or other liquid assets whose prices are directly affected by changes in interest-rate expectations.
+### Hypothesis-specific components
 
-At this stage, the project is deliberately broader than a single final strategy. The next research step is to identify a small set of precise, falsifiable hypotheses.
+```text
+asset universe
+regime definition
+feature set
+prediction target
+forecast horizon
+model choice
+signal mapping
+portfolio allocation logic
+```
 
 ---
 
-## 3. Research Philosophy
+## 3. Economic Intuition
 
-The project should not begin by choosing a sophisticated model.
+Fixed-income assets react differently depending on the prevailing macroeconomic and rates environment.
 
-The sequence should be:
+Possible regime dimensions include:
 
 ```text
-     Economic idea
-           ↓
-   Research hypothesis
-           ↓
-         Data
-           ↓
-       Features
-           ↓
-    Simple baseline
-           ↓
-   Forecasting model
-           ↓
-    Trading signal
-           ↓
-       Backtest
-           ↓
-      Validation
+Inflation rising / falling
+Policy rates rising / falling
+Yield levels rising / falling
+Curve steepening / flattening
+Curve inversion / normalization
+Rate volatility high / low
+```
+
+The underlying hypothesis is that these states may correspond to systematically different risk-return profiles across bond maturities.
+
+For example, long-duration bonds may react differently from short-duration bonds when:
+
+- inflation accelerates;
+- expected policy rates increase;
+- the yield curve flattens;
+- rate volatility rises.
+
+The goal is not merely to label economic states. The regime representation must eventually support a tradable allocation rule.
+
+---
+
+## 4. Research Philosophy
+
+The project should not begin by selecting a sophisticated model.
+
+The intended sequence is:
+
+```text
+Economic hypothesis
+        ↓
+Point-in-time data
+        ↓
+Feature engineering
+        ↓
+Regime representation
+        ↓
+Simple economic baseline
+        ↓
+Statistical / ML model
+        ↓
+Agentic extension
+        ↓
+Trading signal / allocation
+        ↓
+    Backtest
+        ↓
+   Validation
 ```
 
 The model must serve the hypothesis, not the reverse.
 
-Only after defining the prediction problem should the appropriate model be selected.
-
----
-
-## 4. Candidate Research Questions
-
-The following questions are currently examples, not final decisions.
-
-### Candidate A — Bond Direction Forecasting
-
-> Can changes in inflation, policy rates and the yield curve predict short-horizon returns across different bond maturities?
-
-Possible output:
-
-```text
-Expected positive return  → +1
-No strong expectation     →  0
-Expected negative return  → -1
-```
-
----
-
-### Candidate B — Duration Allocation
-
-> Can macroeconomic and interest-rate conditions determine when long-, intermediate-, or short-duration bond exposure is preferable?
-
-Possible universe:
-
-```text
-Short-duration bonds
-Intermediate-duration bonds
-Long-duration bonds
-```
-
-The strategy could change exposure according to the predicted interest-rate environment.
-
----
-
-### Candidate C — Yield Forecasting
-
-> Does forecasting future changes in Treasury yields improve a systematic bond-trading strategy relative to simple rules?
-
-Conceptually:
-
-```text
-Macro / rates features
-        ↓
-Yield forecasting model
-        ↓
-Expected yield change
-        ↓
-Bond trading signal
-```
-
-Because bond prices and yields move in opposite directions, a forecast of rising yields would generally imply pressure on bond prices, while falling yields would generally support bond prices.
-
----
-
-### Candidate D — Macro / Rates Regimes -- `Chosen one`
-
-> Can combinations of inflation, rates, yield-curve shape and volatility identify recurring regimes with different optimal fixed-income exposures?
-
-Possible regime examples:
-
-```text
-Inflation rising / yields rising
-Inflation falling / yields falling
-Curve steepening
-Curve flattening
-High-rate volatility
-Low-rate volatility
-```
-
-A later model could attempt to classify or forecast these regimes.
+Likewise, the agentic system must serve a clear decision problem.
 
 ---
 
@@ -167,41 +143,40 @@ A later model could attempt to classify or forecast these regimes.
 
 The exact traded universe is still open.
 
-Potential instruments may include:
+Potential instruments include:
 
 - U.S. Treasury ETFs;
-- short-, intermediate-, and long-duration bond ETFs;
+- short-duration Treasury ETFs;
+- intermediate-duration Treasury ETFs;
+- long-duration Treasury ETFs;
 - Treasury futures;
 - European government-bond instruments;
-- additional liquid assets used as benchmarks or cross-asset signals.
+- additional liquid fixed-income instruments used as benchmarks or comparative exposures.
 
-A multi-asset structure is preferred because it allows the system to compare different sensitivities to interest-rate and inflation dynamics.
+A multi-asset structure is preferred because the research question explicitly concerns **different fixed-income exposures across regimes**.
 
-The final universe should satisfy three conditions:
+The final universe should satisfy:
 
 1. clear economic connection to the hypothesis;
-2. sufficient historical data;
-3. realistic tradability and benchmark construction.
+2. sufficient historical depth;
+3. realistic tradability;
+4. enough variation in duration / rate sensitivity;
+5. reliable benchmark construction.
 
 ---
 
 ## 6. Candidate Data
 
-The first data architecture may include several groups of variables.
-
 ### 6.1 Market Data
 
 Possible inputs:
 
-- bond prices;
-- bond ETF prices;
-- Treasury yields;
-- futures prices;
-- market returns;
+- bond / ETF prices;
+- Treasury futures prices;
+- returns;
 - trading volume;
-- volatility measures.
-
----
+- realized volatility;
+- rate-volatility measures.
 
 ### 6.2 Interest-Rate Data
 
@@ -214,10 +189,6 @@ Possible inputs:
 - 10-year yields;
 - 30-year yields.
 
-These allow the construction of yield-curve features.
-
----
-
 ### 6.3 Yield-Curve Features
 
 Examples:
@@ -228,18 +199,17 @@ Examples:
 30Y - 10Y
 ```
 
-Possible additional features:
+Possible derived features:
 
 - slope;
 - change in slope;
 - steepening / flattening;
-- inversion indicators.
-
----
+- inversion indicators;
+- level / slope / curvature representations.
 
 ### 6.4 Inflation Data
 
-Possible variables:
+Possible inputs:
 
 - CPI;
 - core CPI;
@@ -248,25 +218,19 @@ Possible variables:
 - breakeven inflation;
 - inflation expectations.
 
-The distinction between low-frequency official inflation data and higher-frequency market-implied inflation expectations will need to be handled carefully.
-
----
+Official inflation releases and market-implied inflation measures must be treated differently because they have different publication frequencies and timing.
 
 ### 6.5 Real Rates
 
-A simplified real-rate concept is:
+A simplified representation is:
 
 ```text
-Nominal yield
--
+  Nominal yield
+       -
 Expected inflation
-=
-Real yield
+       =
+   Real yield
 ```
-
-Real rates may be particularly informative for fixed-income and cross-asset behavior.
-
----
 
 ### 6.6 Additional Macro-Financial Variables
 
@@ -279,13 +243,13 @@ Possible later candidates:
 - economic-surprise indicators;
 - central-bank expectations.
 
-These should be included only if they have a clear economic role.
+Variables should be included only when their economic role can be justified.
 
 ---
 
-## 7. Proposed Architecture v0
+## 7. Proposed Architecture v1
 
-The first target architecture is:
+The repository should evolve toward:
 
 ```text
 ProjectAgentTrading26/
@@ -308,63 +272,315 @@ ProjectAgentTrading26/
     ├── data_acquisition.py
     ├── data_transformation.py
     ├── feature_engineering.py
+    ├── regime_model.py
     ├── forecasting.py
     ├── signal_generation.py
+    ├── portfolio.py
     ├── backtester.py
-    └── evaluator.py
+    ├── evaluator.py
+    │
+    └── agents/
+        ├── __init__.py
+        ├── orchestrator.py
+        ├── macro_agent.py
+        ├── regime_agent.py
+        ├── strategy_agent.py
+        ├── risk_agent.py
+        └── critic_agent.py
 ```
 
-The current repository already contains a functioning subset of this pipeline. The new structure should evolve gradually rather than through a complete rewrite.
+This is a **target architecture**, not a requirement to implement every module immediately.
+
+The deterministic research engine comes first. The agent layer is an extension built on top of that engine.
 
 ---
 
-## 8. Functional Pipeline
+## 8. Two-Layer System Design
 
-The target pipeline is:
+The architecture deliberately separates the project into two layers.
+
+### Layer A — Deterministic Quantitative Core
 
 ```text
-         RAW DATA
-             ↓
- DATA CLEANING AND ALIGNMENT
-             ↓
-     FEATURE ENGINEERING
-             ↓
-       BASELINE MODEL
-             ↓
-    FORECASTING / ML MODEL
-             ↓
-      SIGNAL GENERATION
-             ↓
-        +1 / 0 / -1
-             ↓
-          BACKTEST
-             ↓
-TRAIN / VALIDATION / OUT-OF-SAMPLE
-             ↓
-   PERFORMANCE EVALUATION
+       RAW DATA
+          ↓
+  CLEANING / ALIGNMENT
+          ↓
+  FEATURE ENGINEERING
+          ↓
+     REGIME MODEL
+          ↓
+   FORECASTING / ML
+          ↓
+SIGNAL / PORTFOLIO RULE
+          ↓
+      BACKTEST
+          ↓
+     EVALUATION
 ```
 
-Each stage should have a clear responsibility.
+This layer must be independently runnable and reproducible.
+
+It provides:
+
+- numerical features;
+- model outputs;
+- regime probabilities / labels;
+- candidate positions;
+- historical performance.
+
+### Layer B — Agentic Decision Layer
+
+The agentic layer consumes structured, point-in-time information produced by the quantitative core.
+
+```text
+                 ORCHESTRATOR
+                      │
+       ┌──────────────┼──────────────┐
+       │              │              │
+   Macro Agent    Regime Agent   Strategy Agent
+       │              │              │
+       └──────────────┼──────────────┘
+                      ↓
+                  Risk Agent
+                      ↓
+                 Critic Agent
+                      ↓
+               Final Decision
+                      ↓
+                 +1 / 0 / -1
+```
+
+The agent layer must not bypass the backtester or validation framework.
 
 ---
 
-## 9. Module Responsibilities
+## 9. Agent Responsibilities
+
+The exact agent design remains provisional.
+
+### 9.1 Orchestrator Agent
+
+Coordinates the agentic workflow.
+
+Responsibilities may include:
+
+- deciding which specialized agents should be called;
+- passing structured information between agents;
+- managing dependencies;
+- collecting outputs;
+- resolving missing or inconsistent outputs;
+- producing the final structured decision package.
+
+The orchestrator should not directly invent market data or overwrite deterministic model outputs.
+
+### 9.2 Macro Agent
+
+Interprets the macroeconomic state using only approved point-in-time inputs.
+
+Possible inputs:
+
+- inflation trend;
+- policy-rate state;
+- yield levels;
+- real-rate proxies;
+- macro surprises.
+
+Possible output:
+
+```text
+macro_state
+confidence
+supporting_variables
+```
+
+### 9.3 Regime Agent
+
+Consumes quantitative regime outputs and evaluates the current rate-regime interpretation.
+
+Possible inputs:
+
+- cluster / regime label;
+- regime probabilities;
+- yield-curve state;
+- volatility state;
+- transition probabilities.
+
+Possible output:
+
+```text
+regime_interpretation
+regime_confidence
+transition_risk
+```
+
+This agent should complement, not replace, the underlying quantitative regime model.
+
+### 9.4 Strategy Agent
+
+Maps regime information into candidate fixed-income exposures.
+
+Possible responsibilities:
+
+- compare short-, intermediate-, and long-duration exposures;
+- convert regime information into candidate directional positions;
+- explain why a given exposure is consistent with the regime.
+
+Possible output:
+
+```text
+candidate_position
+candidate_weight
+rationale
+confidence
+```
+
+### 9.5 Risk Agent
+
+Applies risk constraints independently from the Strategy Agent.
+
+Possible checks:
+
+- excessive exposure;
+- volatility threshold;
+- concentration;
+- leverage constraints;
+- turnover;
+- drawdown / risk regime;
+- conflicting signals.
+
+The Risk Agent may reduce or reject a proposed position.
+
+### 9.6 Critic Agent
+
+Acts as an evaluator / challenger before the final decision.
+
+Possible responsibilities:
+
+- check whether the recommendation is supported by available data;
+- detect inconsistencies between agents;
+- identify unsupported reasoning;
+- flag possible look-ahead or information-timing problems;
+- request reconsideration when necessary.
+
+The Critic Agent provides a controlled evaluator–optimizer mechanism rather than unrestricted debate.
+
+---
+
+## 10. Why the Agent Layer Is Not Implemented First
+
+The project should first establish:
+
+```text
+reliable data
+        ↓
+point-in-time features
+        ↓
+valid regime representation
+        ↓
+baseline strategy
+        ↓
+proper backtest
+```
+
+Only then does it make sense to introduce autonomous decision components.
+
+Otherwise, the agents would be reasoning over an unstable research pipeline and their contribution could not be measured cleanly.
+
+The agentic extension therefore becomes a **later experimental layer**, not the initial implementation step.
+
+---
+
+## 11. Agentic Design Principles
+
+### 11.1 Use Agents Only Where Agency Adds Value
+
+Tasks with fixed and testable logic should remain deterministic.
+
+Examples:
+
+```text
+return calculation
+yield-curve spread calculation
+data alignment
+transaction-cost calculation
+performance metrics
+```
+
+Agents are more appropriate for:
+
+```text
+context synthesis
+specialized reasoning
+conflict resolution
+tool selection
+structured critique
+orchestration
+```
+
+### 11.2 Structured Inputs and Outputs
+
+Agents should communicate through explicit schemas rather than unconstrained prose.
+
+Example:
+
+```json
+{
+  "regime": "flattening_high_volatility",
+  "confidence": 0.72,
+  "recommended_signal": -1,
+  "risk_flag": false
+}
+```
+
+### 11.3 Agent Output Must Be Testable
+
+The project should compare:
+
+```text
+ Quantitative baseline
+         vs
+  ML-enhanced strategy
+         vs
+Agent-enhanced strategy
+```
+
+The agentic layer is useful only if its incremental contribution can be evaluated.
+
+### 11.4 No Direct Access to Future Information
+
+For historical backtests, every agent invocation must receive only information available at that historical timestamp.
+
+### 11.5 Pretrained-Model Leakage Must Be Addressed
+
+If LLM-based agents are used, the model may contain information in its pretrained weights about events occurring after the historical decision date.
+
+Therefore the final methodology must explicitly discuss and mitigate pretrained-model leakage.
+
+Potential safeguards include:
+
+- restrict prompts to structured point-in-time inputs;
+- avoid asking the LLM to recall historical events from memory;
+- avoid giving future outcome information;
+- log complete prompts and responses;
+- test an agent-free quantitative benchmark;
+- treat LLM-agent results as a distinct experimental layer.
+
+---
+
+## 12. Core Module Responsibilities
 
 ### `data_acquisition.py`
 
-Responsible for obtaining raw market and macro-financial data.
+Obtains raw financial and macroeconomic data.
 
-Future sources may include:
+Potential sources:
 
 - Bloomberg;
 - Yahoo Finance;
 - FRED;
 - central-bank databases;
-- other validated financial-data sources.
-
-The module should not perform feature engineering.
-
----
+- other validated sources.
 
 ### `data_transformation.py`
 
@@ -373,19 +589,13 @@ Responsible for:
 - date alignment;
 - frequency alignment;
 - missing values;
-- data cleaning;
 - chronological consistency;
+- point-in-time release handling;
 - combining series from different sources.
-
-This stage becomes especially important because macroeconomic variables may have different frequencies and release schedules.
-
----
 
 ### `feature_engineering.py`
 
-Responsible for creating model inputs.
-
-Possible examples:
+Creates model inputs such as:
 
 ```text
 yield changes
@@ -398,39 +608,46 @@ realized volatility
 rolling statistics
 ```
 
-Features must only use information that would have been available at the time.
+### `regime_model.py`
 
----
+Dedicated to regime identification.
+
+Potential approaches may eventually include:
+
+- deterministic regime rules;
+- clustering;
+- Gaussian mixture models;
+- Hidden Markov Models;
+- other state-classification techniques.
+
+No final model is selected yet.
 
 ### `forecasting.py`
 
-Responsible for predictive models.
+Handles models that forecast:
 
-This module should support increasing complexity.
+- future regime probabilities;
+- regime transitions;
+- returns;
+- other intermediate variables if justified.
 
-Possible development path:
+Potential development path:
 
 ```text
    Simple statistical model
               ↓
-  Linear / Logistic Regression
+ Linear / Logistic Regression
               ↓
         Random Forest
               ↓
-           Ensemble
+  Gradient Boosting / Ensemble
               ↓
-Neural Network, only if justified
+ Neural model, only if justified
 ```
-
-Not every model needs to survive into the final project.
-
-The purpose is comparison, not complexity for its own sake.
-
----
 
 ### `signal_generation.py`
 
-Responsible for converting model outputs into:
+Converts regime / forecasting outputs into:
 
 ```text
 +1 = Long
@@ -438,28 +655,17 @@ Responsible for converting model outputs into:
 -1 = Short
 ```
 
-Example:
+### `portfolio.py`
 
-```text
-Forecast probability > upper threshold
-→ +1
+Maps asset-level signals into portfolio exposures.
 
-Forecast probability < lower threshold
-→ -1
-
-Otherwise
-→ 0
-```
-
-The exact rule will depend on the final target variable.
-
----
+This is especially important if several bond maturities are traded simultaneously.
 
 ### `backtester.py`
 
 Responsible for:
 
-- applying positions;
+- position application;
 - execution timing;
 - strategy returns;
 - transaction costs;
@@ -467,16 +673,12 @@ Responsible for:
 - equity curves;
 - benchmarks.
 
-The backtester should remain independent from any specific forecasting model.
-
----
-
 ### `evaluator.py`
 
-Responsible for comparing models and strategies using metrics such as:
+Computes and compares:
 
 - cumulative return;
-- CAGR (_Compound Annual Growth Rate_);
+- annualized return / CAGR;
 - annualized volatility;
 - Sharpe ratio;
 - maximum drawdown;
@@ -486,15 +688,11 @@ Responsible for comparing models and strategies using metrics such as:
 
 ---
 
-## 10. Development Strategy: Increasing Complexity
+## 13. Development Roadmap
 
-The project should progress through several layers.
+### Stage 0 — Existing Technical Baseline
 
-### Stage 0 — Technical Baseline
-
-The current SMA strategy remains useful as a technical proof of concept.
-
-Its purpose is to verify that:
+The current SMA implementation has already verified that:
 
 ```text
 data → feature → signal → backtest → evaluation
@@ -502,92 +700,97 @@ data → feature → signal → backtest → evaluation
 
 works end to end.
 
-It is not the final research strategy.
+It is not part of the intended final strategy.
 
----
+### Stage 1 — Macro / Rates Data Foundation
 
-### Stage 1 — Economic Baseline
+Implement:
 
-Build a simple strategy based on the final macro / rates hypothesis.
+- selected asset universe;
+- yield data;
+- inflation data;
+- policy-rate data;
+- volatility data;
+- robust timestamp alignment.
 
-Example:
+### Stage 2 — Economic Regime Baseline
+
+Create a simple and interpretable regime definition.
+
+Example conceptually:
 
 ```text
-    Yield-curve change
+     inflation trend
             +
-     Inflation trend
+       yield trend
             +
-        Rate trend
+       curve shape
+            +
+      rate volatility
             ↓
-  Simple deterministic rule
+simple regime classification
             ↓
-          Signal
+   fixed-income exposure
 ```
 
-This gives an interpretable benchmark.
+This becomes the first meaningful benchmark.
 
----
+### Stage 3 — Data-Driven Regime Model
 
-### Stage 2 — Simple Forecasting
+Replace or complement deterministic regime rules with a statistical / ML regime model.
 
-Introduce a statistical forecasting model.
+Possible approaches:
 
-Examples:
-
-- linear regression;
-- logistic regression.
-
-The purpose is to determine whether a fitted predictive relationship improves on the simple baseline.
-
----
-
-### Stage 3 — Machine Learning
-
-Introduce nonlinear models such as:
-
-- Random Forest;
-- gradient boosting;
+- clustering;
+- HMM;
+- classification models;
 - ensemble methods.
 
-The key comparison becomes:
+### Stage 4 — Regime Forecasting
+
+Test whether forecasting the next regime or regime transition adds value beyond contemporaneous regime identification.
+
+### Stage 5 — Agentic Extension
+
+Introduce the specialized agents and orchestrator.
+
+The agentic system should be evaluated against the non-agentic strategy.
+
+Possible comparison:
 
 ```text
- Simple baseline
-       vs
-   Regression
-       vs
- Machine learning
+Economic baseline
+vs
+Data-driven regime model
+vs
+Forecast-enhanced model
+vs
+Agent-enhanced system
 ```
 
----
+### Stage 6 — Optional Advanced Models
 
-### Stage 4 — Neural Models
+Only if justified:
 
-A neural network should only be introduced if:
-
-- the dataset is sufficiently large;
-- the problem justifies nonlinear complexity;
-- simpler models have already been established;
-- strict validation is maintained.
-
-A neural model is an optional extension, not a project requirement.
+- neural networks;
+- more complex ensembles;
+- additional alternative data;
+- more sophisticated multi-agent debate / consensus.
 
 ---
 
-## 11. Validation Framework
+## 14. Validation Framework
 
-The current train/test structure is not sufficient for the final project.
-
-The target structure should be:
+The target structure is:
 
 ```text
         TRAIN
           ↓
-      VALIDATION
+     VALIDATION
           ↓
 MODEL / PARAMETER FREEZE
           ↓
-   OUT-OF-SAMPLE TEST
+  OUT-OF-SAMPLE TEST
 ```
 
 ### Training
@@ -598,10 +801,11 @@ Used to estimate model parameters.
 
 Used to:
 
-- choose features;
-- select models;
+- select features;
+- select regime methodology;
 - tune hyperparameters;
-- choose thresholds.
+- choose signal thresholds;
+- compare candidate agent configurations if necessary.
 
 ### Out-of-Sample
 
@@ -609,96 +813,142 @@ Used only for final evaluation.
 
 The OOS period must not influence model design.
 
----
-
-## 12. Model Comparison
-
-The project should not evaluate a model only in isolation.
-
-The final analysis should answer questions such as:
-
-```text
-Does forecasting beat a simple rule?
-
-Does Random Forest beat regression?
-
-Does an ensemble improve robustness?
-
-Does additional complexity survive out of sample?
-```
-
-Possible comparison table:
-
-```text
-Model                  Return   Sharpe   Max DD
-------------------------------------------------
-Simple baseline          ...
-Regression               ...
-Random Forest            ...
-Ensemble                 ...
-Benchmark                ...
-```
-
-This incremental comparison may become one of the central strengths of the final project.
+Walk-forward validation may later be added if appropriate.
 
 ---
 
-## 13. Execution and Look-Ahead Control
+## 15. Model and System Comparison
 
-All signals must be based only on information available at the time.
+The final analysis should not report only one model.
 
-A generic daily rule could be:
+The project should evaluate the incremental contribution of each layer.
+
+Example:
 
 ```text
-   Information available through day t
-                 ↓
-      Features calculated at t
-                 ↓
-       Forecast generated at t
-                 ↓
-        Signal generated at t
-                 ↓
-      Position applied from t+1
+System                         Return   Sharpe   Max DD
+------------------------------------------------------
+Economic regime baseline        ...
+Statistical regime model        ...
+ML regime model                 ...
+Forecast-enhanced system        ...
+Agent-enhanced system           ...
+Benchmark                       ...
 ```
 
-For macroeconomic data, publication dates are especially important.
-
-For example, an inflation observation referring to one month may only be released several weeks later. The strategy must use the **release date**, not the period to which the statistic refers.
+This structure allows the project to answer not only whether the final system works, but **which additional components actually add value**.
 
 ---
 
-## 14. Open Decisions
+## 16. Execution and Look-Ahead Control
 
-The following decisions are intentionally still open:
+All signals must use only information available at the decision time.
 
-- final research question;
-- final traded assets;
-- prediction horizon;
-- target variable;
-- exact macroeconomic features;
+A generic workflow is:
+
+```text
+Information available through t
+            ↓
+Point-in-time feature set
+            ↓
+Regime / forecast output
+            ↓
+Agentic analysis, if enabled
+            ↓
+Signal generated at t
+            ↓
+Position applied from t+1
+```
+
+For macroeconomic data, publication dates are essential.
+
+An inflation value referring to month m cannot be used until its actual publication date.
+
+The same point-in-time rule applies to every agent input.
+
+---
+
+## 17. Current Working Decisions
+
+The following are now treated as working decisions:
+
+```text
+Domain                  Macro / rates / fixed income
+Research candidate      Candidate D — Macro / Rates Regimes
+System type             Multi-asset systematic trading
+Core architecture       Quantitative engine + later agentic layer
+Signal convention       +1 / 0 / -1
+Validation philosophy   Train / validation / OOS
+Development philosophy  Baseline first, complexity incrementally
+Agent implementation    Required in expected architecture, later stage
+```
+
+---
+
+## 18. Open Decisions
+
+The following remain open:
+
+- exact traded assets;
+- U.S. vs European vs mixed market scope;
+- prediction / holding horizon;
+- precise regime definition;
 - exact historical sample;
+- exact macroeconomic features;
 - final data sources;
-- baseline trading rule;
+- baseline exposure rule;
+- regime-identification model;
 - forecasting models;
-- hyperparameter ranges;
+- portfolio construction method;
+- agent framework;
+- exact agent count;
+- LLM-based vs tool-based agents;
+- agent consensus / orchestration method;
 - signal thresholds;
 - benchmark portfolio;
 - transaction-cost assumptions.
 
-These items should be resolved progressively rather than fixed prematurely.
+These decisions should be resolved progressively.
 
 ---
 
-## 15. Current Status
+## 19. Current Status
 
 ```text
-Repository baseline tested         ✓
-Current code inspected             ✓
-Initial research architecture      ✓
-Final hypothesis                   OPEN
-Final asset universe               OPEN
-Final dataset                      OPEN
-Final forecasting model            OPEN
+Repository baseline tested               ✓
+Current code inspected                   ✓
+Research architecture defined            ✓
+Working research candidate selected      ✓
+Agentic layer included in architecture   ✓
+
+Final asset universe                     OPEN
+Final dataset                            OPEN
+Regime definition                        OPEN
+Baseline exposure rule                   OPEN
+Final model                              OPEN
+Agent implementation details             OPEN
 ```
 
-The next step is **???**
+---
+
+## 20. Immediate Next Step
+
+The next step is to define the **minimum viable specification of Candidate D** before changing the code.
+
+The next design decision should specify four items:
+
+```text
+1. Market scope
+   Example: U.S. rates first
+
+2. Traded universe
+   Example structure: short / intermediate / long duration
+
+3. Initial regime dimensions
+   Inflation + yield level + curve shape + rate volatility
+
+4. Initial time scale
+   Daily, weekly, or mixed-frequency framework
+```
+
+Once these four items are fixed provisionally, the repository can be refactored around a concrete v1 implementation without locking the project permanently to one final model.
