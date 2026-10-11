@@ -132,3 +132,11 @@ paths:
 
 pipeline:
   run_data_acquisition: false
+
+
+forecasting:
+  dataset_version: v1
+  horizon_weeks: 4
+  rate_change_weeks: 4
+  inflation_trend_weeks: 13
+  target_name: target_tlt_minus_shy_4w
