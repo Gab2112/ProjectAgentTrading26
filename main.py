@@ -2,13 +2,13 @@
 main.py - Grid Search su SMA e Plot Esclusivo della Soluzione Vincente
 """
 
-from data_acquisition import get_data
-from data_transformation import DataTransformer
-from signal_generation import SignalGenerator
-from backtester import Backtester
-from evaluator import ModelEvaluator
+from src.data_acquisition import get_data
+from src.data_transformation import DataTransformer
+from src.signal_generation import SignalGenerator
+from src.backtester import Backtester
+from src.evaluator import ModelEvaluator
 
-
+d
 def run_pipeline():
     # =========================================================================
     # Configurazione Parametri
