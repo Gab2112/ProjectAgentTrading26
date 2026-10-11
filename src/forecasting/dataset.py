@@ -51,6 +51,28 @@ FEATURE_COLUMNS_V1 = [
     "rate_volatility_13w",
 ]
 
+
+FEATURE_COLUMNS_V2 = [
+    # Stato dei tassi
+    "rates__treasury_2y",
+
+    # Dinamica recente dei tassi
+    "treasury_2y_change_4w",
+
+    # Forma principale della curva
+    "curve_10y_2y",
+
+    # Inflazione osservata
+    "core_cpi_yoy",
+    "core_cpi_yoy_change_13w",
+
+    # Inflazione attesa
+    "inflation__breakeven_10y",
+
+    # Volatilità dei tassi
+    "rate_volatility_13w",
+]
+
 def load_feature_dataset(
     config: dict,
     root_dir: Path,
