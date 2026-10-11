@@ -72,6 +72,10 @@ regime:
   statistical_model: null
   forecasting_model: null
 
+  inflation_trend_weeks: 13
+  rate_trend_weeks: 13
+  volatility_min_history_weeks: 52
+
 signals:
   allowed_values:
     - -1
@@ -84,14 +88,18 @@ signals:
 
 portfolio:
   allocation_method: null
-  leverage: null
+  leverage: 1.0
 
 validation:
   method: chronological
-  train_end: null
-  validation_end: null
-  oos_start: null
+  train_end: "2016-12-31"
+  validation_end: "2021-12-31"
+  oos_start: "2022-01-01"
   walk_forward: false
+  
+evaluation:
+  annualization_factor: 52
+  evaluate_oos: false
 
 execution:
   signal_frequency: weekly
@@ -120,3 +128,7 @@ paths:
   processed_data: data/processed
   signals: data/signals
   results: data/results
+
+
+pipeline:
+  run_data_acquisition: false

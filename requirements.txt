@@ -4,3 +4,4 @@ yfinance
 matplotlib>=3.3.0
 seaborn>=0.11.0
 PyYAML>=6.0
+pandas_datareader>=0.10.0
