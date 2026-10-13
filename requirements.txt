@@ -1,7 +1,23 @@
-pandas>=1.3.0
-numpy>=1.21.0
-yfinance
-matplotlib>=3.3.0
-seaborn>=0.11.0
-PyYAML>=6.0
-pandas_datareader>=0.10.0
+# Python 3.14.0
+#
+# Installazione (dalla cartella principale del progetto):
+#   python3.14 -m venv .venv
+#   source .venv/bin/activate
+#   pip install -r requirements.txt
+
+# Elaborazione dati
+pandas==3.0.6
+numpy==2.5.4
+PyYAML==6.0.3
+
+# Download dei dati (usati solo con run_data_acquisition: true)
+yfinance==1.7.0
+pandas_datareader==0.11.1
+
+# Grafici
+matplotlib==3.11.2
+seaborn==0.13.2
+
+# Lettura di formati aggiuntivi in src/data_loader.py (Excel, Parquet, Feather)
+openpyxl==3.1.5
+pyarrow==25.0.1

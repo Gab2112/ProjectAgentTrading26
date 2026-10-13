@@ -22,6 +22,7 @@ from typing import Tuple
 
 import pandas as pd
 
+from src.data_loader import load_dataset
 
 # =============================================================================
 # Lettura delle feature
@@ -31,15 +32,7 @@ def load_feature_dataset(config: dict, root_dir: Path) -> pd.DataFrame:
     """Carica il dataset settimanale prodotto da feature_engineering.py."""
     path = root_dir / config["paths"]["processed_data"] / "features_weekly.csv"
 
-    if not path.exists():
-        raise FileNotFoundError(
-            f"Feature dataset not found: {path}"
-        )
-
-    df = pd.read_csv(path, parse_dates=["Date"])
-    df = df.set_index("Date").sort_index()
-
-    return df
+    return load_dataset(path)
 
 
 # =============================================================================
