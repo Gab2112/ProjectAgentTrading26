@@ -30,11 +30,11 @@ from src.data_loader import load_dataset
 
 
 def _read_csv_with_date_index(path: Path) -> pd.DataFrame:
-    """Legge un CSV, converte la colonna Date in indice temporale e ordina i dati."""
-    # Controllo del file, conversione della data, rimozione delle date non
-    # valide o duplicate e ordinamento sono gestiti da load_dataset().
-    return load_dataset(path)
-
+    """Legge un dataset raw e applica una pulizia prudente delle date."""
+    return load_dataset(
+        path,
+        strict=False,
+    )
 
 def _coerce_numeric(df: pd.DataFrame) -> pd.DataFrame:
     """Converte tutte le colonne del DataFrame in formato numerico quando possibile."""

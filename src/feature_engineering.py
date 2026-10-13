@@ -71,7 +71,10 @@ def _build_monthly_yoy_feature(
         / f"{series_id}.csv"
     )
 
-    monthly = load_dataset(path)
+    monthly = load_dataset(
+        path,
+        strict=False,
+    )
 
     monthly[series_id] = pd.to_numeric(
         monthly[series_id],
@@ -229,7 +232,7 @@ def add_inflation_features(
     Costruisce indicatori di inflazione osservata e attesa.
 
     CPI e Core CPI:
-        variazione percentuale rispetto a circa 52 settimane prima.
+        variazione percentuale rispetto allo stesso mese dell'anno precedente.
 
     Breakeven inflation:
         livello corrente e variazione settimanale delle aspettative di
