@@ -35,6 +35,7 @@ from typing import Tuple
 
 import pandas as pd
 
+from src.data_loader import load_dataset
 
 # =============================================================================
 # Lettura dei segnali
@@ -44,15 +45,7 @@ def load_signal_dataset(config: dict, root_dir: Path) -> pd.DataFrame:
     """Carica il dataset settimanale prodotto da signal_generation.py."""
     path = root_dir / config["paths"]["signals"] / "signals_weekly.csv"
 
-    if not path.exists():
-        raise FileNotFoundError(
-            f"Signal dataset not found: {path}"
-        )
-
-    df = pd.read_csv(path, parse_dates=["Date"])
-    df = df.set_index("Date").sort_index()
-
-    return df
+    return load_dataset(path)
 
 
 # =============================================================================

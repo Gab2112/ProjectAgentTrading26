@@ -22,6 +22,7 @@ from typing import Tuple
 
 import pandas as pd
 
+from src.data_loader import load_dataset
 
 # =============================================================================
 # Lettura del dataset processato
@@ -31,15 +32,7 @@ def load_master_dataset(config: dict, root_dir: Path) -> pd.DataFrame:
     """Carica il dataset settimanale costruito da data_transformation.py."""
     path = root_dir / config["paths"]["processed_data"] / "master_weekly.csv"
 
-    if not path.exists():
-        raise FileNotFoundError(
-            f"Processed dataset not found: {path}"
-        )
-
-    df = pd.read_csv(path, parse_dates=["Date"])
-    df = df.set_index("Date").sort_index()
-
-    return df
+    return load_dataset(path)
 
 def _get_release_lag_days(config: dict, series_id: str) -> int:
     """Recupera il lag di pubblicazione della serie macro."""
@@ -78,20 +71,7 @@ def _build_monthly_yoy_feature(
         / f"{series_id}.csv"
     )
 
-    monthly = pd.read_csv(path)
-
-    monthly["Date"] = pd.to_datetime(
-        monthly["Date"],
-        errors="coerce",
-    )
-
-    monthly = (
-        monthly
-        .dropna(subset=["Date"])
-        .drop_duplicates(subset=["Date"], keep="last")
-        .set_index("Date")
-        .sort_index()
-    )
+    monthly = load_dataset(path)
 
     monthly[series_id] = pd.to_numeric(
         monthly[series_id],

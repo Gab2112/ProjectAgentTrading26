@@ -80,6 +80,7 @@ ProjectAgentTrading26/
 `-- src/
     |-- __init__.py
     |-- data_acquisition.py
+    |-- data_loader.py
     |-- data_transformation.py
     |-- feature_engineering.py
     |-- regime_model.py
@@ -94,10 +95,11 @@ ProjectAgentTrading26/
 
 ## Environment
 
-The project has been tested with **Python 3.13.x**.
+The project has been tested with **Python 3.14.0**.
+Exact library versions are pinned in `requirements.txt`.
 
 ```bash
-python3 -m venv .venv
+python3.14 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install -r requirements.txt
 ```

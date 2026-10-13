@@ -22,6 +22,7 @@ from typing import Dict, Tuple
 
 import pandas as pd
 
+from src.data_loader import load_dataset
 
 # =============================================================================
 # Utility di base
@@ -30,23 +31,9 @@ import pandas as pd
 
 def _read_csv_with_date_index(path: Path) -> pd.DataFrame:
     """Legge un CSV, converte la colonna Date in indice temporale e ordina i dati."""
-    if not path.exists():
-        raise FileNotFoundError(f"File not found: {path}")
-
-    df = pd.read_csv(path)
-
-    if "Date" not in df.columns:
-        raise KeyError(f"'Date' column not found in {path.name}")
-
-    # Conversione robusta della data e rimozione di eventuali righe non valide.
-    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-    df = df.dropna(subset=["Date"])
-
-    # Evitiamo duplicati temporali, mantenendo l'ultima osservazione disponibile.
-    df = df.drop_duplicates(subset=["Date"], keep="last")
-    df = df.set_index("Date").sort_index()
-
-    return df
+    # Controllo del file, conversione della data, rimozione delle date non
+    # valide o duplicate e ordinamento sono gestiti da load_dataset().
+    return load_dataset(path)
 
 
 def _coerce_numeric(df: pd.DataFrame) -> pd.DataFrame:
