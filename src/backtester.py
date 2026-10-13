@@ -42,6 +42,54 @@ def load_portfolio_dataset(config: dict, root_dir: Path) -> pd.DataFrame:
 
     return load_dataset(path)
 
+# =============================================================================
+# Controllo del periodo disponibile al backtest
+# =============================================================================
+
+def restrict_backtest_period(
+    portfolio: pd.DataFrame,
+    config: dict,
+) -> pd.DataFrame:
+    """
+    Limita il backtest al periodo consentito dalla fase di ricerca.
+
+    Durante lo sviluppo, quando evaluate_oos=False, il backtester può
+    utilizzare soltanto TRAIN e VALIDATION e termina quindi alla data
+    validation_end.
+
+    L'OOS viene incluso soltanto quando evaluate_oos=True, cioè dopo che
+    modello, feature, soglie e parametri sono stati congelati.
+    """
+    evaluate_oos = bool(
+        config.get("evaluation", {})
+        .get("evaluate_oos", False)
+    )
+
+    if evaluate_oos:
+        return portfolio.copy()
+
+    validation_end = (
+        config.get("validation", {})
+        .get("validation_end")
+    )
+
+    if validation_end is None:
+        raise ValueError(
+            "validation_end is required when OOS evaluation is disabled."
+        )
+
+    development_end = pd.Timestamp(validation_end)
+
+    restricted = portfolio.loc[
+        portfolio.index <= development_end
+    ].copy()
+
+    if restricted.empty:
+        raise ValueError(
+            "No observations available in the development backtest period."
+        )
+
+    return restricted
 
 # =============================================================================
 # Parametri di esecuzione
@@ -277,8 +325,9 @@ def add_equity_curves(
     """
     Costruisce equity curve monetarie e indici normalizzati a 100.
 
-    Le curve complete vengono salvate qui; l'evaluator deciderà in seguito
-    quale intervallo utilizzare per IS / validation / OOS.
+    Le curve vengono costruite esclusivamente sul periodo autorizzato dal
+    backtester. Durante lo sviluppo questo periodo termina alla fine della
+    validation; l'OOS viene incluso solo dopo il suo esplicito sblocco.
     """
     result = backtest.copy()
     params = _get_execution_parameters(config)
@@ -370,6 +419,10 @@ def run_backtest(
 
     portfolio = load_portfolio_dataset(config, root_dir)
 
+    portfolio = restrict_backtest_period(
+        portfolio,
+        config,
+    )
     backtest = apply_execution_lag(portfolio)
     backtest = calculate_strategy_returns(backtest, config)
     backtest = add_benchmarks(backtest)
@@ -406,6 +459,7 @@ def run_backtest(
     summary = {
         "rows": len(backtest),
         "first_active_week": first_active,
+        "backtest_end": backtest.index.max(),
         "final_equity": float(
             backtest["strategy_equity"].iloc[-1]
         ),
@@ -425,7 +479,10 @@ def run_backtest(
             "  First active week: "
             f"{first_active.date()}"
         )
-
+    print(
+        "  Backtest end:      "
+        f"{summary['backtest_end'].date()}"
+    )
     print(
         "  Final equity:      "
         f"{summary['final_equity']:,.2f}"
