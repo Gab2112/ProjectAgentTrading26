@@ -74,7 +74,7 @@ def transform_market_data(
     Pulisce i dati giornalieri degli ETF e li converte a frequenza settimanale.
 
     Regola di aggregazione:
-    - Open   -> primo valore della settimana
+    - Open   -> primo valore della stetimana
     - High   -> massimo della settimana
     - Low    -> minimo della settimana
     - Close  -> ultimo valore della settimana
