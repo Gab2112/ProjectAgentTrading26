@@ -105,8 +105,8 @@ execution:
   signal_frequency: weekly
   execution_rule: next_available_period
   initial_capital: 100000.0
-  commission_bps: null
-  slippage_bps: null
+  commission_bps: 2      # commissione per operazione, in basis points
+  slippage_bps: 1        # differenza stimata tra prezzo atteso ed eseguito
 
 benchmarks:
   - equal_weight_buy_and_hold

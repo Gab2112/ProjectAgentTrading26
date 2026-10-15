@@ -131,7 +131,7 @@ def print_project_summary(config: dict) -> None:
     )
 
     print("\n======================================================")
-    print("            PROJECTAGENTTRADING26")
+    print("            PROJECT AGENT TRADING 26")
     print("======================================================")
     print(
         f"Version:            "

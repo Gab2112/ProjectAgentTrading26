@@ -23,6 +23,7 @@ from typing import Dict, Tuple
 import pandas as pd
 
 from src.data_loader import load_dataset
+from src.utils import get_release_lag_days
 
 # =============================================================================
 # Utility di base
@@ -140,44 +141,6 @@ def _macro_series_mapping(config: dict) -> Dict[str, str]:
     return mapping
 
 
-def _get_release_lag_days(config: dict, series_id: str) -> int:
-    """
-    Restituisce il lag prudenziale, in giorni di calendario, per la serie.
-
-    I valori devono essere definiti nel file config.yaml.
-    Se la sezione non è presente, vengono usati fallback conservativi.
-
-    Spiegazione intuitiva e semplice di questo lag: dobbiamo evitare il 
-    cossiddetto 'look-ahead bias'. I.e. il CPI di gennaio descrive l'inflazione
-    relativa al mese di gennaio, ma non è disponibile prima di febbraio (non)
-    viene pubblicato in tempo reale (essendo un dato macroeconomico richiede
-    del tempo per essere determinto). Se nel backtest noi associamo quel valore
-    corrispondente alla data di gennaio, il nostro modello barerebbere perchè 
-    avrebbe accesso a un'info che, in quel momento storico, un trader non avrebbe.
-    Dunque, introduciamo un lag che permette di spostare temporalmente in avanti
-    l'informazione dell'indice CPI. I valori inseriti 45 e 35 giorni sono
-    arbitrari, al momento sono dei fallback prudenti. Nelle fasi più avanzate
-    del progetto analizzeremo le date di rilascio e renderemo il backtest più 
-    rigoroso.
-
-    """
-    configured_lags = (
-        config.get("data", {})
-        .get("release_lags_days", {})
-    )
-
-    if series_id in configured_lags:
-        return int(configured_lags[series_id])
-
-    # Fallback provvisori e volutamente prudenti.
-    default_lags = {
-        "CPIAUCSL": 45,
-        "CPILFESL": 45,
-        "FEDFUNDS": 35,
-    }
-
-    return default_lags.get(series_id, 0)
-
 
 def _is_low_frequency_macro(series_id: str) -> bool:
     """Identifica le serie mensili che richiedono un trattamento point-in-time."""
@@ -231,7 +194,7 @@ def transform_macro_data(
         series = df[[series_id]].copy()
 
         if _is_low_frequency_macro(series_id):
-            lag_days = _get_release_lag_days(config, series_id)
+            lag_days = get_release_lag_days(config, series_id)
 
             # Trasformiamo la data dell'osservazione in una data di disponibilità
             # approssimata, così da ridurre il rischio di look-ahead bias.

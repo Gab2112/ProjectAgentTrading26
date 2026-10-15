@@ -23,6 +23,7 @@ from typing import Tuple
 import pandas as pd
 
 from src.data_loader import load_dataset
+from src.utils import get_release_lag_days
 
 # =============================================================================
 # Lettura del dataset processato
@@ -33,24 +34,6 @@ def load_master_dataset(config: dict, root_dir: Path) -> pd.DataFrame:
     path = root_dir / config["paths"]["processed_data"] / "master_weekly.csv"
 
     return load_dataset(path)
-
-def _get_release_lag_days(config: dict, series_id: str) -> int:
-    """Recupera il lag di pubblicazione della serie macro."""
-    configured_lags = (
-        config.get("data", {})
-        .get("release_lags_days", {})
-    )
-
-    if series_id in configured_lags:
-        return int(configured_lags[series_id])
-
-    default_lags = {
-        "CPIAUCSL": 45,
-        "CPILFESL": 45,
-        "FEDFUNDS": 35,
-    }
-
-    return default_lags.get(series_id, 0)
 
 
 def _build_monthly_yoy_feature(
@@ -86,7 +69,7 @@ def _build_monthly_yoy_feature(
     )
 
     # Il dato viene reso disponibile solo dopo il lag di pubblicazione.
-    lag_days = _get_release_lag_days(config, series_id)
+    lag_days = get_release_lag_days(config, series_id)
 
     monthly.index = (
         monthly.index

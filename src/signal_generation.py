@@ -32,6 +32,7 @@ from typing import Tuple
 import pandas as pd
 
 from src.data_loader import load_dataset
+from src.utils import get_tickers
 
 # =============================================================================
 # Lettura del dataset dei regimi
@@ -286,7 +287,10 @@ def generate_asset_signals(
 # Report dei segnali
 # =============================================================================
 
-def build_signal_summary(signals: pd.DataFrame) -> pd.DataFrame:
+def build_signal_summary(
+    signals: pd.DataFrame,
+    config: dict,
+) -> pd.DataFrame:
     """
     Conta la frequenza dei segnali generati per ciascun asset.
 
@@ -295,7 +299,7 @@ def build_signal_summary(signals: pd.DataFrame) -> pd.DataFrame:
     """
     rows = []
 
-    for asset in ["SHY", "IEF", "TLT"]:
+    for asset in get_tickers(config):
         column = f"{asset}_signal"
 
         # Per il report consideriamo solo le settimane in cui il regime
@@ -350,7 +354,7 @@ def run_signal_generation(
     signals = build_duration_score(regimes)
     signals = generate_asset_signals(signals, config)
 
-    summary = build_signal_summary(signals)
+    summary = build_signal_summary(signals, config)
 
     signals_path = signals_dir / "signals_weekly.csv"
     summary_path = signals_dir / "signal_summary.csv"

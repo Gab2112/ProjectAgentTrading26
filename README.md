@@ -89,6 +89,7 @@ ProjectAgentTrading26/
     |-- portfolio.py
     |-- backtester.py
     |-- evaluator.py
+    |-- utils.py
     `-- agents/
         `-- __init__.py
 ```
@@ -241,7 +242,7 @@ Realized return at t+1
 
 This `shift(1)` rule prevents look-ahead bias.
 
-Transaction costs and slippage are currently set to zero in the first baseline and remain open assumptions for later robustness tests.
+Transaction costs are applied to portfolio turnover: 2 bps commission + 1 bps slippage per unit of turnover (`execution.commission_bps` and `execution.slippage_bps` in `config.yaml`).
 
 ## Evaluation framework
 
@@ -268,11 +269,15 @@ evaluation:
 
 It must remain locked until the model, features, thresholds and relevant hyperparameters are frozen.
 
+While the OOS is locked, the backtest itself stops at `validation_end`: neither `backtest_weekly.csv` nor the final equity printed by `main.py` contain OOS returns.
+
 Current evaluation metrics include cumulative return, annualized return, annualized volatility, Sharpe ratio, maximum drawdown and profit factor.
 
 The 3M Treasury yield is currently used as a proxy for the risk-free rate.
 
 The main benchmark is a true equal-weight buy-and-hold portfolio of SHY, IEF and TLT, together with individual ETF buy-and-hold benchmarks.
+
+Note: `backtest_weekly.csv` also contains a `benchmark_equal_weight_rebalanced_*` series (weekly rebalanced to 1/3 each). It is kept only as a reference and is not the benchmark used in `evaluation_metrics.csv`.
 
 ## Current status
 

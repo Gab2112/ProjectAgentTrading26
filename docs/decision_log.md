@@ -228,6 +228,51 @@ Deterministic calculations should remain deterministic. Agents may later add val
 
 ---
 
+## 2026-10-13 - Backtest restricted to development period while OOS is locked
+
+**Decision**
+
+When `evaluation.evaluate_oos` is `false`, the backtest stops at `validation.validation_end` (2021-12-31).
+
+**Rationale**
+
+Previously the backtest ran until the last available week and printed the final equity, which indirectly revealed the strategy return over the OOS period (2022 onward). The evaluator already excluded the OOS correctly; the backtester now follows the same rule.
+
+---
+
+## 2026-10-13 - Transaction costs introduced
+
+**Decision**
+
+```text
+commission  2 bps
+slippage    1 bps
+```
+
+Costs are charged on portfolio turnover (sum of absolute weight changes).
+
+**Rationale**
+
+Treasury ETFs are highly liquid, so 3 bps per unit of turnover is a realistic and slightly conservative assumption. The slippage component also partially covers the fact that signals computed on the Friday close are executed at the same close.
+
+**Effect on the deterministic baseline**
+
+Annualized return: train 0.34% -> -0.27%, validation 0.93% -> 0.54%.
+
+---
+
+## 2026-10-13 - Rebalanced benchmark renamed
+
+**Decision**
+
+Rename the weekly-rebalanced equal-weight series in `backtest_weekly.csv` to `benchmark_equal_weight_rebalanced_*`.
+
+**Rationale**
+
+The official benchmark in `evaluation_metrics.csv` is a true buy-and-hold without rebalancing. Using the same name for two different portfolios could lead to inconsistent charts and tables.
+
+---
+
 ## Next decision point
 
 Before implementing `forecasting.py`, define:

@@ -38,6 +38,7 @@ import numpy as np
 import pandas as pd
 
 from src.data_loader import load_dataset
+from src.utils import get_tickers
 
 # =============================================================================
 # Lettura del backtest
@@ -118,7 +119,10 @@ def _get_evaluation_parameters(config: dict) -> dict:
 # Individuazione dell'inizio effettivo della strategia
 # =============================================================================
 
-def get_first_active_week(backtest: pd.DataFrame) -> pd.Timestamp:
+def get_first_active_week(
+    backtest: pd.DataFrame,
+    tickers: list[str],
+) -> pd.Timestamp:
     """
     Restituisce la prima settimana in cui il portafoglio ha una posizione attiva.
 
@@ -126,9 +130,8 @@ def get_first_active_week(backtest: pd.DataFrame) -> pd.Timestamp:
     non esisteva ancora perché le feature/regimi richiedevano storico minimo.
     """
     applied_columns = [
-        "SHY_applied_weight",
-        "IEF_applied_weight",
-        "TLT_applied_weight",
+        f"{ticker}_applied_weight"
+        for ticker in tickers
     ]
 
     active = (
@@ -158,7 +161,10 @@ def split_evaluation_periods(
     L'OOS non viene restituito quando evaluate_oos = false.
     """
     params = _get_evaluation_parameters(config)
-    first_active = get_first_active_week(backtest)
+    first_active = get_first_active_week(
+        backtest,
+        get_tickers(config),
+    )
 
     data = backtest.loc[backtest.index >= first_active].copy()
 
@@ -238,6 +244,7 @@ def build_weekly_risk_free(
 
 def build_buy_and_hold_benchmark(
     period: pd.DataFrame,
+    tickers: list[str],
 ) -> pd.Series:
     """
     Costruisce un vero portafoglio equal-weight buy-and-hold.
@@ -252,9 +259,8 @@ def build_buy_and_hold_benchmark(
     allontanarsi da 1/3.
     """
     return_columns = [
-        "SHY_return_1w",
-        "IEF_return_1w",
-        "TLT_return_1w",
+        f"{ticker}_return_1w"
+        for ticker in tickers
     ]
 
     missing = [
@@ -387,6 +393,7 @@ def evaluate_period(
     period_name: str,
     period: pd.DataFrame,
     annualization_factor: int,
+    tickers: list[str],
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Valuta strategia e benchmark all'interno di un singolo periodo.
@@ -396,15 +403,15 @@ def evaluate_period(
         annualization_factor,
     )
 
-    buy_hold_return = build_buy_and_hold_benchmark(period)
+    buy_hold_return = build_buy_and_hold_benchmark(period, tickers)
 
     series_map = {
         "strategy": period["strategy_net_return"],
         "equal_weight_buy_and_hold": buy_hold_return,
-        "SHY_buy_and_hold": period["benchmark_SHY_return"],
-        "IEF_buy_and_hold": period["benchmark_IEF_return"],
-        "TLT_buy_and_hold": period["benchmark_TLT_return"],
     }
+
+    for ticker in tickers:
+        series_map[f"{ticker}_buy_and_hold"] = period[f"benchmark_{ticker}_return"]
 
     metric_rows = []
 
@@ -479,6 +486,7 @@ def run_evaluation(
             period_name=period_name,
             period=period,
             annualization_factor=params["annualization_factor"],
+            tickers=get_tickers(config),
         )
 
         metric_frames.append(metrics)
