@@ -17,3 +17,9 @@ env/
 # Dati e file temporanei/log
 *.log
 .DS_Store
+
+# Output generati dalla pipeline (si ricreano con: python3 main.py)
+# In Git restano solo i dati grezzi in data/raw/.
+data/processed/
+data/signals/
+data/results/

@@ -26,7 +26,6 @@ import random
 import numpy as np
 import yaml
 
-from src.data_acquisition import run_data_acquisition
 from src.data_transformation import run_data_transformation
 from src.feature_engineering import run_feature_engineering
 from src.regime_model import run_regime_model
@@ -201,6 +200,10 @@ def run_pipeline() -> None:
     # Per default utilizziamo i CSV già salvati nel repository.
     # Il download viene effettuato solo quando esplicitamente richiesto.
     if run_download:
+        # Import locale: yfinance e pandas_datareader servono solo per il
+        # download, quindi non sono richiesti quando si usano i CSV locali.
+        from src.data_acquisition import run_data_acquisition
+
         print("[0/7] Data acquisition")
         run_data_acquisition(
             config,
