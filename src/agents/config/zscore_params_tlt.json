@@ -1,0 +1,6 @@
+{
+    "window": 40,
+    "threshold": 1.0,
+    "exit_threshold": 0.0,
+    "price_col": "TLT_close"
+}

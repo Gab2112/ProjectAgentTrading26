@@ -1,0 +1,9 @@
+{
+    "slope_col": "curve_10y_2y",
+    "rate_change_col": "treasury_10y_change_1w",
+    "inflation_col": "cpi_yoy",
+    "slope_window": 4,
+    "rate_window": 4,
+    "score_threshold": 0.5,
+    "target_asset": "TLT"
+}

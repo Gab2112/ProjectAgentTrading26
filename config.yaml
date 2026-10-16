@@ -1,0 +1,134 @@
+project:
+  name: ProjectAgentTrading26
+  version: "0.1"
+  random_seed: 42
+
+research:
+  working_candidate: macro_rates_regimes
+  market_scope: US
+  objective: regime_based_fixed_income_allocation
+
+universe:
+  traded_assets:
+    short_duration:
+      ticker: SHY
+      role: short_duration_treasury
+    intermediate_duration:
+      ticker: IEF
+      role: intermediate_duration_treasury
+    long_duration:
+      ticker: TLT
+      role: long_duration_treasury
+
+frequency:
+  raw_market_data: daily
+  macro_data: native
+  strategy: weekly
+  rebalance: weekly
+
+data:
+  start_date: "2004-01-01"
+  end_date: null
+
+  market_source:
+    provider: yfinance
+
+  macro_source:
+    provider: FRED
+
+  rates:
+    policy_rate: FEDFUNDS
+    treasury_3m: DGS3MO
+    treasury_2y: DGS2
+    treasury_5y: DGS5
+    treasury_10y: DGS10
+    treasury_30y: DGS30
+
+  inflation:
+    cpi: CPIAUCSL
+    core_cpi: CPILFESL
+    breakeven_5y: T5YIE
+    breakeven_10y: T10YIE
+
+  rate_volatility:
+    preferred_source: Bloomberg
+    preferred_series: null
+    fallback: realized_yield_volatility
+
+features:
+  regime_dimensions:
+    - inflation
+    - rates
+    - yield_curve
+    - rate_volatility
+
+  yield_curve_spreads:
+    - 10y_2y
+    - 10y_3m
+    - 30y_10y
+
+regime:
+  baseline_method: deterministic
+  statistical_model: null
+  forecasting_model: null
+
+  inflation_trend_weeks: 13
+  rate_trend_weeks: 13
+  volatility_min_history_weeks: 52
+
+signals:
+  allowed_values:
+    - -1
+    - 0
+    - 1
+  convention:
+    long: 1
+    flat: 0
+    short: -1
+
+portfolio:
+  allocation_method: null
+  leverage: 1.0
+
+validation:
+  method: chronological
+  train_end: "2016-12-31"
+  validation_end: "2021-12-31"
+  oos_start: "2022-01-01"
+  walk_forward: false
+  
+evaluation:
+  annualization_factor: 52
+  evaluate_oos: false
+
+execution:
+  signal_frequency: weekly
+  execution_rule: next_available_period
+  initial_capital: 100000.0
+  commission_bps: 2      # commissione per operazione, in basis points
+  slippage_bps: 1        # differenza stimata tra prezzo atteso ed eseguito
+
+benchmarks:
+  - equal_weight_buy_and_hold
+  - individual_asset_buy_and_hold
+
+agents:
+  planned: true
+  enabled: false
+  roles:
+    - orchestrator
+    - macro_agent
+    - regime_agent
+    - strategy_agent
+    - risk_agent
+    - critic_agent
+
+paths:
+  raw_data: data/raw
+  processed_data: data/processed
+  signals: data/signals
+  results: data/results
+
+
+pipeline:
+  run_data_acquisition: false
