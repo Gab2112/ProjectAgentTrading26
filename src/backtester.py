@@ -28,6 +28,10 @@ import pandas as pd
 
 from src.data_loader import load_dataset
 from src.utils import get_tickers
+from src.time_split import (
+    restrict_to_allowed_period,
+    is_oos_enabled,
+)
 
 # =============================================================================
 # Lettura dei pesi di portafoglio
@@ -381,20 +385,13 @@ def run_backtest(
     results_dir = root_dir / config["paths"]["results"]
     results_dir.mkdir(parents=True, exist_ok=True)
 
+    # Carica i pesi e applica la politica temporale centralizzata.
     portfolio = load_portfolio_dataset(config, root_dir)
+    portfolio = restrict_to_allowed_period(portfolio, config)
 
-    # Finché l'OOS è bloccato, il backtest si ferma alla fine della
-    # validation: in questo modo né l'equity finale stampata né il file
-    # backtest_weekly.csv contengono i rendimenti del periodo OOS.
-    evaluate_oos = bool(
-        config.get("evaluation", {}).get("evaluate_oos", False)
-    )
+    # Utilizzato per indicare lo stato dell'OOS nel report.
+    evaluate_oos = is_oos_enabled(config)
 
-    if not evaluate_oos:
-        validation_end = pd.Timestamp(
-            config["validation"]["validation_end"]
-        )
-        portfolio = portfolio.loc[portfolio.index <= validation_end]
 
     backtest = apply_execution_lag(portfolio, config)
     backtest = calculate_strategy_returns(backtest, config)

@@ -24,6 +24,7 @@ import pandas as pd
 
 from src.data_loader import load_dataset
 from src.utils import get_release_lag_days
+from src.time_split import restrict_to_allowed_period
 
 # =============================================================================
 # Utility di base
@@ -315,6 +316,10 @@ def run_data_transformation(
         market_data=market_data,
         macro_data=macro_data,
     )
+
+    # Applica la politica temporale comune prima di salvare i dati
+    # e generare report che potrebbero includere informazioni OOS.
+    master = restrict_to_allowed_period(master, config)
 
     quality_summary = build_data_quality_summary(master)
 

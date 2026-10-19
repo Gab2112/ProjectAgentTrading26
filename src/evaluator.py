@@ -39,6 +39,11 @@ import pandas as pd
 
 from src.data_loader import load_dataset
 from src.utils import get_tickers
+from src.time_split import (
+    get_time_boundaries,
+    is_oos_enabled,
+    split_time_periods,
+)
 
 # =============================================================================
 # Lettura del backtest
@@ -61,59 +66,27 @@ def load_backtest_dataset(config: dict, root_dir: Path) -> pd.DataFrame:
 
 def _get_evaluation_parameters(config: dict) -> dict:
     """
-    Recupera le date di split e i parametri di valutazione.
+    Recupera i parametri di valutazione.
 
-    Le date devono essere fissate prima di utilizzare l'OOS per evitare
-    modifiche retroattive motivate dai risultati.
+    I confini temporali e il blocco OOS sono gestiti
+    esclusivamente dal modulo time_split.py.
     """
-    validation = config.get("validation", {})
-    evaluation = config.get("evaluation", {})
-
-    train_end = validation.get("train_end")
-    validation_end = validation.get("validation_end")
-    oos_start = validation.get("oos_start")
-
-    missing_dates = [
-        name
-        for name, value in {
-            "train_end": train_end,
-            "validation_end": validation_end,
-            "oos_start": oos_start,
-        }.items()
-        if value is None
-    ]
-
-    if missing_dates:
-        raise ValueError(
-            "Missing validation dates in config.yaml: "
-            + ", ".join(missing_dates)
-        )
-
-    train_end = pd.Timestamp(train_end)
-    validation_end = pd.Timestamp(validation_end)
-    oos_start = pd.Timestamp(oos_start)
-
-    if not (train_end < validation_end < oos_start):
-        raise ValueError(
-            "Expected train_end < validation_end < oos_start."
-        )
+    train_end, validation_end, oos_start = get_time_boundaries(config)
 
     annualization_factor = int(
-        evaluation.get("annualization_factor", 52)
+        config.get("evaluation", {}).get("annualization_factor", 52)
     )
 
-    evaluate_oos = bool(
-        evaluation.get("evaluate_oos", False)
-    )
+    if annualization_factor <= 0:
+        raise ValueError("annualization_factor must be positive.")
 
     return {
         "train_end": train_end,
         "validation_end": validation_end,
         "oos_start": oos_start,
         "annualization_factor": annualization_factor,
-        "evaluate_oos": evaluate_oos,
+        "evaluate_oos": is_oos_enabled(config),
     }
-
 
 # =============================================================================
 # Individuazione dell'inizio effettivo della strategia
@@ -156,46 +129,23 @@ def split_evaluation_periods(
     config: dict,
 ) -> Dict[str, pd.DataFrame]:
     """
-    Costruisce TRAIN, VALIDATION e, al momento non ancora autorizzato, OOS.
+    Prepara i dati della strategia per la valutazione.
 
-    L'OOS non viene restituito quando evaluate_oos = false.
+    Esclude le settimane precedenti alla prima posizione
+    effettivamente investita e delega lo split temporale
+    al modulo centralizzato.
     """
-    params = _get_evaluation_parameters(config)
+
     first_active = get_first_active_week(
         backtest,
         get_tickers(config),
     )
 
-    data = backtest.loc[backtest.index >= first_active].copy()
-
-    train = data.loc[
-        data.index <= params["train_end"]
+    data = backtest.loc[
+        backtest.index >= first_active
     ].copy()
 
-    validation = data.loc[
-        (data.index > params["train_end"])
-        & (data.index <= params["validation_end"])
-    ].copy()
-
-    periods = {
-        "train": train,
-        "validation": validation,
-    }
-
-    if params["evaluate_oos"]:
-        oos = data.loc[
-            data.index >= params["oos_start"]
-        ].copy()
-
-        periods["oos"] = oos
-
-    for name, period in periods.items():
-        if period.empty:
-            raise ValueError(
-                f"Evaluation period '{name}' is empty."
-            )
-
-    return periods
+    return split_time_periods(data, config)
 
 
 # =============================================================================
