@@ -38,7 +38,7 @@ class AbstractOpener(ABC):
         self,
         path: str | Path,
         date_column: str | None = "Date",
-        drop_duplicate_dates: bool = True,
+        strict: bool = True,
         **read_options,
     ) -> pd.DataFrame:
         """
@@ -48,8 +48,9 @@ class AbstractOpener(ABC):
           - path: percorso del file da caricare;
           - date_column: nome della colonna data. Se None, il DataFrame
             viene restituito senza trasformare l'indice;
-          - drop_duplicate_dates: se True, in caso di date duplicate
-            mantiene l'ultima osservazione;
+          - strict: se True, date non valide o duplicate generano un errore;
+            se False, le date non valide vengono rimosse e per i duplicati
+            viene mantenuta l'ultima osservazione;
           - read_options: opzioni aggiuntive passate alla funzione pandas
             (es. sheet_name per Excel, sep per CSV).
 
@@ -75,7 +76,7 @@ class AbstractOpener(ABC):
             df,
             path,
             date_column,
-            drop_duplicate_dates,
+            strict,
         )
 
     @abstractmethod
@@ -88,7 +89,7 @@ class AbstractOpener(ABC):
         df: pd.DataFrame,
         path: Path,
         date_column: str,
-        drop_duplicate_dates: bool,
+        strict: bool,
     ) -> pd.DataFrame:
         """
         Converte la colonna data in indice temporale ordinato.
@@ -105,13 +106,36 @@ class AbstractOpener(ABC):
                 f"Colonna '{date_column}' assente nel file {path.name}"
             )
 
-        df[date_column] = pd.to_datetime(df[date_column], errors="coerce")
+        df[date_column] = pd.to_datetime(
+            df[date_column],
+            errors="coerce",
+        )
 
-        # Righe con data non valida vengono scartate.
-        df = df.dropna(subset=[date_column])
+        invalid_dates = df[date_column].isna()
 
-        if drop_duplicate_dates:
-            df = df.drop_duplicates(subset=[date_column], keep="last")
+        if invalid_dates.any():
+            if strict:
+                raise ValueError(
+                    f"Date non valide rilevate nel file {path.name}"
+                )
+
+            df = df.loc[~invalid_dates].copy()
+
+        duplicate_dates = df.duplicated(
+            subset=[date_column],
+            keep=False,
+        )
+
+        if duplicate_dates.any():
+            if strict:
+                raise ValueError(
+                    f"Date duplicate rilevate nel file {path.name}"
+                )
+
+            df = df.drop_duplicates(
+                subset=[date_column],
+                keep="last",
+            )
 
         return df.set_index(date_column).sort_index()
 
@@ -202,7 +226,7 @@ def get_opener(path: str | Path) -> AbstractOpener:
 def load_dataset(
     path: str | Path,
     date_column: str | None = "Date",
-    drop_duplicate_dates: bool = True,
+    strict: bool = True,
     **read_options,
 ) -> pd.DataFrame:
     """
@@ -218,6 +242,6 @@ def load_dataset(
     return opener.open(
         path,
         date_column=date_column,
-        drop_duplicate_dates=drop_duplicate_dates,
+        strict=strict,
         **read_options,
     )
