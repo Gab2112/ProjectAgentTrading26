@@ -1,6 +1,8 @@
 {
-    "window": 40,
+    "window": 15,
     "threshold": 1.0,
     "exit_threshold": 0.0,
+    "stop_threshold": null,
+    "mode": "momentum",
     "price_col": "TLT_close"
 }
