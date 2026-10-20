@@ -58,6 +58,10 @@ def _get_regime_parameters(config: dict) -> dict:
         "volatility_min_history_weeks": int(
             regime_config.get("volatility_min_history_weeks", 52)
         ),
+        "rate_state_source": regime_config.get(
+            "rate_state_source",
+            "rates__treasury_2y"
+        )
     }
 
 
@@ -106,6 +110,7 @@ def add_inflation_state(
 def add_rate_state(
     df: pd.DataFrame,
     trend_weeks: int,
+    source_column: str = "rates__treasury_2y"
 ) -> pd.DataFrame:
     """
     Classifica il regime dei tassi usando il Treasury 2Y.
@@ -114,8 +119,6 @@ def add_rate_state(
     monetaria e del tratto breve/intermedio della curva.
     """
     regimes = df.copy()
-
-    source_column = "rates__treasury_2y"
 
     if source_column not in regimes.columns:
         raise KeyError(f"Missing required feature: {source_column}")
@@ -295,6 +298,7 @@ def build_regime_dataset(
     regimes = add_rate_state(
         regimes,
         trend_weeks=params["rate_trend_weeks"],
+        source_column=params["rate_state_source"],
     )
 
     regimes = add_curve_state(regimes)

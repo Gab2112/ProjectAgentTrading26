@@ -72,6 +72,7 @@ regime:
   statistical_model: null
   forecasting_model: null
 
+  rate_state_source: rates__treasury_2y
   inflation_trend_weeks: 13
   rate_trend_weeks: 13
   volatility_min_history_weeks: 52
