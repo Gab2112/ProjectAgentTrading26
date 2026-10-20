@@ -1,285 +1,469 @@
-# Decision Log
+# Registro delle decisioni (Decision Log)
 
-This file records only **material research and architecture decisions**. Routine coding changes are intentionally excluded.
-
----
-
-## 2026-10-11 - Working research direction: Macro / Rates Regimes
-
-**Decision**
-
-Use a U.S. macro / rates regime framework as the working research direction.
-
-**Research question**
-
-> Can combinations of inflation, interest rates, yield-curve shape and rate volatility identify recurring regimes associated with different fixed-income exposures?
-
-**Status**
-
-Working hypothesis, not irrevocably final.
+Questo file registra esclusivamente le **decisioni sostanziali relative alla ricerca e all'architettura del progetto**. Le modifiche ordinarie al codice sono intenzionalmente escluse.
 
 ---
 
-## 2026-10-11 - U.S.-only (atm)
+## 10 Ottobre - Direzione di ricerca preliminare: regimi macroeconomici e dei tassi d'interesse
 
-**Decision**
+**Decisione**
 
-Restrict the first implementation to U.S. fixed income.
+Adottare un framework basato sui regimi macroeconomici e dei tassi d'interesse statunitensi come direzione di ricerca.
 
----
+**Domanda di ricerca**
 
-## 2026-10-11 - Traded universe: SHY / IEF / TLT
-
-**Decision**
-
-- SHY for short duration;
-- IEF for intermediate duration;
-- TLT for long duration.
+> Le combinazioni di inflazione, tassi d'interesse, forma della curva dei rendimenti e volatilità dei tassi possono identificare regimi ricorrenti associati a differenti esposizioni ai titoli obbligazionari (USA)?
 
 ---
 
-## 2026-10-11 - Weekly strategy frequency
+## 10 Ottobre - Universo degli strumenti negoziati: SHY / IEF / TLT
 
-**Decision**
+**Decisione**
 
-Use daily raw market data, macro data at native frequency, and a weekly strategy / weekly rebalance.
-
----
-
-## 2026-10-11 - Local raw data retained in repository
-
-**Decision**
-
-Keep downloaded raw market and macro data in `data/raw/`.
-
-`main.py` skips re-downloading by default.
-
-**Rationale**
-
-The final project must be reproducible from repository contents without requiring a fresh download.
+- SHY: Treasury USA con scadenza residua di 1-3 anni, duration breve;
+- IEF: Treasury USA con scadenza residua di 7-10 anni, duration intermedia;
+- TLT: Treasury USA con scadenza residua superiore a 20 anni, duration lunga.
 
 ---
 
-## 2026-10-11 - Publication-lag treatment for macro data
+## 10 Ottobre - Frequenza settimanale della strategia
 
-**Decision**
+**Decisione**
 
-```text
-CPI       45 calendar days
-Core CPI  45 calendar days
-FEDFUNDS  35 calendar days
+Utilizzare dati grezzi di mercato a frequenza giornaliera, dati macroeconomici alla loro frequenza originale e una strategia con ribilanciamento settimanale.
+
+---
+
+## 10 Ottobre - Gestione dei ritardi di pubblicazione dei dati macroeconomici
+
+**Decisione**
 ```
+CPI        45 giorni di calendario
 
-**Known limitation**
+Core CPI   45 giorni di calendario
 
-Current FRED histories may contain later revisions.
-
-**Future action**
-
-Evaluate ALFRED / point-in-time vintage data or exact historical release calendars before final OOS evaluation if feasible.
-
----
-
-## 2026-10-11 - CPI YoY calculated on monthly raw data
-
-**Decision**
-
-Calculate CPI YoY and Core CPI YoY using a true 12-month comparison on the original monthly series, then apply publication lag and weekly alignment.
-
----
-
-## 2026-10-11 - Deterministic four-dimensional regime baseline
-
-**Decision**
-
-```text
-inflation     rising / falling
-rates         rising / falling
-curve         normal / inverted
-volatility    high / low
+FEDFUNDS   35 giorni di calendario
 ```
+**Limitazione nota**
+
+Le serie storiche attualmente disponibili su FRED potrebbero contenere revisioni effettuate successivamente alla pubblicazione originale.
+
+**Azione futura**
+
+Valutare, se fattibile, l'utilizzo di dati storici **point-in-time** tramite ALFRED oppure dei calendari esatti delle pubblicazioni storiche, prima della valutazione sul Test Set definitiva.
 
 ---
 
-## 2026-10-11 - Regime thresholds
+## 11 Ottobre - Calcolo dell'inflazione CPI YoY sui dati mensili originali
 
-**Decision**
+**Decisione**
 
-- inflation trend window: 13 weeks;
-- rate trend window: 13 weeks;
-- curve inversion threshold: 10Y - 2Y = 0;
-- volatility threshold: cumulative historical median using at least 52 observations and shifted by one week.
+Calcolare CPI YoY e Core CPI YoY utilizzando un confronto effettivo a 12 mesi sulle serie mensili originali, applicando successivamente il ritardo di pubblicazione e l'allineamento alla frequenza settimanale.
 
 ---
 
-## 2026-10-11 - Deterministic duration score
+## 11 Ottobre - Modello deterministico di riferimento basato su quattro dimensioni
 
-**Decision**
-
-```text
-rates falling      +2
-rates rising       -2
-inflation falling  +1
-inflation rising   -1
-curve inverted     +1
-curve normal        0
+**Decisione**
 ```
+Inflazione      crescente / decrescente
 
-High volatility moves the score one point toward zero.
+Tassi           crescenti / decrescenti
 
-**Status**
+Curva           normale / invertita
 
-Baseline only. Not a claim of optimal weights.
+Volatilità      alta / bassa
+```
+---
+
+## 11 Ottobre - Soglie per la classificazione dei regimi
+
+**Decisione**
+
+- Finestra temporale per il trend dell'inflazione: 13 settimane;
+- Finestra temporale per il trend dei tassi: 13 settimane;
+- Soglia di inversione della curva: rendimento a 10 anni meno rendimento a 2 anni = 0;
+- Soglia di volatilità: mediana storica cumulativa, calcolata utilizzando almeno 52 osservazioni e ritardata di una settimana.
 
 ---
 
-## 2026-10-11 - Baseline signal thresholds
+## 11 Ottobre - Punteggio deterministico della duration
 
-**Decision**
-
-```text
-score >= +2 -> long-duration regime
-score <= -2 -> short-duration regime
-otherwise   -> intermediate-duration regime
+**Decisione**
 ```
+Tassi in diminuzione       +2
 
-Asset mapping:
+Tassi in aumento           -2
 
-```text
-long duration         -> TLT +1
-intermediate duration -> IEF +1
-short duration        -> SHY +1 and TLT -1
+Inflazione in diminuzione  +1
+
+Inflazione in aumento      -1
+
+Curva invertita            +1
+
+Curva normale               0
 ```
+In presenza di elevata volatilità, il punteggio viene avvicinato allo zero di un punto.
+
+**Stato**
+
+Esclusivamente modello di riferimento (**baseline**). Non si sostiene che i pesi adottati siano ottimali. Da sottoporre ad analisi approfondite successivamente.
 
 ---
 
-## 2026-10-11 - Portfolio allocation
+## 11 Ottobre - Soglie dei segnali della baseline
 
-**Decision**
+**Decisione**
+```
+score >= +2  -> regime di duration lunga
 
-Use `equal_active_signal` with maximum gross exposure of 1.0 and no additional leverage.
+score <= -2  -> regime di duration breve
 
-Example:
+altrimenti   -> regime di duration intermedia
+```
+Associazione agli strumenti finanziari:
+```
+Duration lunga       -> TLT +1
 
-```text
-SHY +1 and TLT -1
+Duration intermedia  -> IEF +1
+
+Duration breve       -> SHY +1 e TLT -1
+```
+---
+
+## 11 Ottobre - Allocazione del portafoglio
+
+**Decisione**
+
+Utilizzare `equal_active_signal`, con esposizione lorda massima pari a 1,0 e senza leva finanziaria aggiuntiva.
+
+Esempio:
+```
+SHY +1 e TLT -1
+
 -> SHY +0.50
+
 -> TLT -0.50
 ```
-
 ---
 
-## 2026-10-11 - Execution timing
+## 11 Ottobre - Tempistica di esecuzione
 
-**Decision**
+**Decisione**
 
-Apply target weights with a one-week lag.
-
-```text
-signal at t
--> target weights at t
--> applied position at t+1
+Applicare i pesi obiettivo con un ritardo di una settimana.
 ```
+Segnale al tempo t
 
+-> pesi obiettivo al tempo t
+
+-> posizione effettivamente applicata al tempo t+1
+```
 ---
 
-## 2026-10-11 - Validation split
+## 11 Ottobre - Suddivisione dei dati per la validazione
 
-**Decision**
-
-```text
+**Decisione**
+```
 TRAIN
+
 2005-05-27 -> 2016-12-30
 
 VALIDATION
+
 2017-01-06 -> 2021-12-31
 
 OOS
-2022-01-01 onward
+
+Dal 2022-01-01 in avanti
 ```
+**Regola fondamentale**
 
-**Critical rule**
-
-OOS remains locked until the model and relevant design choices are frozen.
-
----
-
-## 2026-10-11 - Deterministic baseline retained despite weak performance
-
-**Decision**
-
-Keep the current deterministic economic system as the official Stage 1 baseline even though it underperforms the fixed-income benchmark in train and validation.
-
-**Rationale**
-
-Its purpose is comparison and interpretability, not retroactive optimization.
+Il periodo OOS deve rimanere escluso da qualsiasi valutazione fino a quando il modello e le relative scelte progettuali non saranno stati definiti e congelati.
 
 ---
 
-## 2026-10-11 - Agent layer deferred
+## 11 Ottobre - Mantenimento della baseline deterministica nonostante le prestazioni insufficienti
 
-**Decision**
+**Decisione**
 
-Keep agents disabled until the quantitative core and at least one forecasting / ML model are established.
+Mantenere l'attuale sistema economico deterministico come baseline ufficiale dello Stage 1, nonostante abbia registrato prestazioni inferiori rispetto al benchmark obbligazionario sia nel periodo di training sia in quello di validazione.
 
-**Rationale**
+**Motivazione**
 
-Deterministic calculations should remain deterministic. Agents may later add value in interpretation, coordination, critique or decision aggregation.
-
----
-
-## 2026-10-13 - Backtest restricted to development period while OOS is locked
-
-**Decision**
-
-When `evaluation.evaluate_oos` is `false`, the backtest stops at `validation.validation_end` (2021-12-31).
-
-**Rationale**
-
-Previously the backtest ran until the last available week and printed the final equity, which indirectly revealed the strategy return over the OOS period (2022 onward). The evaluator already excluded the OOS correctly; the backtester now follows the same rule.
+Il suo scopo è fornire un riferimento per il confronto e garantire interpretabilità, non essere ottimizzato retroattivamente sulla base dei risultati ottenuti.
 
 ---
 
-## 2026-10-13 - Transaction costs introduced
+## 11 Ottobre - Introduzione degli agenti rinviata
 
-**Decision**
+**Decisione**
 
-```text
-commission  2 bps
-slippage    1 bps
+Mantenere gli agenti disabilitati fino a quando non saranno stati sviluppati il nucleo quantitativo e almeno un modello di previsione / Machine Learning.
+
+**Motivazione**
+
+I calcoli deterministici devono rimanere deterministici. Gli agenti potranno successivamente apportare valore aggiunto nelle attività di interpretazione, coordinamento, analisi critica o aggregazione delle decisioni.
+
+---
+
+## 12 Ottobre - Backtest limitato al periodo di sviluppo finché l'OOS rimane bloccato
+
+**Decisione**
+
+Quando `evaluation.evaluate_oos` è impostato su `false`, il backtest si interrompe alla data `validation.validation_end` (2021-12-31).
+
+**Motivazione**
+
+In precedenza, il backtest proseguiva fino all'ultima settimana disponibile e mostrava il valore finale dell'equity, rivelando indirettamente il rendimento della strategia nel periodo OOS (dal 2022 in avanti).
+
+Il modulo di valutazione escludeva già correttamente il periodo OOS; ora anche il modulo di backtesting rispetta la stessa regola.
+
+---
+
+## 12 Ottobre - Introduzione dei costi di transazione
+
+**Decisione**
 ```
+Commissioni   2 bps
 
-Costs are charged on portfolio turnover (sum of absolute weight changes).
+Slippage      1 bps
+```
+I costi vengono applicati al turnover del portafoglio, calcolato come somma delle variazioni assolute dei pesi.
 
-**Rationale**
+**Motivazione**
 
-Treasury ETFs are highly liquid, so 3 bps per unit of turnover is a realistic and slightly conservative assumption. The slippage component also partially covers the fact that signals computed on the Friday close are executed at the same close.
+Gli ETF sui Treasury statunitensi sono generalmente liquidi. I 3 punti base per unità di turnover costituiscono tuttavia un'ipotesi iniziale da verificare con analisi di sensibilità; non rappresentano una stima completa dei costi di negoziazione, finanziamento e prestito titoli per eventuali posizioni short.
 
-**Effect on the deterministic baseline**
+L'applicazione dei pesi con un ritardo di una settimana limita il rischio di look-ahead bias, ma resta da verificare la coerenza tra momento di generazione del segnale, primo prezzo negoziabile e intervallo dei rendimenti attribuiti alla posizione. Lo slippage ipotizzato non sostituisce tale verifica.
 
-Annualized return: train 0.34% -> -0.27%, validation 0.93% -> 0.54%.
+**Effetto sulla baseline deterministica**
 
----
+Rendimento annualizzato:
 
-## 2026-10-13 - Rebalanced benchmark renamed
-
-**Decision**
-
-Rename the weekly-rebalanced equal-weight series in `backtest_weekly.csv` to `benchmark_equal_weight_rebalanced_*`.
-
-**Rationale**
-
-The official benchmark in `evaluation_metrics.csv` is a true buy-and-hold without rebalancing. Using the same name for two different portfolios could lead to inconsistent charts and tables.
+- Training: da 0,34% a -0,27%;
+- Validation: da 0,93% a 0,54%.
 
 ---
 
-## Next decision point
+## 13 Ottobre - Ridenominazione del benchmark ribilanciato
 
-Before implementing `forecasting.py`, define:
+**Decisione**
 
-1. the prediction target;
-2. the prediction horizon;
-3. whether Stage 2 is regression or classification;
-4. the exact training/validation procedure for model selection.
+Rinominare la serie a pesi uguali con ribilanciamento settimanale presente in `backtest_weekly.csv` in `benchmark_equal_weight_rebalanced\_*`.
 
-No OOS data should be used in making these decisions.
+**Motivazione**
+
+Il benchmark ufficiale riportato in `evaluation_metrics.csv` è un autentico portafoglio **buy-and-hold**, senza ribilanciamento.
+
+Utilizzare lo stesso nome per due portafogli differenti potrebbe generare incoerenze nei grafici e nelle tabelle.
+
+---
+
+## 13 - 15 Ottobre - Sviluppo sperimentale degli agenti
+
+**Sviluppi effettuati**
+
+Tra il 13 e il 15 ottobre sono stati introdotti i primi moduli agent-based:
+
+- Agenti tecnici SMA/EMA, basati su logiche trend-following.
+- Agente Z-Score, basato su logiche mean-reversion.
+- Agente macroeconomico basato su yield curve e inflazione.
+- Agente FinBERT per l'analisi del sentiment finanziario.
+- Componenti sperimentali di ottimizzazione e walk-forward training.
+
+Il 16 ottobre il branch di Gabriele sullo sviluppo degli agenti è stato integrato in `main`.
+
+**Decisione**
+
+Conservare questi componenti come base sperimentale, senza attivarli nella pipeline principale.
+
+**Motivazione**
+
+La presenza degli agenti nel repository non implica che siano già integrati, validati o economicamente utili. La loro introduzione deve seguire la stabilizzazione della strategia quantitativa e delle procedure di valutazione.
+
+**Stato**
+
+Implementazione preliminare. Integrazione operativa e valutazione comparativa ancora da completare.
+
+---
+
+## 15 - 16 Ottobre - Centralizzazione del caricamento dati e gestione del repository
+
+**Decisioni**
+
+- Introdurre `src/data_loader.py` come punto centralizzato per il caricamento e la validazione dei dataset.
+- Centralizzare alcune funzionalità comuni nel modulo `src/utils.py`.
+- Mantenere in Git i dati grezzi necessari alla riproducibilità.
+- Escludere dal versionamento i CSV generati automaticamente dalla pipeline (`data/processed/`, `data/signals/`, `data/results/`).
+
+**Motivazione**
+
+Ridurre la duplicazione del codice, prevenire inconsistenze nella lettura dei dati ed evitare conflitti Git causati da output rigenerabili.
+
+La pipeline deve continuare a essere riproducibile tramite `python3 main.py`.
+
+**Nota**
+
+I dataset elaborati e i risultati dovranno essere riproducibili e disponibili nel pacchetto finale di consegna, secondo le istruzioni dell'esame.
+
+---
+
+## 16 Ottobre - Prima integrazione dei contributi dei collaboratori
+
+**Evento**
+
+Effettuata una prima integrazione su `main` dei branch `GCafa` e `Gabs`.
+
+**Decisione**
+
+Mantenere `main` come riferimento condiviso per la pipeline economica, preservando lo sviluppo dei componenti sperimentali nei rispettivi branch.
+
+---
+
+## 19 Ottobre - Primo briefing di coordinamento e definizione delle priorità
+
+**Decisione**
+
+Consolidare l'impostazione del progetto come sistema quantitativo modulare per il trading sui Treasury statunitensi, con particolare attenzione alla previsione dei rendimenti, all'identificazione dei regimi macroeconomici e alla gestione delle esposizioni.
+
+**Impostazione concordata**
+
+- Conservare SHY, IEF e TLT come universo iniziale.
+- Mantenere una baseline deterministica interpretabile.
+- Sviluppare progressivamente modelli di regressione e forecasting.
+- Valutare l'apporto dei modelli di clustering per l'identificazione dei regimi.
+- Considerare gli agenti come livello complementare, senza sostituire i calcoli quantitativi deterministici.
+- Utilizzare procedure comuni di backtesting, valutazione e controllo del rischio.
+
+**Priorità metodologiche**
+
+1. Completare la revisione della qualità dei dati e della pipeline esistente.
+2. Garantire la corretta separazione temporale fra train, validation e Test Set.
+3. Definire target e orizzonte predittivo prima di implementare nuovi modelli.
+4. Confrontare ogni estensione con la baseline e con strategie passive.
+5. Valutare rendimenti netti, Sharpe Ratio, drawdown, turnover e robustezza temporale.
+
+**Obiettivo condiviso**
+
+Sviluppare una strategia che possa generare rendimenti superiori ai benchmark passivi, mantenendo rigore metodologico, riproducibilità e plausibilità economica.
+
+**Stato**
+
+Impostazione di lavoro per le successive attività individuali e per la futura integrazione dei contributi.
+
+---
+
+## 19 Ottobre - Centralizzazione della gestione temporale e protezione del Test Set
+
+**Decisione**
+
+Centralizzare la gestione dei periodi train, validation e out-of-sample (OOS) nel modulo `src/time_split.py`.
+
+Quando `evaluation.evaluate_oos` è impostato su `false`, il master dataset viene limitato al periodo di sviluppo prima delle successive elaborazioni della pipeline.
+
+**Motivazione**
+
+Evitare che le osservazioni OOS entrino nei dataset di sviluppo, nei report diagnostici e nelle procedure di selezione dei modelli.
+
+Mantenere comunque lo storico necessario al calcolo delle feature rolling e degli indicatori macroeconomici.
+
+**Verifiche effettuate**
+
+- Pipeline end-to-end eseguita correttamente.
+- Risultati economici della baseline rimasti invariati.
+- Superati i test sintetici sui confini temporali.
+- Nessuna osservazione successiva al 31 dicembre 2021 negli output di sviluppo.
+
+**Limitazioni**
+
+La separazione temporale non garantisce automaticamente l'assenza di data leakage.
+
+---
+
+## 20 Ottobre - Candidata Treasury 30Y e allocazione difensiva
+
+**Problema di ricerca**
+
+Valutare se un indicatore maggiormente collegato ai rendimenti Treasury di lungo periodo e una diversa gestione delle esposizioni possano migliorare la baseline deterministica.
+
+**Confronto degli indicatori dei tassi**
+
+Risultati ottenuti sul medesimo periodo train di 606 settimane.
+
+| Indicatore   | Rendimento cumulato | Sharpe | Max Drawdown |
+
+| ------------ | ------------------: | -----: | -----------: |
+
+| Treasury 2Y  |              −3,11% | −0,102 |      −36,67% |
+
+| Treasury 10Y |             +19,20% |  0,084 |      −25,21% |
+
+| Treasury 30Y |             +46,96% |  0,267 |      −19,89% |
+
+La strategia basata sul 30Y ha inoltre prodotto rendimenti positivi in entrambi i sottoperiodi del train analizzati.
+
+**Confronto delle esposizioni nei regimi ribassisti sulla duration**
+
+Utilizzando il Treasury 30Y come indicatore:
+
+| Configurazione     | Rendimento cumulato | Sharpe |
+
+| ------------------ | ------------------: | -----: |
+
+| 50% SHY / −50% TLT |             +46,96% |  0,267 |
+
+| 100% SHY           |             +58,20% |  0,340 |
+
+| −100% TLT          |             +35,10% |  0,184 |
+
+**Decisione provvisoria**
+
+Mantenere la strategia originale basata sul Treasury 2Y come baseline ufficiale di confronto.
+
+Selezionare come candidata di ricerca la seguente configurazione:
+
+- Regime favorevole alla duration lunga: 100% TLT.
+- Regime intermedio: 100% IEF.
+- Regime difensivo: 100% SHY.
+- Indicatore del regime dei tassi: Treasury 30Y.
+
+La candidata rappresenta una strategia di allocazione tattica della duration, prevalentemente long-only.
+
+**Stato**
+
+Candidata sperimentale. Non ancora adottata come strategia predefinita su `main`.
+
+**Criticità aperte**
+
+- Rischio di overfitting derivante dalla selezione delle configurazioni sul train.
+- Stabilità della configurazione difensiva ancora da verificare nei sottoperiodi.
+- Validation già parzialmente consultata e quindi non completamente indipendente dalle successive decisioni di ricerca.
+- Performance ancora inferiori al benchmark equal-weight buy-and-hold nel train.
+- Necessità di migliorare la gestione del rischio di duration e le ipotesi sui costi operativi.
+
+**Prossime attività**
+
+1. Completare l'analisi delle feature economiche.
+2. Introdurre test diagnostici permanenti.
+3. Valutare metodi di dimensionamento delle esposizioni basati sul rischio.
+4. Definire i target per il forecasting.
+5. Integrare successivamente regressione, clustering e agenti.
+
+## Prossime decisioni da prendere
+
+Prima di procedere con lo sviluppo dei modelli di forecasting, dobbiamo definire:
+
+1. **Variabile target:** prevedere il rendimento degli ETF, il rendimento relativo rispetto a SHY oppure le variazioni dei rendimenti Treasury.
+2. **Orizzonte predittivo:** inizialmente una settimana, coerentemente con la frequenza della strategia.
+3. **Tipologia di modello:** regressione o classificazione, privilegiando inizialmente modelli statistici interpretabili.
+4. **Procedura di validazione:** modalità di addestramento, confronto dei modelli e possibile introduzione di walk-forward validation.
+5. **Gestione del rischio:** scegliere tra pesi nominali, volatility targeting e dimensionamento basato sulla duration.
+6. **Realismo operativo:** verificare il timing di esecuzione, la coerenza dei prezzi adjusted e la corretta modellazione dei costi.
+
+**Regole metodologiche**
+
+- La baseline deterministica originale rimane il riferimento ufficiale.
+- Le nuove configurazioni devono essere documentate e confrontate attraverso procedure coerenti.
+- L'OOS dal 2022 rimane bloccato fino al congelamento definitivo della strategia e dei parametri.
+- Le questioni ancora aperte devono essere risolte prima della valutazione finale.
