@@ -9,12 +9,21 @@ Esporta:
 - ZScoreOptimizer, ZScoreWalkForwardTrainer: Moduli di ottimizzazione per Z-Score
 - MacroYieldCurveAgent: Agente macroeconomico basato su pendenza di curva (10Y-2Y), regimi e inflazione
 - FinBERTAgent: Agente sentiment basato su transformer FinBERT
+- KalmanOrchestratorAgent (e alias OrchestratorAgent): Agente Orchestratore basato su Filtro di Kalman adattivo continuo (senza training esplicito)
+- StaticOrchestratorAgent: Agente Orchestratore statico a griglia (benchmark comparativo)
+- OrchestratorOptimizer: Modulo di ottimizzazione dei pesi e delle soglie decisionali per il modello statico
 """
 
 from .base_agent import BaseAgent
 from .EMA_EMW_agent import EMA_EMW_Agent, SMAEMAAgent, SMAEMAOptimizer, WalkForwardTrainer
 from .ZScore_agent import ZScoreAgent, ZScoreOptimizer, ZScoreWalkForwardTrainer
 from .macro_yield_curve_agent import MacroYieldCurveAgent
+from .orchestrator_agent import (
+    KalmanOrchestratorAgent,
+    OrchestratorAgent,
+    StaticOrchestratorAgent,
+    OrchestratorOptimizer,
+)
 
 try:
     from .FinBERT_agent import FinBERTAgent
@@ -32,4 +41,8 @@ __all__ = [
     "ZScoreWalkForwardTrainer",
     "MacroYieldCurveAgent",
     "FinBERTAgent",
+    "KalmanOrchestratorAgent",
+    "OrchestratorAgent",
+    "StaticOrchestratorAgent",
+    "OrchestratorOptimizer",
 ]
