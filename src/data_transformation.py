@@ -32,11 +32,8 @@ from src.time_split import restrict_to_allowed_period
 
 
 def _read_csv_with_date_index(path: Path) -> pd.DataFrame:
-    """Legge un dataset raw e applica una pulizia prudente delle date."""
-    return load_dataset(
-        path,
-        strict=False,
-    )
+    """Legge un CSV raw e valida rigorosamente le date."""
+    return load_dataset(path)
 
 def _coerce_numeric(df: pd.DataFrame) -> pd.DataFrame:
     """Converte tutte le colonne del DataFrame in formato numerico quando possibile."""

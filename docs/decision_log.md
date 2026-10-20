@@ -381,89 +381,199 @@ La separazione temporale non garantisce automaticamente l'assenza di data leakag
 
 ---
 
-## 20 Ottobre - Candidata Treasury 30Y e allocazione difensiva
+## 20 Ottobre - Selezione sperimentale del Treasury 30Y e revisione delle esposizioni
 
 **Problema di ricerca**
 
-Valutare se un indicatore maggiormente collegato ai rendimenti Treasury di lungo periodo e una diversa gestione delle esposizioni possano migliorare la baseline deterministica.
+Valutare se la scelta dell'indicatore utilizzato per identificare i regimi dei tassi e una diversa allocazione nei regimi sfavorevoli alla duration possano migliorare le prestazioni della baseline deterministica.
 
-**Confronto degli indicatori dei tassi**
+**Analisi degli indicatori dei tassi**
 
-Risultati ottenuti sul medesimo periodo train di 606 settimane.
+Sono stati confrontati Treasury 2Y, 10Y e 30Y, mantenendo invariata la struttura della strategia e utilizzando esclusivamente il periodo di training di 606 settimane.
 
-| Indicatore   | Rendimento cumulato | Sharpe | Max Drawdown |
+| Indicatore | Rendimento cumulato | Sharpe | Max Drawdown |
+|---|---:|---:|---:|
+| Treasury 2Y | −3,11% | −0,102 | −36,67% |
+| Treasury 10Y | +19,20% | 0,084 | −25,21% |
+| Treasury 30Y | +46,96% | 0,267 | −19,89% |
 
-| ------------ | ------------------: | -----: | -----------: |
+La configurazione basata sul Treasury 30Y ha mostrato le migliori prestazioni tra le tre alternative considerate, con rendimenti positivi anche nei due sottoperiodi del train precedentemente analizzati.
 
-| Treasury 2Y  |              −3,11% | −0,102 |      −36,67% |
+**Analisi delle esposizioni difensive**
 
-| Treasury 10Y |             +19,20% |  0,084 |      −25,21% |
+Mantenendo il Treasury 30Y come indicatore dei tassi, sono state confrontate tre allocazioni nei regimi sfavorevoli alla duration lunga.
 
-| Treasury 30Y |             +46,96% |  0,267 |      −19,89% |
+| Configurazione difensiva | Rendimento cumulato | Sharpe | Max Drawdown |
+|---|---:|---:|---:|
+| A. 50% SHY / −50% TLT | +46,96% | 0,267 | −19,89% |
+| B. 100% SHY | +58,20% | 0,340 | −19,89% |
+| C. −100% TLT | +35,10% | 0,184 | −22,22% |
 
-La strategia basata sul 30Y ha inoltre prodotto rendimenti positivi in entrambi i sottoperiodi del train analizzati.
-
-**Confronto delle esposizioni nei regimi ribassisti sulla duration**
-
-Utilizzando il Treasury 30Y come indicatore:
-
-| Configurazione     | Rendimento cumulato | Sharpe |
-
-| ------------------ | ------------------: | -----: |
-
-| 50% SHY / −50% TLT |             +46,96% |  0,267 |
-
-| 100% SHY           |             +58,20% |  0,340 |
-
-| −100% TLT          |             +35,10% |  0,184 |
+Tutti i risultati si riferiscono esclusivamente al periodo di training. I confronti sono stati riprodotti mediante uno script sperimentale senza utilizzare nuove osservazioni di validation o OOS.
 
 **Decisione provvisoria**
 
-Mantenere la strategia originale basata sul Treasury 2Y come baseline ufficiale di confronto.
+Mantenere la baseline deterministica originale, basata sul Treasury 2Y, come riferimento ufficiale.
 
-Selezionare come candidata di ricerca la seguente configurazione:
+Conservare parallelamente una candidata sperimentale caratterizzata da:
 
-- Regime favorevole alla duration lunga: 100% TLT.
-- Regime intermedio: 100% IEF.
-- Regime difensivo: 100% SHY.
-- Indicatore del regime dei tassi: Treasury 30Y.
+- **Regime favorevole alla duration lunga:** 100% TLT.
+- **Regime intermedio:** 100% IEF.
+- **Regime difensivo:** 100% SHY.
+- **Indicatore dei regimi dei tassi:** Treasury 30Y.
 
-La candidata rappresenta una strategia di allocazione tattica della duration, prevalentemente long-only.
+Questa candidata rappresenta una strategia di allocazione tattica della duration, con esposizioni long-only nelle tre configurazioni considerate.
 
-**Stato**
+**Motivazione**
 
-Candidata sperimentale. Non ancora adottata come strategia predefinita su `main`.
+La soluzione consente di esplorare il ruolo informativo dei rendimenti Treasury a lunga scadenza, distinguendo la selezione del regime dalla successiva allocazione degli ETF.
 
-**Criticità aperte**
+L'eliminazione della posizione short su TLT nei regimi difensivi costituisce inoltre un'ipotesi alternativa più semplice dal punto di vista operativo, che richiede comunque un confronto economico rigoroso.
 
-- Rischio di overfitting derivante dalla selezione delle configurazioni sul train.
-- Stabilità della configurazione difensiva ancora da verificare nei sottoperiodi.
-- Validation già parzialmente consultata e quindi non completamente indipendente dalle successive decisioni di ricerca.
-- Performance ancora inferiori al benchmark equal-weight buy-and-hold nel train.
-- Necessità di migliorare la gestione del rischio di duration e le ipotesi sui costi operativi.
+**Stato e implementazione**
 
-**Prossime attività**
+- Parametrizzato l'indicatore dei tassi tramite `rate_state_source`.
+- Conservato `rates__treasury_2y` come valore predefinito della baseline.
+- Implementato uno script dedicato al confronto delle esposizioni.
+- Riprodotti i risultati sperimentali sul train.
+- Modifiche salvate sul branch personale `gianluca`, senza alterare la baseline condivisa su `main`.
 
-1. Completare l'analisi delle feature economiche.
-2. Introdurre test diagnostici permanenti.
-3. Valutare metodi di dimensionamento delle esposizioni basati sul rischio.
-4. Definire i target per il forecasting.
-5. Integrare successivamente regressione, clustering e agenti.
+**Limitazioni e criticità aperte**
+
+- La candidata è stata selezionata utilizzando risultati in-sample: esiste un rischio concreto di overfitting.
+- La validation è stata parzialmente consultata nel percorso di ricerca e non può essere considerata completamente indipendente da tutte le successive decisioni.
+- La configurazione selezionata rimane inferiore al benchmark equal-weight buy-and-hold nel training.
+- È necessario verificare la stabilità delle prestazioni nei sottoperiodi e in differenti condizioni di mercato.
+- Le esposizioni nominali non garantiscono un rischio di duration uniforme fra SHY, IEF e TLT.
+- Restano da approfondire i costi effettivi di esecuzione, la robustezza dei segnali e il rischio macroeconomico.
+
+**Regola metodologica**
+
+La candidata Treasury 30Y non sostituisce la baseline ufficiale e non autorizza l'apertura anticipata del Test Set OOS.
+
+---
+
+## 21 Ottobre - Introduzione dei test automatici e verifica degli invarianti della pipeline
+
+**Decisione**
+
+Introdurre una suite permanente di test automatici basata su `unittest`, per verificare le proprietà temporali, economiche e operative della pipeline prima di sviluppare nuovi modelli predittivi.
+
+**Ambiti di verifica**
+
+Sono stati introdotti due moduli:
+
+- `tests/test_time_split.py`: 15 test sui confini temporali, sulla separazione train/validation, sulla protezione OOS e sull'integrità dei DataFrame.
+- `tests/test_pipeline_invariants.py`: 16 test sui segnali, sui pesi di portafoglio, sul ritardo di esecuzione, sui rendimenti, sui costi e sul caricamento dei dati.
+
+I controlli utilizzano dataset sintetici e, quando necessario, file CSV temporanei, senza accedere ai rendimenti reali del Test Set.
+
+**Motivazione**
+
+La successiva introduzione di forecasting, clustering e agenti aumenterà la complessità del sistema.
+
+È quindi necessario disporre di controlli riproducibili che rilevino eventuali regressioni del codice, violazioni delle regole di portafoglio o errori nella gestione temporale dei dati.
+
+**Problema identificato e correzione**
+
+Durante i test è stata individuata una criticità nella rappresentazione numerica dei pesi del portafoglio.
+
+La sostituzione degli zeri con `pd.NA` nel calcolo del denominatore poteva produrre colonne di tipo `object`, anziché valori numerici coerenti.
+
+È stata applicata una correzione minima in `src/portfolio.py`, mantenendo invariata la formula economica dell'allocazione.
+
+**Verifiche effettuate**
+
+- 31 test automatici superati senza errori.
+- Pipeline completa eseguita correttamente in tutti i 7 passaggi.
+- Valutazione OOS mantenuta disabilitata.
+
+**Decisione metodologica**
+
+Mantenere i test come parte permanente del processo di sviluppo e rieseguirli dopo ogni modifica sostanziale alla pipeline.
+
+**Limitazione**
+
+Il superamento dei test non dimostra automaticamente l'assenza di qualsiasi forma di data leakage.
+
+Rimangono necessarie verifiche specifiche sulla disponibilità storica delle informazioni macroeconomiche, sulla costruzione delle feature e sulla coerenza tra segnali, prezzi ed esecuzione.
+
+---
+
+## 21 Ottobre - Adozione della validazione rigorosa nel caricamento dei dati
+
+**Problema identificato**
+
+Il modulo centralizzato `src/data_loader.py` prevede due modalità:
+
+- `strict=True`: interrompe il caricamento quando rileva date invalide o duplicate.
+- `strict=False`: elimina le date invalide e conserva l'ultima osservazione in presenza di duplicati.
+
+Sul branch `gianluca`, alcune operazioni di caricamento dei dati raw utilizzavano esplicitamente `strict=False`, diversamente da `main`.
+
+**Analisi effettuata**
+
+È stato eseguito un audit sulla colonna delle date dei 13 file CSV raw utilizzati dal progetto.
+
+| Controllo | Risultato |
+|---|---:|
+| CSV raw esaminati | 13 |
+| Date invalide | 0 |
+| Date duplicate | 0 |
+| Date duplicate fino al 2021 | 0 |
+
+Non sono quindi emerse anomalie nelle date che giustifichino l'utilizzo sistematico di una modalità permissiva.
+
+**Decisione**
+
+Adottare `strict=True` come politica ordinaria di caricamento sia per i dati raw sia per quelli processati.
+
+Sono stati uniformati:
+
+- `src/data_transformation.py`, nella lettura dei CSV raw.
+- `src/feature_engineering.py`, nella lettura delle serie mensili originali.
+
+Non è stato necessario modificare `src/data_loader.py`, che utilizza già `strict=True` come comportamento predefinito.
+
+**Motivazione**
+
+La validazione rigorosa evita che osservazioni finanziarie vengano eliminate o sostituite silenziosamente durante la preparazione dei dati.
+
+Eventuali anomalie future dovranno essere esaminate e risolte mediante procedure esplicite, documentate e riproducibili.
+
+**Verifica finale**
+
+Dopo l'uniformazione del caricamento:
+
+- Tutti i 31 test automatici sono stati nuovamente superati.
+- La pipeline ha completato correttamente tutti i passaggi.
+- I risultati della baseline sono rimasti invariati.
+- L'OOS è rimasto bloccato.
+
+**Politica futura**
+
+La modalità permissiva potrà essere utilizzata soltanto in casi esplicitamente giustificati, accompagnati da controlli sulla quantità e sulla natura delle osservazioni eliminate.
+
+---
 
 ## Prossime decisioni da prendere
 
-Prima di procedere con lo sviluppo dei modelli di forecasting, dobbiamo definire:
+Completata la stabilizzazione iniziale della pipeline, le successive decisioni riguarderanno prevalentemente la correttezza informativa delle feature, il forecasting e la gestione del rischio.
 
-1. **Variabile target:** prevedere il rendimento degli ETF, il rendimento relativo rispetto a SHY oppure le variazioni dei rendimenti Treasury.
-2. **Orizzonte predittivo:** inizialmente una settimana, coerentemente con la frequenza della strategia.
-3. **Tipologia di modello:** regressione o classificazione, privilegiando inizialmente modelli statistici interpretabili.
-4. **Procedura di validazione:** modalità di addestramento, confronto dei modelli e possibile introduzione di walk-forward validation.
-5. **Gestione del rischio:** scegliere tra pesi nominali, volatility targeting e dimensionamento basato sulla duration.
-6. **Realismo operativo:** verificare il timing di esecuzione, la coerenza dei prezzi adjusted e la corretta modellazione dei costi.
+1. **Disponibilità delle informazioni macroeconomiche:** verificare i ritardi di pubblicazione, le revisioni storiche dei dati e l'eventuale utilizzo di serie point-in-time.
+2. **Coerenza temporale dell'esecuzione:** verificare il rapporto fra chiusura settimanale, disponibilità del segnale, primo prezzo negoziabile e rendimento attribuito alla posizione.
+3. **Variabile target del forecasting:** scegliere tra rendimento degli ETF, rendimento relativo rispetto a SHY o variazioni dei rendimenti Treasury, definendo prima la relativa interpretazione economica.
+4. **Orizzonte predittivo:** considerare inizialmente un orizzonte di una settimana, coerente con la frequenza della strategia.
+5. **Modello iniziale:** privilegiare un modello di regressione interpretabile e confrontarlo con benchmark predittivi semplici.
+6. **Procedura di validazione:** definire training, eventuali finestre walk-forward e criteri di selezione prima dell'addestramento dei modelli.
+7. **Gestione del rischio:** confrontare esposizioni nominali, volatility targeting e dimensionamento basato sulla duration.
+8. **Integrazione dei componenti:** stabilire come utilizzare successivamente clustering e agenti senza compromettere la riproducibilità del sistema.
 
-**Regole metodologiche**
+**Regole metodologiche permanenti**
 
-- La baseline deterministica originale rimane il riferimento ufficiale.
-- Le nuove configurazioni devono essere documentate e confrontate attraverso procedure coerenti.
-- L'OOS dal 2022 rimane bloccato fino al congelamento definitivo della strategia e dei parametri.
-- Le questioni ancora aperte devono essere risolte prima della valutazione finale.
+- La baseline deterministica Treasury 2Y rimane il riferimento ufficiale.
+- La candidata Treasury 30Y resta sperimentale e non ancora validata in modo indipendente.
+- Le alternative devono essere confrontate utilizzando metriche e ipotesi economiche coerenti.
+- Ogni modifica sostanziale deve essere accompagnata dall'esecuzione dei test automatici.
+- Il Test Set OOS dal 2022 deve rimanere bloccato fino al congelamento definitivo della strategia, dei parametri e del protocollo di valutazione.
+- Nessuna scelta progettuale deve essere giustificata retroattivamente utilizzando i risultati OOS.

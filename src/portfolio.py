@@ -140,8 +140,7 @@ def build_portfolio_weights(
     gross_signal = signal_matrix.abs().sum(axis=1)
 
     # Evitiamo divisioni per zero nelle settimane in cui tutti i segnali sono flat.
-    denominator = gross_signal.replace(0, pd.NA)
-
+    denominator = gross_signal.where(gross_signal.ne(0), float("nan"))
     weight_matrix = signal_matrix.div(denominator, axis=0)
 
     # Se non esiste alcuna posizione attiva, il portafoglio rimane interamente flat.
