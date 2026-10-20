@@ -50,7 +50,7 @@ class AbstractOpener(ABC):
             viene restituito senza trasformare l'indice;
           - strict: se True, date non valide o duplicate generano un errore;
             se False, le date non valide vengono rimosse e per i duplicati
-            viene mantenuta l'ultima osservazione;          
+            viene mantenuta l'ultima osservazione;
           - read_options: opzioni aggiuntive passate alla funzione pandas
             (es. sheet_name per Excel, sep per CSV).
 
@@ -136,7 +136,7 @@ class AbstractOpener(ABC):
                 subset=[date_column],
                 keep="last",
             )
-        
+
         return df.set_index(date_column).sort_index()
 
 

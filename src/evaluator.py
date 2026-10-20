@@ -38,6 +38,12 @@ import numpy as np
 import pandas as pd
 
 from src.data_loader import load_dataset
+from src.utils import get_tickers
+from src.time_split import (
+    get_time_boundaries,
+    is_oos_enabled,
+    split_time_periods,
+)
 
 # =============================================================================
 # Lettura del backtest
@@ -60,65 +66,36 @@ def load_backtest_dataset(config: dict, root_dir: Path) -> pd.DataFrame:
 
 def _get_evaluation_parameters(config: dict) -> dict:
     """
-    Recupera le date di split e i parametri di valutazione.
+    Recupera i parametri di valutazione.
 
-    Le date devono essere fissate prima di utilizzare l'OOS per evitare
-    modifiche retroattive motivate dai risultati.
+    I confini temporali e il blocco OOS sono gestiti
+    esclusivamente dal modulo time_split.py.
     """
-    validation = config.get("validation", {})
-    evaluation = config.get("evaluation", {})
-
-    train_end = validation.get("train_end")
-    validation_end = validation.get("validation_end")
-    oos_start = validation.get("oos_start")
-
-    missing_dates = [
-        name
-        for name, value in {
-            "train_end": train_end,
-            "validation_end": validation_end,
-            "oos_start": oos_start,
-        }.items()
-        if value is None
-    ]
-
-    if missing_dates:
-        raise ValueError(
-            "Missing validation dates in config.yaml: "
-            + ", ".join(missing_dates)
-        )
-
-    train_end = pd.Timestamp(train_end)
-    validation_end = pd.Timestamp(validation_end)
-    oos_start = pd.Timestamp(oos_start)
-
-    if not (train_end < validation_end < oos_start):
-        raise ValueError(
-            "Expected train_end < validation_end < oos_start."
-        )
+    train_end, validation_end, oos_start = get_time_boundaries(config)
 
     annualization_factor = int(
-        evaluation.get("annualization_factor", 52)
+        config.get("evaluation", {}).get("annualization_factor", 52)
     )
 
-    evaluate_oos = bool(
-        evaluation.get("evaluate_oos", False)
-    )
+    if annualization_factor <= 0:
+        raise ValueError("annualization_factor must be positive.")
 
     return {
         "train_end": train_end,
         "validation_end": validation_end,
         "oos_start": oos_start,
         "annualization_factor": annualization_factor,
-        "evaluate_oos": evaluate_oos,
+        "evaluate_oos": is_oos_enabled(config),
     }
-
 
 # =============================================================================
 # Individuazione dell'inizio effettivo della strategia
 # =============================================================================
 
-def get_first_active_week(backtest: pd.DataFrame) -> pd.Timestamp:
+def get_first_active_week(
+    backtest: pd.DataFrame,
+    tickers: list[str],
+) -> pd.Timestamp:
     """
     Restituisce la prima settimana in cui il portafoglio ha una posizione attiva.
 
@@ -126,9 +103,8 @@ def get_first_active_week(backtest: pd.DataFrame) -> pd.Timestamp:
     non esisteva ancora perché le feature/regimi richiedevano storico minimo.
     """
     applied_columns = [
-        "SHY_applied_weight",
-        "IEF_applied_weight",
-        "TLT_applied_weight",
+        f"{ticker}_applied_weight"
+        for ticker in tickers
     ]
 
     active = (
@@ -153,43 +129,23 @@ def split_evaluation_periods(
     config: dict,
 ) -> Dict[str, pd.DataFrame]:
     """
-    Costruisce TRAIN, VALIDATION e, al momento non ancora autorizzato, OOS.
+    Prepara i dati della strategia per la valutazione.
 
-    L'OOS non viene restituito quando evaluate_oos = false.
+    Esclude le settimane precedenti alla prima posizione
+    effettivamente investita e delega lo split temporale
+    al modulo centralizzato.
     """
-    params = _get_evaluation_parameters(config)
-    first_active = get_first_active_week(backtest)
 
-    data = backtest.loc[backtest.index >= first_active].copy()
+    first_active = get_first_active_week(
+        backtest,
+        get_tickers(config),
+    )
 
-    train = data.loc[
-        data.index <= params["train_end"]
+    data = backtest.loc[
+        backtest.index >= first_active
     ].copy()
 
-    validation = data.loc[
-        (data.index > params["train_end"])
-        & (data.index <= params["validation_end"])
-    ].copy()
-
-    periods = {
-        "train": train,
-        "validation": validation,
-    }
-
-    if params["evaluate_oos"]:
-        oos = data.loc[
-            data.index >= params["oos_start"]
-        ].copy()
-
-        periods["oos"] = oos
-
-    for name, period in periods.items():
-        if period.empty:
-            raise ValueError(
-                f"Evaluation period '{name}' is empty."
-            )
-
-    return periods
+    return split_time_periods(data, config)
 
 
 # =============================================================================
@@ -238,6 +194,7 @@ def build_weekly_risk_free(
 
 def build_buy_and_hold_benchmark(
     period: pd.DataFrame,
+    tickers: list[str],
 ) -> pd.Series:
     """
     Costruisce un vero portafoglio equal-weight buy-and-hold.
@@ -252,9 +209,8 @@ def build_buy_and_hold_benchmark(
     allontanarsi da 1/3.
     """
     return_columns = [
-        "SHY_return_1w",
-        "IEF_return_1w",
-        "TLT_return_1w",
+        f"{ticker}_return_1w"
+        for ticker in tickers
     ]
 
     missing = [
@@ -387,6 +343,7 @@ def evaluate_period(
     period_name: str,
     period: pd.DataFrame,
     annualization_factor: int,
+    tickers: list[str],
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Valuta strategia e benchmark all'interno di un singolo periodo.
@@ -396,15 +353,15 @@ def evaluate_period(
         annualization_factor,
     )
 
-    buy_hold_return = build_buy_and_hold_benchmark(period)
+    buy_hold_return = build_buy_and_hold_benchmark(period, tickers)
 
     series_map = {
         "strategy": period["strategy_net_return"],
         "equal_weight_buy_and_hold": buy_hold_return,
-        "SHY_buy_and_hold": period["benchmark_SHY_return"],
-        "IEF_buy_and_hold": period["benchmark_IEF_return"],
-        "TLT_buy_and_hold": period["benchmark_TLT_return"],
     }
+
+    for ticker in tickers:
+        series_map[f"{ticker}_buy_and_hold"] = period[f"benchmark_{ticker}_return"]
 
     metric_rows = []
 
@@ -479,6 +436,7 @@ def run_evaluation(
             period_name=period_name,
             period=period,
             annualization_factor=params["annualization_factor"],
+            tickers=get_tickers(config),
         )
 
         metric_frames.append(metrics)

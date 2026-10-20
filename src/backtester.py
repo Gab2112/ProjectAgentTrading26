@@ -27,6 +27,11 @@ from typing import Tuple
 import pandas as pd
 
 from src.data_loader import load_dataset
+from src.utils import get_tickers
+from src.time_split import (
+    restrict_to_allowed_period,
+    is_oos_enabled,
+)
 
 # =============================================================================
 # Lettura dei pesi di portafoglio
@@ -42,54 +47,6 @@ def load_portfolio_dataset(config: dict, root_dir: Path) -> pd.DataFrame:
 
     return load_dataset(path)
 
-# =============================================================================
-# Controllo del periodo disponibile al backtest
-# =============================================================================
-
-def restrict_backtest_period(
-    portfolio: pd.DataFrame,
-    config: dict,
-) -> pd.DataFrame:
-    """
-    Limita il backtest al periodo consentito dalla fase di ricerca.
-
-    Durante lo sviluppo, quando evaluate_oos=False, il backtester può
-    utilizzare soltanto TRAIN e VALIDATION e termina quindi alla data
-    validation_end.
-
-    L'OOS viene incluso soltanto quando evaluate_oos=True, cioè dopo che
-    modello, feature, soglie e parametri sono stati congelati.
-    """
-    evaluate_oos = bool(
-        config.get("evaluation", {})
-        .get("evaluate_oos", False)
-    )
-
-    if evaluate_oos:
-        return portfolio.copy()
-
-    validation_end = (
-        config.get("validation", {})
-        .get("validation_end")
-    )
-
-    if validation_end is None:
-        raise ValueError(
-            "validation_end is required when OOS evaluation is disabled."
-        )
-
-    development_end = pd.Timestamp(validation_end)
-
-    restricted = portfolio.loc[
-        portfolio.index <= development_end
-    ].copy()
-
-    if restricted.empty:
-        raise ValueError(
-            "No observations available in the development backtest period."
-        )
-
-    return restricted
 
 # =============================================================================
 # Parametri di esecuzione
@@ -149,7 +106,10 @@ def _get_execution_parameters(config: dict) -> dict:
 # Applicazione temporale dei pesi
 # =============================================================================
 
-def apply_execution_lag(portfolio: pd.DataFrame) -> pd.DataFrame:
+def apply_execution_lag(
+    portfolio: pd.DataFrame,
+    config: dict,
+) -> pd.DataFrame:
     """
     Sposta i target weights di una settimana in avanti.
 
@@ -160,7 +120,7 @@ def apply_execution_lag(portfolio: pd.DataFrame) -> pd.DataFrame:
     """
     backtest = portfolio.copy()
 
-    for asset in ["SHY", "IEF", "TLT"]:
+    for asset in get_tickers(config):
         target_column = f"{asset}_weight"
         applied_column = f"{asset}_applied_weight"
 
@@ -207,7 +167,7 @@ def calculate_strategy_returns(
     asset_returns = []
     applied_weights = []
 
-    for asset in ["SHY", "IEF", "TLT"]:
+    for asset in get_tickers(config):
         return_column = f"{asset}_return_1w"
         weight_column = f"{asset}_applied_weight"
 
@@ -274,21 +234,31 @@ def calculate_strategy_returns(
 # Benchmark
 # =============================================================================
 
-def add_benchmarks(backtest: pd.DataFrame) -> pd.DataFrame:
+def add_benchmarks(
+    backtest: pd.DataFrame,
+    config: dict,
+) -> pd.DataFrame:
     """
     Costruisce benchmark semplici e trasparenti.
 
     1. Equal-weight buy-and-hold di SHY, IEF e TLT.
     2. Rendimenti buy-and-hold individuali dei tre ETF.
 
-    Il benchmark equal-weight assegna un terzo del capitale a ciascun ETF.
+    Il benchmark equal-weight assegna un terzo del capitale a ciascun ETF e
+    viene RIBILANCIATO ogni settimana (media semplice dei rendimenti).
+
+    Attenzione: non è il benchmark ufficiale delle metriche. Le tabelle di
+    evaluation_metrics.csv usano il vero buy-and-hold senza ribilanciamento,
+    calcolato in evaluator.build_buy_and_hold_benchmark(). Il nome della
+    colonna contiene "rebalanced" proprio per evitare confusione.
     """
     result = backtest.copy()
 
+    tickers = get_tickers(config)
+
     required_returns = [
-        "SHY_return_1w",
-        "IEF_return_1w",
-        "TLT_return_1w",
+        f"{ticker}_return_1w"
+        for ticker in tickers
     ]
 
     missing = [
@@ -302,14 +272,13 @@ def add_benchmarks(backtest: pd.DataFrame) -> pd.DataFrame:
             f"Missing benchmark return columns: {', '.join(missing)}"
         )
 
-    result["benchmark_equal_weight_return"] = (
+    result["benchmark_equal_weight_rebalanced_return"] = (
         result[required_returns]
         .mean(axis=1)
     )
 
-    result["benchmark_SHY_return"] = result["SHY_return_1w"]
-    result["benchmark_IEF_return"] = result["IEF_return_1w"]
-    result["benchmark_TLT_return"] = result["TLT_return_1w"]
+    for ticker in tickers:
+        result[f"benchmark_{ticker}_return"] = result[f"{ticker}_return_1w"]
 
     return result
 
@@ -325,9 +294,8 @@ def add_equity_curves(
     """
     Costruisce equity curve monetarie e indici normalizzati a 100.
 
-    Le curve vengono costruite esclusivamente sul periodo autorizzato dal
-    backtester. Durante lo sviluppo questo periodo termina alla fine della
-    validation; l'OOS viene incluso solo dopo il suo esplicito sblocco.
+    Le curve complete vengono salvate qui; l'evaluator deciderà in seguito
+    quale intervallo utilizzare per IS / validation / OOS.
     """
     result = backtest.copy()
     params = _get_execution_parameters(config)
@@ -340,9 +308,9 @@ def add_equity_curves(
         .cumprod()
     )
 
-    result["benchmark_equal_weight_equity"] = (
+    result["benchmark_equal_weight_rebalanced_equity"] = (
         initial_capital
-        * (1.0 + result["benchmark_equal_weight_return"].fillna(0.0))
+        * (1.0 + result["benchmark_equal_weight_rebalanced_return"].fillna(0.0))
         .cumprod()
     )
 
@@ -353,9 +321,9 @@ def add_equity_curves(
         .cumprod()
     )
 
-    result["benchmark_equal_weight_index_100"] = (
+    result["benchmark_equal_weight_rebalanced_index_100"] = (
         100.0
-        * (1.0 + result["benchmark_equal_weight_return"].fillna(0.0))
+        * (1.0 + result["benchmark_equal_weight_rebalanced_return"].fillna(0.0))
         .cumprod()
     )
 
@@ -417,15 +385,17 @@ def run_backtest(
     results_dir = root_dir / config["paths"]["results"]
     results_dir.mkdir(parents=True, exist_ok=True)
 
+    # Carica i pesi e applica la politica temporale centralizzata.
     portfolio = load_portfolio_dataset(config, root_dir)
+    portfolio = restrict_to_allowed_period(portfolio, config)
 
-    portfolio = restrict_backtest_period(
-        portfolio,
-        config,
-    )
-    backtest = apply_execution_lag(portfolio)
+    # Utilizzato per indicare lo stato dell'OOS nel report.
+    evaluate_oos = is_oos_enabled(config)
+
+
+    backtest = apply_execution_lag(portfolio, config)
     backtest = calculate_strategy_returns(backtest, config)
-    backtest = add_benchmarks(backtest)
+    backtest = add_benchmarks(backtest, config)
     backtest = add_equity_curves(backtest, config)
 
     validate_backtest(backtest)
@@ -438,9 +408,8 @@ def run_backtest(
     # La prima settimana realmente investita è quella in cui almeno un peso
     # applicato è diverso da zero.
     applied_columns = [
-        "SHY_applied_weight",
-        "IEF_applied_weight",
-        "TLT_applied_weight",
+        f"{ticker}_applied_weight"
+        for ticker in get_tickers(config)
     ]
 
     active = (
@@ -459,7 +428,6 @@ def run_backtest(
     summary = {
         "rows": len(backtest),
         "first_active_week": first_active,
-        "backtest_end": backtest.index.max(),
         "final_equity": float(
             backtest["strategy_equity"].iloc[-1]
         ),
@@ -473,16 +441,18 @@ def run_backtest(
     print("\n[Backtester] Baseline completed successfully")
     print(f"  Dataset:          {output_path}")
     print(f"  Rows:             {len(backtest):,}")
+    print(
+        "  Last week:         "
+        f"{backtest.index.max().date()}"
+        + ("" if evaluate_oos else " (OOS locked)")
+    )
 
     if first_active is not None:
         print(
             "  First active week: "
             f"{first_active.date()}"
         )
-    print(
-        "  Backtest end:      "
-        f"{summary['backtest_end'].date()}"
-    )
+
     print(
         "  Final equity:      "
         f"{summary['final_equity']:,.2f}"

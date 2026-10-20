@@ -36,6 +36,7 @@ from typing import Tuple
 import pandas as pd
 
 from src.data_loader import load_dataset
+from src.utils import get_tickers
 
 # =============================================================================
 # Lettura dei segnali
@@ -192,7 +193,10 @@ def build_portfolio_weights(
 # Report sintetico
 # =============================================================================
 
-def build_portfolio_summary(portfolio: pd.DataFrame) -> pd.DataFrame:
+def build_portfolio_summary(
+    portfolio: pd.DataFrame,
+    config: dict,
+) -> pd.DataFrame:
     """
     Crea un report sintetico sui pesi e sulle esposizioni del baseline.
     """
@@ -204,7 +208,7 @@ def build_portfolio_summary(portfolio: pd.DataFrame) -> pd.DataFrame:
 
     rows = []
 
-    for asset in ["SHY", "IEF", "TLT"]:
+    for asset in get_tickers(config):
         column = f"{asset}_weight"
 
         rows.append(
@@ -245,7 +249,7 @@ def run_portfolio(
 
     signals = load_signal_dataset(config, root_dir)
     portfolio = build_portfolio_weights(signals, config)
-    summary = build_portfolio_summary(portfolio)
+    summary = build_portfolio_summary(portfolio, config)
 
     portfolio_path = signals_dir / "portfolio_weights_weekly.csv"
     summary_path = signals_dir / "portfolio_summary.csv"
