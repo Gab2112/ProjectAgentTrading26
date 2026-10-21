@@ -9,9 +9,10 @@ Esporta:
 - ZScoreOptimizer, ZScoreWalkForwardTrainer: Moduli di ottimizzazione per Z-Score
 - MacroYieldCurveAgent: Agente macroeconomico basato su pendenza di curva (10Y-2Y), regimi e inflazione
 - FinBERTAgent: Agente sentiment basato su transformer FinBERT
-- KalmanOrchestratorAgent (e alias OrchestratorAgent): Agente Orchestratore basato su Filtro di Kalman adattivo continuo (senza training esplicito)
-- StaticOrchestratorAgent: Agente Orchestratore statico a griglia (benchmark comparativo)
-- OrchestratorOptimizer: Modulo di ottimizzazione dei pesi e delle soglie decisionali per il modello statico
+- download_news_dataset: Funzione per acquisire e strutturare il database delle notizie finanziarie
+- OrchestratorAgent: Agente Orchestratore quantitativo per la sintesi e combinazione ottima di segnali
+- OrchestratorOptimizer: Modulo di ottimizzazione dei pesi e delle soglie decisionali per l'Orchestratore
+- WalkForwardOrchestrator: Modulo per la validazione walk-forward rolling dell'Orchestratore
 """
 
 from .base_agent import BaseAgent
@@ -19,16 +20,16 @@ from .EMA_EMW_agent import EMA_EMW_Agent, SMAEMAAgent, SMAEMAOptimizer, WalkForw
 from .ZScore_agent import ZScoreAgent, ZScoreOptimizer, ZScoreWalkForwardTrainer
 from .macro_yield_curve_agent import MacroYieldCurveAgent
 from .orchestrator_agent import (
-    KalmanOrchestratorAgent,
     OrchestratorAgent,
-    StaticOrchestratorAgent,
     OrchestratorOptimizer,
+    WalkForwardOrchestrator,
 )
 
 try:
-    from .FinBERT_agent import FinBERTAgent
+    from .FinBERT_agent import FinBERTAgent, download_news_dataset
 except ImportError:
     FinBERTAgent = None  # torch o transformers non installati
+    download_news_dataset = None
 
 __all__ = [
     "BaseAgent",
@@ -41,8 +42,8 @@ __all__ = [
     "ZScoreWalkForwardTrainer",
     "MacroYieldCurveAgent",
     "FinBERTAgent",
-    "KalmanOrchestratorAgent",
+    "download_news_dataset",
     "OrchestratorAgent",
-    "StaticOrchestratorAgent",
     "OrchestratorOptimizer",
+    "WalkForwardOrchestrator",
 ]
