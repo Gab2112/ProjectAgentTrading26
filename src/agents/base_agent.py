@@ -149,7 +149,7 @@ def calculate_performance_metrics(
 
     Ritorna:
         Dizionario con metriche: cumulative_return, annualized_return, annualized_volatility,
-        sharpe_ratio, max_drawdown, profit_factor, calmar_ratio.
+        sharpe_ratio, sortino_ratio, max_drawdown, profit_factor, calmar_ratio.
     """
     clean_ret = returns.fillna(0.0)
     n = len(clean_ret)
@@ -159,6 +159,7 @@ def calculate_performance_metrics(
             "annualized_return": 0.0,
             "annualized_volatility": 0.0,
             "sharpe_ratio": 0.0,
+            "sortino_ratio": 0.0,
             "max_drawdown": 0.0,
             "profit_factor": 0.0,
             "calmar_ratio": 0.0,
@@ -192,11 +193,20 @@ def calculate_performance_metrics(
     # Calmar Ratio
     calmar = float(ann_ret / max(mdd, 0.01))
 
+    # Sortino Ratio (penalizza esclusivamente la volatilita ribassista, premiando l'upside)
+    downside_ret = clean_ret[clean_ret < 0]
+    if len(downside_ret) > 1:
+        downside_vol = float(downside_ret.std(ddof=1) * np.sqrt(annualization_factor))
+    else:
+        downside_vol = vol
+    sortino = float(excess_ret / max(downside_vol, 1e-6)) if downside_vol > 1e-6 else (0.0 if excess_ret >= 0 else -99.0)
+
     return {
         "cumulative_return": cum_ret,
         "annualized_return": ann_ret,
         "annualized_volatility": vol,
         "sharpe_ratio": sharpe,
+        "sortino_ratio": sortino,
         "max_drawdown": mdd,
         "profit_factor": profit_factor,
         "calmar_ratio": calmar,
@@ -205,34 +215,50 @@ def calculate_performance_metrics(
 
 def compute_objective_score(
     metrics: Dict[str, float],
-    metric_type: str = "sharpe_mdd",
+    metric_type: str = "profit_oriented",
 ) -> float:
     """
-    Calcola lo score di ottimizzazione bilanciando rendimento e stabilità/rischio.
+    Calcola lo score di ottimizzazione per la selezione dei parametri.
 
     Opzioni supportate:
-    - 'sharpe_mdd' (default): Sharpe ratio penalizzato per il Maximum Drawdown.
-        Premia strategie con curve di equity regolari e perdite massime contenute.
-        Score = Sharpe * (1 - MDD) se Sharpe >= 0, altrimenti Sharpe * (1 + MDD).
-    - 'sharpe': Sharpe ratio annualizzato puro.
+    - 'profit_oriented' / 'profit' (default): atteggiamento orientato al profitto.
+        Il rendimento cumulato e il driver principale; viene premiata la qualita
+        del rendimento (Sharpe/Sortino positivo) con una penalita controllata
+        sul Max Drawdown (fattore 0.20 anziche 1.0). In questo modo la strategia
+        accetta drawdown fisiologici pur di cavalcare i grandi trend di profitto.
+        Score = cum_ret * (1 + max(0, sharpe)) * (1 - 0.20 * MDD) se cum_ret > 0.
+    - 'sharpe_mdd': Sharpe ratio fortemente penalizzato per il Max Drawdown (conservativo).
+        Score = Sharpe * (1 - MDD) se Sharpe >= 0.
+    - 'sortino': Sortino ratio puro (penalizza solo la volatilita ribassista).
+    - 'sharpe': Sharpe ratio annualizzato standard.
     - 'calmar': Calmar ratio (rendimento annualizzato / max drawdown).
-    - 'return': Rendimento cumulato puro (non include penalità sul rischio).
+    - 'return': Rendimento cumulato puro (nessuna penalizzazione del rischio).
     """
-    sharpe = metrics["sharpe_ratio"]
-    mdd = metrics["max_drawdown"]
-    ann_ret = metrics["annualized_return"]
+    sharpe = float(metrics.get("sharpe_ratio", 0.0))
+    mdd = float(metrics.get("max_drawdown", 0.0))
+    ann_ret = float(metrics.get("annualized_return", 0.0))
+    cum_ret = float(metrics.get("cumulative_return", 0.0))
+    sortino = float(metrics.get("sortino_ratio", sharpe))
 
-    if metric_type == "sharpe_mdd":
+    if metric_type in ("profit_oriented", "profit"):
+        if cum_ret > 0:
+            quality_boost = 1.0 + max(0.0, min(sharpe, 3.0))
+            drawdown_penalty = 1.0 - 0.20 * min(mdd, 0.99)
+            return float(cum_ret * quality_boost * drawdown_penalty)
+        else:
+            return float(cum_ret * (1.0 + min(mdd, 1.0)))
+    elif metric_type == "sharpe_mdd":
         if sharpe >= 0:
             return float(sharpe * (1.0 - min(mdd, 0.99)))
         else:
             return float(sharpe * (1.0 + min(mdd, 1.0)))
+    elif metric_type == "sortino":
+        return sortino
     elif metric_type == "sharpe":
-        return float(sharpe)
+        return sharpe
     elif metric_type == "calmar":
         return float(ann_ret / max(mdd, 0.02))
     elif metric_type == "return":
-        return float(metrics["cumulative_return"])
+        return cum_ret
     else:
         raise ValueError(f"Metrica obiettivo '{metric_type}' non riconosciuta.")
-
