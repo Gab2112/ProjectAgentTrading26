@@ -21,3 +21,4 @@ seaborn==0.13.2
 # Lettura di formati aggiuntivi in src/data_loader.py (Excel, Parquet, Feather)
 openpyxl==3.1.5
 pyarrow==25.0.1
+scikit-learn==1.8.0
