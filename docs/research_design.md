@@ -163,3 +163,99 @@ Una previsione accurata non equivale a un sistema di trading profittevole; un bu
 ---
 
 *Documento di lavoro: nessun risultato quantitativo della nuova strategia è stato ancora prodotto o validato.*
+
+---
+
+## Level A — Risultati e consolidamento della ricerca
+
+### Stato della fase
+
+Il Level A è stato implementato e verificato sul solo campione di training.
+La fase comprende benchmark statici (A1) e un'allocazione dinamica
+con vincolo di volatilità (A2).
+
+### Universo e periodo
+
+- Asset: SPY, IEF, GLD, SHY.
+- Prezzi: OHLC giornalieri rettificati.
+- Training: fino al 31 dicembre 2016.
+- Backtest comparativo: 20 maggio 2005 – 30 dicembre 2016.
+- Frequenza decisionale: settimanale.
+- Esecuzione: prima apertura disponibile dopo il segnale.
+- Capitale iniziale: 100.000 USD.
+- Commissioni: 2 bps; slippage: 1 bp.
+
+### Strategia A2
+
+- Portafoglio di riferimento: Equal Weight (25% per ETF).
+- Stima della covarianza: 126 sedute, annualizzazione a 252.
+- Budget massimo di volatilità stimata: 8% annualizzato.
+- Obiettivo: minimizzare la distanza quadratica dall'Equal Weight.
+- Vincoli: long-only, pesi non negativi, somma dei pesi pari a 1.
+- Ottimizzazione: CVXPY con risolutore CLARABEL.
+- Fallback previsto: portafoglio Minimum Variance in caso di
+  impossibilità di rispettare il budget di rischio.
+
+Il limite dell'8% è stato selezionato durante la ricerca sul training.
+Non rappresenta una garanzia sulla volatilità futura realizzata.
+
+### Risultati del training
+
+| Strategia | CAGR | Volatilità | Maximum Drawdown |
+|---|---:|---:|---:|
+| A2 Volatility Constraint | 6,24% | 6,41% | -14,28% |
+| Equal Weight Weekly | 6,54% | 6,99% | -15,69% |
+| 60/40 Weekly | 7,13% | 10,88% | -32,00% |
+| SPY Buy & Hold | 7,76% | 19,68% | -55,19% |
+| Equal Weight Buy & Hold | 6,16% | 8,75% | -17,63% |
+
+Nel confronto diretto A2 versus Equal Weight settimanale:
+
+- Sharpe Ratio (rf = 0): 0,9773 contro 0,9419.
+- Sortino Ratio (rf = 0): 1,4073 contro 1,3628.
+- Calmar Ratio: 0,4368 contro 0,4166.
+- Differenza CAGR: -0,30 punti percentuali.
+- Miglioramento Maximum Drawdown: circa 1,40 punti percentuali.
+
+### Verifiche tecniche
+
+- 607 settimane di decisione nel training.
+- 520 settimane Equal Weight e 87 con vincolo attivo.
+- 87 ottimizzazioni valide su 87, senza errori.
+- 606 eventi di esecuzione nel backtest.
+- Verificati ritardo di esecuzione, drift dei pesi,
+  turnover, costi e identità contabile del NAV.
+
+### Interpretazione e limitazioni
+
+A2 riduce volatilità e drawdown rispetto all'Equal Weight,
+ma sacrifica parte del rendimento annualizzato.
+
+I miglioramenti delle metriche corrette per il rischio
+sono modesti e non ne è stata dimostrata la significatività
+statistica.
+
+Nel 2009 il vincolo di volatilità ha penalizzato il rendimento,
+coerentemente con il rischio di ridurre l'esposizione durante
+una successiva fase di recupero dei mercati.
+
+I risultati sono esclusivamente in-sample.
+Non costituiscono evidenza di superiorità out-of-sample.
+
+La simulazione utilizza prezzi rettificati come proxy dei
+prezzi di esecuzione e un modello semplificato dei costi.
+Il tasso privo di rischio pari a zero è stato utilizzato
+soltanto per le metriche diagnostiche iniziali.
+
+La verifica dei dati point-in-time macroeconomici,
+la validazione successiva al training e i modelli di regime
+appartengono alle fasi successive.
+
+### Implementazione
+
+- `src/multiasset_allocator.py`
+- `src/multiasset_backtester.py`
+- `environment-multiasset.yml`
+
+Il precedente progetto Treasury rimane preservato
+nei relativi tag Git di archivio.

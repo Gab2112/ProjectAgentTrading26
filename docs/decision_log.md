@@ -831,3 +831,101 @@ La strategia usa segnali macro a frequenza lenta per rendimenti settimanali; sco
 5. Riutilizzare gli elementi generali della pipeline soltanto dopo avere definito la nuova ipotesi economica e il relativo protocollo di backtest.
 
 **Stato:** fase Treasury sospesa, in attesa della decisione del gruppo; nessuna conclusione generale sull'impossibilità di fare systematic trading obbligazionario.
+
+---
+
+## 2026-10-23 — Consolidamento Level A: Multi-Asset Allocation
+
+### Decisione 1 — Universo investibile
+
+Adottato un universo di quattro ETF statunitensi:
+
+- SPY: mercato azionario.
+- IEF: Treasury a duration intermedia.
+- GLD: oro.
+- SHY: Treasury a breve duration.
+
+L'universo è long-only, senza leva finanziaria.
+
+### Decisione 2 — Strategia dinamica A2
+
+Scelto un approccio di allocazione con vincolo di volatilità:
+
+- Riferimento: Equal Weight, 25% per ETF.
+- Finestra di covarianza: 126 sedute giornaliere.
+- Budget di volatilità annualizzata stimata: 8%.
+- Ottimizzazione: minima distanza quadratica dall'Equal Weight.
+- Vincoli: pesi non negativi e somma pari a 100%.
+
+La soglia dell'8% è stata scelta durante la ricerca sul training,
+valutandone frequenza di attivazione e fattibilità operativa.
+Non è stata selezionata massimizzando lo Sharpe Ratio.
+
+Il parametro viene mantenuto fisso nelle successive valutazioni.
+
+### Decisione 3 — Risolutore numerico
+
+SLSQP ha mostrato instabilità numerica in alcune settimane
+caratterizzate da vincolo di volatilità attivo.
+
+Adottati CVXPY e CLARABEL.
+
+Risultato: 87 ottimizzazioni valide su 87 nel training.
+
+### Decisione 4 — Convenzione di esecuzione
+
+- Generazione dei segnali dopo l'ultima chiusura settimanale.
+- Esecuzione alla prima apertura disponibile successiva.
+- Portafoglio rappresentato mediante quantità detenute.
+- Pesi lasciati variare naturalmente fra ribilanciamenti.
+- Turnover calcolato sui valori effettivamente negoziati.
+- Costi: 2 bps commissioni e 1 bp slippage.
+
+La simulazione utilizza prezzi giornalieri rettificati.
+
+### Decisione 5 — Risultati preliminari
+
+Periodo del backtest: 2005-05-20 / 2016-12-30.
+
+A2:
+- CAGR: 6,24%.
+- Volatilità annualizzata: 6,41%.
+- Maximum Drawdown: -14,28%.
+- Sharpe Ratio con rf=0: 0,9773.
+
+Equal Weight settimanale:
+- CAGR: 6,54%.
+- Volatilità annualizzata: 6,99%.
+- Maximum Drawdown: -15,69%.
+- Sharpe Ratio con rf=0: 0,9419.
+
+A2 presenta un contenimento del rischio e un miglioramento
+modesto delle metriche corrette per il rischio, accompagnati
+da un rendimento annualizzato inferiore.
+
+Non è stata dimostrata una superiorità statisticamente robusta.
+
+### Decisione 6 — Limiti della ricerca
+
+Tutti i risultati sono esclusivamente in-sample.
+
+Non sono stati utilizzati dati di validation o OOS
+per valutare le performance della strategia.
+
+I test sono stati eseguiti mediante script diagnostici;
+la loro integrazione in una suite automatizzata resta da completare.
+
+Il confronto con tassi risk-free storici, la verifica
+point-in-time dei dati macroeconomici e la validazione
+fuori campione appartengono a fasi successive.
+
+### Decisione 7 — Passaggio al Level B
+
+Il Level A viene consolidato come insieme di benchmark
+statici e baseline dinamico per la ricerca successiva.
+
+La prossima fase introdurrà regimi macro-finanziari
+interpretabili, verificandone il contributo incrementale.
+
+Non verranno modificati retroattivamente i parametri
+di A2 per migliorarne i risultati storici.

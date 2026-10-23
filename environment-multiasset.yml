@@ -1,0 +1,12 @@
+name: multiasset-opt
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.11.17
+  - numpy=2.4.6
+  - pandas=3.1.0
+  - scipy=1.17.1
+  - cvxpy=1.9.3
+  - clarabel=0.11.1
