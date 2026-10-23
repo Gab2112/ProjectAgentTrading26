@@ -1,312 +1,165 @@
-# Research Design
-
-Systematic trading research project for the LUISS course **Data-Driven Models for Investment**.
-
-## Current research direction
-
-The current working hypothesis is a **Macro / Rates Regimes** framework:
-
-> Can combinations of inflation, interest rates, yield-curve shape and rate volatility identify recurring macro/rates regimes associated with different fixed-income exposures?
-
-The current implementation is an interpretable **economic baseline**, not the final strategy.
-
-## Traded universe
-
-The MVP uses three U.S. Treasury ETFs:
-
-- **SHY**: short-duration Treasuries;
-- **IEF**: intermediate-duration Treasuries;
-- **TLT**: long-duration Treasuries.
-
-The strategy operates at **weekly frequency**.
-
-## Current pipeline
-
-```text
-        RAW DATA
-            |
-            v
- DATA TRANSFORMATION
-            |
-            v
-  FEATURE ENGINEERING
-            |
-            v
-      REGIME MODEL
-            |
-            v
-   SIGNAL GENERATION
-            |
-            v
-        PORTFOLIO
-            |
-            v
-        BACKTEST
-            |
-            v
-       EVALUATION
-```
-
-The entire pipeline can be executed from the repository root with:
-
-```bash
-python3 main.py
-```
-
-By default, the pipeline uses the raw CSV files already stored in the repository and does **not** download data again.
-
-## Repository structure
-
-```text
-ProjectAgentTrading26/
-|
-|-- README.md
-|-- requirements.txt
-|-- config.yaml
-|-- main.py
-|
-|-- docs/
-|   |-- research_design.md
-|   `-- decision_log.md
-|
-|-- data/
-|   |-- raw/
-|   |   |-- market/
-|   |   `-- macro/
-|   |-- processed/
-|   |-- signals/
-|   `-- results/
-|
-`-- src/
-    |-- __init__.py
-    |-- data_acquisition.py
-    |-- data_transformation.py
-    |-- feature_engineering.py
-    |-- regime_model.py
-    |-- forecasting.py
-    |-- signal_generation.py
-    |-- portfolio.py
-    |-- backtester.py
-    |-- evaluator.py
-    `-- agents/
-        `-- __init__.py
-```
-
-## Environment
+# Disegno della ricerca
 
-The project has been tested with **Python 3.13.x**.
+**Progetto:** Regime-Aware Multi-Asset Allocation: Dynamic Risk-Adjusted Performance and Downside Protection\
+**Corso:** Data-Driven Models for Investment — LUISS Guido Carli\
+**Docenti:** Antonio Simeone, Villy De Luca\
+**Repository di riferimento:** `Gab2112/ProjectAgentTrading26`\
+**Stato:** bozza di Fase 0; nessuna implementazione autorizzata da questo documento\
+**Data:** 23 ottobre 2026
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install -r requirements.txt
-```
+## 1. Contesto e motivazione
 
-Quick syntax check:
+Il progetto studia una nuova direzione di ricerca rispetto alle precedenti strategie su ETF Treasury (SHY, IEF, TLT). I risultati della fase precedente non hanno fornito evidenza sufficientemente robusta di valore incrementale rispetto ai benchmark. In particolare, una regressione Ridge sui rendimenti relativi futuri TLT–SHY non ha superato la previsione basata sulla media storica, mentre una strategia momentum TLT/SHY ha mostrato risultati di validazione inferiori a diversi benchmark passivi.
 
-```bash
-python3 -m py_compile main.py src/*.py
-```
+**Implicazione metodologica:** non assumere che la maggiore complessità migliori i risultati; valutare ogni modulo aggiuntivo contro un benchmark più semplice, mantenendo separati qualità previsionale e utilità economica.
 
-## Data
+## 2. Domanda di ricerca e ipotesi
 
-### Market data
+### 2.1 Domanda principale
 
-Daily adjusted data are obtained from Yahoo Finance for SHY, IEF and TLT.
+> Un'allocazione dinamica basata su stati macro-finanziari identificabili con informazioni disponibili al momento della decisione può migliorare il rendimento corretto per il rischio di un portafoglio diversificato SPY–IEF–GLD–SHY rispetto a benchmark statici e a una regola dinamica semplice, senza compromettere la protezione dalle perdite?
 
-### Macro / rates data
+### 2.2 Domanda incrementale
 
-Current FRED inputs include:
+> Modelli previsionali di machine learning e segnali strutturati derivati da notizie aggiungono valore economico misurabile rispetto all'allocazione già condizionata ai regimi?
 
-- Federal Funds Rate;
-- 3M, 2Y, 5Y, 10Y and 30Y Treasury yields;
-- CPI;
-- Core CPI;
-- 5Y and 10Y breakeven inflation.
+### 2.3 Meccanismo economico ipotizzato
 
-Raw data are stored in `data/raw/` so the pipeline remains reproducible without requiring a new download.
+La volatilità, le correlazioni e le distribuzioni dei rendimenti delle diverse asset class variano al mutare delle condizioni di crescita, inflazione, tassi e stress finanziario. Se tali cambiamenti sono identificabili in tempo utile, una riallocazione disciplinata potrebbe migliorare il trade-off rischio-rendimento rispetto a pesi statici. La premessa non implica che i regimi siano prevedibili, che i rapporti storici siano stabili o che la riallocazione sia redditizia al netto dei costi.
 
-## Data transformation
+### 2.4 Ipotesi falsificabili
 
-The pipeline:
+- **H1:** una strategia dinamica semplice presenta prestazioni corrette per il rischio migliori di un portafoglio diversificato statico su dati non utilizzati per definirne le regole.
+- **H2:** l'informazione sul regime macro-finanziario apporta valore incrementale rispetto alla strategia dinamica semplice, dopo costi e con un confronto del rischio coerente.
+- **H3:** le previsioni ML apportano valore incrementale rispetto alla strategia condizionata ai regimi.
+- **H4, esplorativa e subordinata ai dati:** i segnali da notizie storiche verificabili apportano ulteriore valore rispetto alla versione priva di sentiment.
 
-- cleans and sorts raw observations;
-- converts market and rates data to weekly frequency;
-- aligns all series on a common calendar;
-- applies conservative publication lags to low-frequency macro variables;
-- preserves the last known macro observation until the next release.
+Le ipotesi non devono essere considerate confermate da risultati in-sample, grafici favorevoli o singoli episodi di crisi.
 
-Current provisional release-lag assumptions:
+## 3. Obiettivi e criteri di valutazione
 
-- CPI: 45 calendar days;
-- Core CPI: 45 calendar days;
-- FEDFUNDS: 35 calendar days.
+**Obiettivo primario:** miglioramento della performance corretta per il rischio, non semplice massimizzazione del rendimento assoluto.
 
-These lags reduce publication-timing look-ahead bias but do **not** fully solve historical revision leakage.
+**Obiettivo secondario:** protezione dinamica dal downside, verificata attraverso drawdown, downside volatility, comportamento in sottoperiodi di stress e capacità di partecipare ai successivi recuperi.
 
-A future improvement is to use **ALFRED / point-in-time vintage macro data** or exact historical release calendars.
+**Vincolo interpretativo:** una strategia non è considerata superiore perché investe quasi sempre nello strumento meno volatile. Quando appropriato, confrontare strategie anche a budget di rischio comparabile.
 
-## Feature engineering
+Metriche da riportare: rendimento cumulato ed equity curve, CAGR, volatilità annualizzata, Sharpe (con convenzione risk-free esplicita), Sortino, maximum drawdown, turnover, costi, esposizioni e prestazioni per sottoperiodo. Per il ML riportare separatamente metriche previsionali e finanziarie.
 
-The baseline currently includes:
+**Da definire prima di usare la validazione:** metrica primaria di selezione, tolleranze sul downside, metodo di confronto a parità di rischio, ipotesi di costo e soglia minima di utilità economica.
 
-- weekly ETF returns;
-- weekly changes in Treasury yields;
-- yield-curve spreads: 10Y-2Y, 10Y-3M, 30Y-10Y;
-- weekly changes in those spreads;
-- CPI YoY and Core CPI YoY computed from the original monthly series;
-- weekly changes in 5Y and 10Y breakeven inflation;
-- a 13-week realized rate-volatility proxy based on 10Y Treasury yield changes.
+## 4. Universo investibile
 
-No future target variables are created in the feature-engineering stage.
+| ETF | Esposizione | Ruolo economico ipotizzato |
+|---|---|---|
+| SPY | Azioni USA large cap | Crescita e rischio azionario |
+| IEF | Treasury USA a scadenza intermedia | Duration e possibile diversificazione in recessione/disinflazione |
+| GLD | Oro | Diversificazione in alcune condizioni di stress o shock monetari |
+| SHY | Treasury USA a breve durata | Componente difensiva con rischio di duration ridotto |
 
-## Deterministic regime baseline
+**Scelte iniziali:** long-only, senza leva, niente vendite allo scoperto, capitale interamente investito nei quattro ETF salvo successiva introduzione esplicita della liquidità; riallocazione mensile; limiti di concentrazione e costi realistici.
 
-The current regime model classifies four dimensions:
+**Avvertenza:** nessuno dei quattro strumenti è universalmente difensivo. IEF può soffrire shock inflazionistici e rialzi dei rendimenti; GLD può perdere valore durante crisi; SHY non coincide con liquidità priva di rischio. Questi rapporti devono essere verificati, non assunti come regole immutabili.
 
-```text
-Inflation   -> rising / falling
-Rates       -> rising / falling
-Curve       -> normal / inverted
-Volatility  -> high / low
-```
+**Da verificare:** date effettive d'inizio delle serie investibili, prezzi adjusted/total return, distribuzioni, copertura comune e ruolo operativo di SHY come posizione difensiva rispetto al riferimento risk-free per il calcolo dello Sharpe.
 
-The implementation produces all **16 possible combined regimes**.
+## 5. Architettura sperimentale incrementale
 
-## Signal generation
+### Livello A — Benchmark e regola dinamica semplice
 
-The duration score currently uses:
+- **A1, statici:** SPY buy-and-hold; 60% SPY e 40% IEF; equal-weight sui quattro ETF; altri ETF individuali solo a fini descrittivi.
+- **A2, dinamico:** una sola regola semplice e motivata economicamente, candidata tra trend azionario e gestione della volatilità. La selezione deve avvenire prima dell'esame delle prestazioni di validazione.
+- **Risultato atteso:** un baseline riproducibile, non una strategia già dichiarata vincente.
 
-- falling rates: positive contribution;
-- rising rates: negative contribution;
-- falling inflation: positive contribution;
-- rising inflation: negative contribution;
-- inverted curve: mild positive contribution;
-- high volatility: reduced conviction.
+### Livello B — Regimi macro-finanziari
 
-Signal mapping:
+- **B1, interpretabile:** schema concettuale di due dimensioni (stress finanziario alto/basso; pressione inflazionistica alta/bassa), con definizioni operative ancora da stabilire.
+- **B2, statistico, opzionale:** clustering (es. K-means/GMM) soltanto se apporta una giustificazione e un test chiaro. Standardizzazione, stima dei cluster e assegnazione devono rispettare l'informazione storicamente disponibile.
+- **Test decisivo:** miglioramento rispetto ad A2; attenzione a stabilità, persistenza, turnover, interpretabilità e robustezza.
 
-```text
-High duration score     -> TLT long
-Intermediate score      -> IEF long
-Low duration score      -> SHY long + TLT short
-```
+### Livello C — Previsione e agenti
 
-All final asset signals belong to:
+- **C1, previsione:** selezionare un unico target primario. Candidato prioritario: rischio azionario del mese successivo o probabilità di evento negativo **definito quantitativamente prima della stima**. Confrontare benchmark di persistenza/media storica, modello lineare/logistico regolarizzato e al massimo un modello non lineare giustificato.
+- **C2, modulo regime:** restituire una classificazione o probabilità di regime ottenuta senza informazioni future.
+- **C3, notizie/sentiment:** classificare soltanto documenti con timestamp verificabile, storico adeguato e contenuti disponibili alla decisione. In assenza di tali dati, realizzare una dimostrazione contemporanea, senza attribuirle prestazioni storiche.
+- **C4, controllo del rischio:** limiti e verifiche deterministici; nessun agente può derogare ai vincoli rigidi.
+- **C5, allocazione:** trasformazione esplicita e riproducibile dei segnali in pesi, con limiti, turnover e tempi di esecuzione definiti.
 
-```text
-+1 = long
- 0 = flat
--1 = short
-```
+**Ablation study:** statico → A2 → B → C senza notizie → C con notizie, se metodologicamente possibile.
 
-## Portfolio construction
+## 6. Dati e integrità temporale
 
-The current allocation method is `equal_active_signal`.
+Fonti candidate: prezzi giornalieri adjusted degli ETF, VIX, rendimenti Treasury, CPI, indicatori di curva e stress finanziario. Yahoo Finance e FRED sono possibili fonti, ma la decisione richiede un audit delle serie e delle rispettive convenzioni.
 
-Examples:
+Controlli minimi:
 
-```text
-TLT signal = +1
--> TLT weight = +1.00
+1. Esistenza e negoziabilità storica di ciascun ETF.
+2. Prezzi corretti per split e distribuzioni e confronto coerente dei rendimenti.
+3. Giorni comuni di mercato, valori mancanti, anomalie e duplicati.
+4. Disponibilità *point-in-time* di dati macro, date di pubblicazione, ritardi e revisioni.
+5. Nessun dato derivato dal futuro nelle feature, nelle etichette o nelle trasformazioni.
+6. Tracciabilità dei file originali e risultati riproducibili senza riscaricare dati.
 
-IEF signal = +1
--> IEF weight = +1.00
+**Frequenza proposta:** prezzi giornalieri per feature e monitoraggio; decisione e riallocazione mensile.
 
-SHY signal = +1 and TLT signal = -1
--> SHY weight = +0.50
--> TLT weight = -0.50
-```
+## 7. Protocollo cronologico e protezione dell'OOS
 
-The baseline uses gross exposure capped at 1.0 and no additional leverage.
+**Suddivisione candidata, non ancora congelata:** training 2005–2016; validation 2017–2021; test finale dal 2022 in avanti. Da confermare dopo l'audit di copertura delle serie e della numerosità effettiva delle osservazioni mensili.
 
-## Backtest timing
+- Iperparametri, feature, regole, pesi e soglie si scelgono nel training e nella validation, eventualmente con walk-forward interno.
+- Tutti i preprocessing statistici sono stimati soltanto con dati disponibili al momento della previsione.
+- Target con orizzonte che supera un confine train/validation/test richiedono gestione esplicita del *purging* o esclusione delle osservazioni contaminate.
+- Non analizzare i risultati del test per modificare la metodologia.
+- **Importante:** il periodo dal 2022 è già stato analizzato in precedenti esperimenti Treasury. Non va descritto ingenuamente come “mai osservato” a livello di ricercatori. Per la nuova strategia il test deve essere *locked* per le decisioni della nuova ricerca; qualsiasi conoscenza pregressa pertinente va dichiarata nel report.
 
-Target weights produced at week `t` are applied only from the next period:
+**Punto aperto:** definizione concreta del test finale e della sua data conclusiva, inclusi gli effetti della ricerca iterativa effettuata sul medesimo intervallo.
 
-```text
-Information available at t
-            |
-            v
-Target weights at t
-            |
-            v
-Applied weights at t+1
-            |
-            v
-Realized return at t+1
-```
+## 8. Segnali, operatività e costi
 
-This `shift(1)` rule prevents look-ahead bias.
+La frequenza mensile non rende automaticamente un backtest eseguibile. È necessario definire la sequenza:
 
-Transaction costs and slippage are currently set to zero in the first baseline and remain open assumptions for later robustness tests.
+1. Chiusura dell'intervallo informativo e timestamp dell'ultima osservazione utilizzabile.
+2. Calcolo dei segnali a dati effettivamente disponibili.
+3. Prima finestra di esecuzione accessibile dopo la generazione del segnale.
+4. Applicazione dei pesi e attribuzione dei rendimenti ai periodi successivi.
+5. Applicazione di commissioni, spread/slippage e costi indotti dal turnover.
 
-## Evaluation framework
+**Scelta ancora aperta:** convenzione di prezzo/esecuzione (ad esempio ordine al primo open negoziabile dopo l'osservazione). Evitare il falso assunto di eseguire al close il segnale calcolato con quello stesso close.
 
-Current chronological split:
+I segnali discreti richiesti dal corso (`-1`, `0`, `+1`) dovranno essere rappresentati in modo verificabile per almeno due asset. La prima architettura long-only può usare solo `0` e `+1`, a condizione di motivare come l'assenza di una posizione sia distinta da un'allocazione difensiva e di verificare la compatibilità con i requisiti di consegna. I pesi di portafoglio sono un livello ulteriore rispetto al segnale discreto.
 
-```text
-TRAIN
-2005-05-27 -> 2016-12-30
+## 9. Criteri di interpretazione e possibilità di fallimento
 
-VALIDATION
-2017-01-06 -> 2021-12-31
+L'ipotesi non è supportata se i vantaggi compaiono soltanto in training, se spariscono al netto dei costi, se risultano spiegati da minore esposizione al rischio o se dipendono da scelte retrospettive. Risultati negativi vanno conservati e commentati.
 
-OOS
-2022-01-01 -> 2026
-LOCKED
-```
+Una previsione accurata non equivale a un sistema di trading profittevole; un buon backtest non prova capacità predittiva né causalità. La valutazione finale deve isolare il contributo di ogni livello.
 
-The OOS period is currently disabled through:
+## 10. Decisioni e questioni aperte
 
-```yaml
-evaluation:
-  evaluate_oos: false
-```
+### Decisioni di indirizzo adottate per la Fase 0
 
-It must remain locked until the model, features, thresholds and relevant hyperparameters are frozen.
+- Domanda principale: utilità economica dei regimi nella riallocazione multi-asset.
+- Obiettivo primario: performance corretta per il rischio.
+- Obiettivo secondario: protezione dal downside.
+- Universo iniziale: SPY, IEF, GLD, SHY.
+- Frequenza iniziale: mensile.
+- Progressione: A → B → C, con confronto incrementale.
+- Sviluppo e documentazione interna in italiano; inglese solo per i materiali finali.
 
-Current evaluation metrics include cumulative return, annualized return, annualized volatility, Sharpe ratio, maximum drawdown and profit factor.
+### Decisioni da prendere prima dei backtest
 
-The 3M Treasury yield is currently used as a proxy for the risk-free rate.
+- Regola unica del baseline dinamico A2.
+- Metrica primaria e criteri di successo predefiniti.
+- Soglie di regime e calendario storico effettivamente disponibile.
+- Target previsionale primario e sua definizione operativa.
+- Limiti di peso, scelta del modello di allocazione, costi e calendario di esecuzione.
+- Periodi esatti di split e disciplina OOS, dopo audit dei dati.
+- Disponibilità e licenze delle notizie storiche.
 
-The main benchmark is a true equal-weight buy-and-hold portfolio of SHY, IEF and TLT, together with individual ETF buy-and-hold benchmarks.
+## 11. Prossima attività autorizzabile
 
-## Current status
+**Audit esclusivamente conoscitivo del repository**, senza modifiche: verificare stato Git, documentazione esistente, struttura dei moduli e possibili componenti riutilizzabili. Prima di qualsiasi commit, push, merge o modifica ai file condivisi, preparare un elenco delle variazioni proposte e sottoporlo a revisione.
 
-Completed:
+---
 
-- raw-data acquisition;
-- data transformation;
-- feature engineering;
-- deterministic regime model;
-- signal generation;
-- portfolio construction;
-- backtesting;
-- train/validation evaluation;
-- one-command end-to-end execution through `main.py`.
-
-The deterministic baseline currently underperforms the fixed-income benchmark and should be treated as an **economic reference model**, not as the final strategy.
-
-Next research stage:
-
-1. define a forecasting / classification target;
-2. implement a simple statistical model;
-3. compare it against the deterministic baseline;
-4. introduce nonlinear ML only if justified;
-5. consider an agentic layer only after the quantitative core is stable.
-
-## Agents
-
-The agent layer is planned but currently disabled.
-
-Potential future roles include Orchestrator, Macro Agent, Regime Agent, Strategy Agent, Risk Agent and Critic Agent.
-
-Agents should complement the quantitative pipeline, not replace deterministic calculations.
-
-## Documentation
-
-See:
-
-- `docs/research_design.md` for methodology and research architecture;
-- `docs/decision_log.md` for important design decisions and unresolved methodological issues.
+*Documento di lavoro: nessun risultato quantitativo della nuova strategia è stato ancora prodotto o validato.*

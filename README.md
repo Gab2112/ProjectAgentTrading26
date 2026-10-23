@@ -1,319 +1,195 @@
-# LUISS Final Project Work
+# ProjectAgentTrading26
 
-Systematic trading research project for the LUISS course **Data-Driven Models for Investment**.
+**Progetto universitario di trading sistematico e finanza quantitativa**
 
-## Current research direction
+**Corso:** Data-Driven Models for Investment, LUISS Guido Carli
 
-The current working hypothesis is a **Macro / Rates Regimes** framework:
+**Docenti:** Antonio Simeone e Villy De Luca
 
-> Can combinations of inflation, interest rates, yield-curve shape and rate volatility identify recurring macro/rates regimes associated with different fixed-income exposures?
+> **Stato attuale: Fase 0 - progettazione della nuova ricerca Multi-Asset.**
+> La strategia descritta qui non è ancora implementata. Il codice Python presente nel repository esegue tuttora la precedente pipeline sui Treasury statunitensi. Non interpretare i suoi output come risultati del nuovo progetto.
 
-The current implementation is an interpretable **economic baseline**, not the final strategy.
+## 1. Panoramica
 
-## Traded universe
+Il progetto studia se un'**allocazione dinamica tra azioni, Treasury statunitensi e oro** possa migliorare la performance corretta per il rischio e la protezione dalle perdite rispetto a portafogli diversificati statici.
 
-The current chosen assets strategy uses three U.S. Treasury ETFs:
+La nuova direzione di ricerca è denominata:
 
-- **SHY**: short-duration Treasuries;
-- **IEF**: intermediate-duration Treasuries;
-- **TLT**: long-duration Treasuries.
+**Regime-Aware Multi-Asset Allocation: Dynamic Risk-Adjusted Performance and Downside Protection**
 
-The strategy operates at **weekly frequency**.
+L'obiettivo tecnico è sviluppare, con complessità incrementale, tre livelli della medesima strategia: una baseline trasparente (**A**), un'allocazione condizionata ai regimi macro-finanziari (**B**) e una versione con **previsioni ML e agenti AI** (**C**).
 
-## Current pipeline
+Il sistema deve essere valutabile e riproducibile. Non si assume che una strategia dinamica o un modello più complesso batta necessariamente un benchmark passivo.
 
-```text
-        RAW DATA
-            |
-            v
- DATA TRANSFORMATION
-            |
-            v
-  FEATURE ENGINEERING
-            |
-            v
-      REGIME MODEL
-            |
-            v
-   SIGNAL GENERATION
-            |
-            v
-        PORTFOLIO
-            |
-            v
-        BACKTEST
-            |
-            v
-       EVALUATION
-```
+**Documento metodologico di riferimento:** [`docs/research_design.md`](docs/research_design.md). Il presente README fornisce una panoramica del progetto e dello stato del repository; il Research Design contiene ipotesi, vincoli e questioni ancora aperte.
 
-The entire pipeline can be executed from the repository root with:
+## 2. Domande di ricerca e obiettivi
 
-```bash
-python3 main.py
-```
+**Domanda principale:** un'allocazione dinamica basata su stati macro-finanziari identificabili con informazioni disponibili al momento della decisione può migliorare il rendimento corretto per il rischio di un portafoglio SPY-IEF-GLD-SHY rispetto a benchmark statici e a una semplice regola dinamica, senza compromettere la protezione dalle perdite?
 
-By default, the pipeline uses the raw CSV files already stored in the repository and does **not** download data again.
+**Domanda incrementale:** previsioni di machine learning e segnali strutturati derivati da notizie aggiungono valore economico misurabile rispetto all'allocazione già condizionata ai regimi?
 
-## Repository structure
+- **Obiettivo primario:** migliorare la performance corretta per il rischio, non massimizzare soltanto il rendimento assoluto.
+- **Obiettivo secondario:** contenere il *downside*, studiando drawdown, volatilità al ribasso, fasi di stress e partecipazione ai recuperi.
+- **Principio di valutazione:** una strategia che detiene quasi sempre l'asset meno rischioso non è automaticamente superiore; quando opportuno, i confronti devono tenere conto di budget di rischio comparabili.
+
+## 3. Universo investibile proposto
+
+| ETF | Esposizione | Ruolo economico ipotizzato |
+| --- | --- | --- |
+| **SPY** | Azioni statunitensi large cap | Crescita ed esposizione al rischio azionario |
+| **IEF** | Treasury USA a scadenza intermedia | Duration e possibile diversificazione in recessioni disinflazionistiche |
+| **GLD** | Oro | Diversificazione in alcune condizioni di stress o shock monetari |
+| **SHY** | Treasury USA a breve durata | Componente difensiva con rischio di duration ridotto |
+
+**Ipotesi operative iniziali:** posizioni long-only, nessuna leva, nessuno short selling, capitale investito nei quattro ETF salvo decisione esplicita sulla liquidità, ribilanciamento mensile, limiti di concentrazione e costi di transazione.
+
+**Attenzione:** obbligazioni e oro non sono coperture universali. IEF può perdere valore quando i rendimenti salgono; GLD può scendere anche durante una crisi; SHY non equivale a una posizione in contanti priva di rischio. Le caratteristiche difensive degli asset devono essere verificate sui dati.
+
+L'universo e le regole operative sono **proposte di Fase 0**, ancora soggette ad audit e approvazione metodologica.
+
+## 4. Architettura sperimentale: A -> B -> C
+
+I tre livelli non sono strategie indipendenti: ogni livello deve permettere di misurare il valore incrementale dei moduli aggiunti.
+
+### Livello A - Benchmark e baseline semplice
+
+- **A1, benchmark statici:** SPY buy-and-hold; portafoglio 60% SPY / 40% IEF; portafoglio equal-weight sui quattro ETF.
+- **A2, baseline dinamica:** una regola interpretabile da scegliere *prima* della valutazione, candidata tra controllo del trend azionario e gestione della volatilità.
+- **Domanda:** una semplice gestione dinamica migliora un'allocazione diversificata statica?
+
+### Livello B - Allocazione basata sui regimi
+
+- **B1:** classificazione macro-finanziaria interpretabile, inizialmente fondata su stress finanziario e pressioni inflazionistiche.
+- **B2, opzionale:** clustering statistico, per esempio K-means o GMM, se motivato e valutabile senza informazioni future.
+- **Domanda:** conoscere il regime aggiunge valore rispetto alla baseline A2, al netto dei costi?
+
+### Livello C - Forecasting ML e agenti AI
+
+- **Previsione:** target primario da definire; candidati sono il rischio azionario nel mese successivo o la probabilità di una perdita significativa definita ex ante. Modelli semplici e benchmark predittivi vengono prima dei modelli complessi.
+- **Modulo regime:** classificazioni o probabilità di regime costruite con informazioni disponibili alla data della decisione.
+- **Agente notizie/sentiment:** segnali ottenuti da notizie storiche con timestamp verificabile. Senza un archivio adeguato, soltanto una dimostrazione contemporanea, senza attribuirle performance di backtest.
+- **Controllo del rischio:** vincoli quantitativi deterministici su pesi, concentrazione, rischio e turnover; nessun agente può superarli.
+- **Allocatore:** conversione esplicita e riproducibile degli output in pesi di portafoglio.
+
+**Confronto incrementale previsto:** portafogli statici -> A2 -> B -> C senza notizie -> C con notizie, se i dati lo consentono.
+
+## 5. Dati e metodo di valutazione
+
+**Fonti candidate:** prezzi giornalieri rettificati degli ETF, VIX, serie Treasury, CPI e altre misure di stress finanziario. Yahoo Finance e FRED sono fonti possibili, da verificare prima dell'utilizzo.
+
+Prima dei backtest devono essere controllati:
+
+- disponibilità storica e negoziabilità effettiva degli ETF;
+- trattamento di distribuzioni, split e rendimenti *total return*;
+- calendari di mercato, dati mancanti, duplicati e anomalie;
+- date di pubblicazione e revisioni delle serie macroeconomiche (*point-in-time*);
+- assenza di informazioni future in feature, preprocessing, target e classificazioni di regime;
+- riproducibilità dei risultati a partire dai dati originali.
+
+**Frequenza proposta:** dati giornalieri per indicatori e monitoraggio; decisioni di allocazione mensili.
+
+### Separazione temporale
+
+| Campione | Periodo candidato | Stato |
+| --- | --- | --- |
+| Training | 2005-2016 | Da confermare dopo l'audit dei dati |
+| Validation | 2017-2021 | Da confermare e utilizzare con disciplina |
+| Test finale | Dal 2022 | **Bloccato durante lo sviluppo** |
+
+Questi intervalli non sono ancora congelati per la nuova ricerca. Il periodo dal 2022 è già stato osservato in precedenti analisi Treasury: pertanto non va presentato come storicamente ignoto ai ricercatori. Le eventuali conoscenze pregresse pertinenti dovranno essere dichiarate e non utilizzate per ottimizzare il nuovo modello.
+
+**Esecuzione:** i segnali devono usare dati disponibili a un timestamp esplicito ed essere negoziati soltanto nella prima finestra realistica successiva. Il semplice ritardo di una riga nei pesi non garantisce, da solo, un backtest eseguibile.
+
+**Costi:** commissioni, slippage/spread e turnover devono essere inclusi. Il protocollo e i valori operativi definitivi restano da fissare.
+
+**Metriche:** rendimento cumulato, CAGR, volatilità annualizzata, Sharpe, Sortino, massimo drawdown, turnover, costi, allocazioni e risultati per sottoperiodo. Le metriche previsionali ML devono rimanere distinte dalle metriche economiche.
+
+I requisiti didattici sui segnali discreti `-1`, `0`, `+1` devono essere verificati: nell'architettura iniziale long-only sono previsti soltanto segnali `0` e `+1`, distinti dai pesi effettivi del portafoglio.
+
+## 6. Stato effettivo del codice
+
+| Componente | Stato corrente |
+| --- | --- |
+| Research Design Multi-Asset | Documento di Fase 0 presente |
+| Dati SPY e GLD | Non ancora acquisiti e verificati nella nuova pipeline |
+| Pipeline `main.py` | **Ancora basata sulla ricerca Treasury precedente** |
+| Configurazione `config.yaml` | **Ancora specifica per Treasury SHY/IEF/TLT** |
+| Backtesting e valutazione | Moduli da verificare e adattare |
+| Test automatici | Test della pipeline precedente, non validazione Multi-Asset |
+| Clustering, forecasting e agenti Multi-Asset | Non ancora integrati nella nuova strategia |
+
+**Avvertenza operativa:** eseguire `python3 main.py` allo stato attuale significa eseguire la **vecchia strategia Treasury**, non il nuovo sistema multi-asset. Non utilizzarne i risultati per valutare il nuovo progetto.
+
+### Struttura essenziale del repository
 
 ```text
 ProjectAgentTrading26/
-|
 |-- README.md
-|-- requirements.txt
 |-- config.yaml
 |-- main.py
-|
+|-- requirements.txt
 |-- docs/
 |   |-- research_design.md
-|   `-- decision_log.md
-|
+|   |-- decision_log.md
+|   `-- treasury_research_review.md
 |-- data/
-|   |-- raw/
-|   |   |-- market/
-|   |   `-- macro/
-|   |-- processed/
-|   |-- signals/
-|   `-- results/
-|
-`-- src/
-    |-- __init__.py
-    |-- data_acquisition.py
-    |-- data_loader.py
-    |-- data_transformation.py
-    |-- feature_engineering.py
-    |-- regime_model.py
-    |-- forecasting.py
-    |-- signal_generation.py
-    |-- portfolio.py
-    |-- backtester.py
-    |-- evaluator.py
-    |-- utils.py
-    `-- agents/
-        `-- __init__.py
+|   `-- raw/
+|-- src/
+|   |-- data_loader.py
+|   |-- time_split.py
+|   |-- data_acquisition.py
+|   |-- data_transformation.py
+|   |-- feature_engineering.py
+|   |-- regime_model.py
+|   |-- signal_generation.py
+|   |-- portfolio.py
+|   |-- backtester.py
+|   |-- evaluator.py
+|   `-- agents/
+`-- tests/
 ```
 
-## Environment
+Questa struttura rappresenta i **componenti principali ancora presenti**, non l'architettura definitiva. Durante la migrazione alcuni moduli saranno adattati o sostituiti; la presenza di un agente nel repository non implica che sia già connesso alla pipeline corrente.
 
-The project has been tested with **Python 3.14.0**.
-Exact library versions are pinned in `requirements.txt`.
+### Ambiente e verifiche
+
+Le dipendenze sono dichiarate in `requirements.txt`. Per preparare un ambiente locale:
 
 ```bash
-python3.14 -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install -r requirements.txt
 ```
 
-Quick syntax check:
+Per eseguire i test esistenti:
 
 ```bash
-python3 -m py_compile main.py src/*.py
+python3 -m unittest discover -s tests -v
 ```
 
-## Data
+I 31 test della precedente pipeline sono stati superati prima della transizione documentale. Ciò **non** certifica la nuova strategia Multi-Asset: i test andranno aggiornati quando cambieranno i moduli.
 
-### Market data
+## 7. Ricerca Treasury precedente e conservazione Git
 
-Daily adjusted data are obtained from Yahoo Finance for SHY, IEF and TLT.
+La precedente fase studiava una strategia su SHY, IEF e TLT. Le sue verifiche e i suoi risultati, inclusi gli esiti negativi del forecasting Ridge e della validazione Momentum 30Y, sono documentati in [`docs/treasury_research_review.md`](docs/treasury_research_review.md) e nel registro decisionale [`docs/decision_log.md`](docs/decision_log.md).
 
-### Macro / rates data
+Il lavoro è stato conservato su GitHub tramite i tag:
 
-Current FRED inputs include:
+- `archive/treasury-gianluca-final`: stato completo della ricerca Treasury al commit `0f13c76`;
+- `archive/treasury-forecasting`: precedente sviluppo sperimentale, commit `a8bd531`.
 
-- Federal Funds Rate;
-- 3M, 2Y, 5Y, 10Y and 30Y Treasury yields;
-- CPI;
-- Core CPI;
-- 5Y and 10Y breakeven inflation.
+**Branch di lavoro:** `gianluca`. **Branch ufficiale condiviso:** `main`. La transizione non richiede un nuovo branch, riscritture della cronologia o modifiche a `main`.
 
-Raw data are stored in `data/raw/` so the pipeline remains reproducible without requiring a new download.
+La pulizia dei file Treasury sul branch attivo avverrà in modo selettivo, tramite modifiche revisionate e commit espliciti; non saranno eliminati i moduli generali soltanto perché utilizzati nella ricerca precedente.
 
-## Data transformation
+## 8. Prossime attività (Fase 0)
 
-The pipeline:
+1. Completare l'audit conoscitivo del repository e identificare il codice realmente riutilizzabile.
+2. Confermare l'universo investibile, la disponibilità dei dati e il calendario storico comune.
+3. Scegliere una sola regola dinamica A2 e definire la metrica primaria di valutazione.
+4. Definire limiti di portafoglio, convenzione di esecuzione, costi e disciplina temporale.
+5. Congelare un protocollo di ricerca prima di iniziare i nuovi backtest.
+6. Implementare progressivamente A, B e C, conservando anche i risultati negativi.
 
-- cleans and sorts raw observations;
-- converts market and rates data to weekly frequency;
-- aligns all series on a common calendar;
-- applies conservative publication lags to low-frequency macro variables;
-- preserves the last known macro observation until the next release.
-
-Current provisional release-lag assumptions:
-
-- CPI: 45 calendar days;
-- Core CPI: 45 calendar days;
-- FEDFUNDS: 35 calendar days.
-
-These lags reduce publication-timing look-ahead bias but do **not** fully solve historical revision leakage.
-
-A future improvement is to use **ALFRED / point-in-time vintage macro data** or exact historical release calendars.
-
-## Feature engineering
-
-The baseline currently includes:
-
-- weekly ETF returns;
-- weekly changes in Treasury yields;
-- yield-curve spreads: 10Y-2Y, 10Y-3M, 30Y-10Y;
-- weekly changes in those spreads;
-- CPI YoY and Core CPI YoY computed from the original monthly series;
-- weekly changes in 5Y and 10Y breakeven inflation;
-- a 13-week realized rate-volatility proxy based on 10Y Treasury yield changes.
-
-No future target variables are created in the feature-engineering stage.
-
-## Deterministic regime baseline
-
-The current regime model classifies four dimensions:
-
-```text
-Inflation   -> rising / falling
-Rates       -> rising / falling
-Curve       -> normal / inverted
-Volatility  -> high / low
-```
-
-The implementation produces all **16 possible combined regimes**.
-
-## Signal generation
-
-The duration score currently uses:
-
-- falling rates: positive contribution;
-- rising rates: negative contribution;
-- falling inflation: positive contribution;
-- rising inflation: negative contribution;
-- inverted curve: mild positive contribution;
-- high volatility: reduced conviction.
-
-Signal mapping:
-
-```text
-High duration score     -> TLT long
-Intermediate score      -> IEF long
-Low duration score      -> SHY long + TLT short
-```
-
-All final asset signals belong to:
-
-```text
-+1 = long
- 0 = flat
--1 = short
-```
-
-## Portfolio construction
-
-The current allocation method is `equal_active_signal`.
-
-Examples:
-
-```text
-TLT signal = +1
--> TLT weight = +1.00
-
-IEF signal = +1
--> IEF weight = +1.00
-
-SHY signal = +1 and TLT signal = -1
--> SHY weight = +0.50
--> TLT weight = -0.50
-```
-
-The baseline uses gross exposure capped at 1.0 and no additional leverage.
-
-## Backtest timing
-
-Target weights produced at week `t` are applied only from the next period:
-
-```text
-Information available at t
-            |
-            v
-Target weights at t
-            |
-            v
-Applied weights at t+1
-            |
-            v
-Realized return at t+1
-```
-
-This `shift(1)` rule prevents look-ahead bias.
-
-Transaction costs are applied to portfolio turnover: 2 bps commission + 1 bps slippage per unit of turnover (`execution.commission_bps` and `execution.slippage_bps` in `config.yaml`).
-
-## Evaluation framework
-
-Current chronological split:
-
-```text
-TRAIN
-2005-05-27 -> 2016-12-30
-
-VALIDATION
-2017-01-06 -> 2021-12-31
-
-OOS
-2022-01-01 -> 2026
-LOCKED
-```
-
-The OOS period is currently disabled through:
-
-```yaml
-evaluation:
-  evaluate_oos: false
-```
-
-It must remain locked until the model, features, thresholds and relevant hyperparameters are frozen.
-
-While the OOS is locked, the backtest itself stops at `validation_end`: neither `backtest_weekly.csv` nor the final equity printed by `main.py` contain OOS returns.
-
-Current evaluation metrics include cumulative return, annualized return, annualized volatility, Sharpe ratio, maximum drawdown and profit factor.
-
-The 3M Treasury yield is currently used as a proxy for the risk-free rate.
-
-The main benchmark is a true equal-weight buy-and-hold portfolio of SHY, IEF and TLT, together with individual ETF buy-and-hold benchmarks.
-
-Note: `backtest_weekly.csv` also contains a `benchmark_equal_weight_rebalanced_*` series (weekly rebalanced to 1/3 each). It is kept only as a reference and is not the benchmark used in `evaluation_metrics.csv`.
-
-## Current status
-
-Completed:
-
-- raw-data acquisition;
-- data transformation;
-- feature engineering;
-- deterministic regime model;
-- signal generation;
-- portfolio construction;
-- backtesting;
-- train/validation evaluation;
-- one-command end-to-end execution through `main.py`.
-
-The deterministic baseline currently underperforms the fixed-income benchmark and should be treated as an **economic reference model**, not as the final strategy.
-
-Next research stage:
-
-1. define a forecasting / classification target;
-2. implement a simple statistical model;
-3. compare it against the deterministic baseline;
-4. introduce nonlinear ML only if justified;
-5. consider an agentic layer only after the quantitative core is stable.
-
-## Agents
-
-The agent layer is planned but currently disabled.
-
-Potential future roles include Orchestrator, Macro Agent, Regime Agent, Strategy Agent, Risk Agent and Critic Agent.
-
-Agents should complement the quantitative pipeline, not replace deterministic calculations.
-
-## Documentation
-
-See:
-
-- `docs/research_design.md` for methodology and research architecture;
-- `docs/decision_log.md` for important design decisions and unresolved methodological issues.
+**Regola di sviluppo:** nessuna modifica automatica a `main`, nessun accesso anticipato ai risultati del test, nessun commit o push non revisionato. Il primo obiettivo è un problema economico ben definito e falsificabile, non una curva dei rendimenti attraente a posteriori.
