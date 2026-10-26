@@ -1,24 +1,44 @@
+
+# ============================================================
+# PROJECT CONFIGURATION
+# Regime-Aware Multi-Asset Allocation
+# ============================================================
+
 project:
   name: ProjectAgentTrading26
-  version: "0.1"
+  version: "0.2"
   random_seed: 42
 
 research:
-  working_candidate: macro_rates_regimes
+  working_candidate: regime_aware_multi_asset_allocation
   market_scope: US
-  objective: regime_based_fixed_income_allocation
+  objective: risk_adjusted_performance_and_downside_protection
+
+# ------------------------------------------------------------
+# INVESTABLE UNIVERSE
+# ------------------------------------------------------------
 
 universe:
   traded_assets:
-    short_duration:
-      ticker: SHY
-      role: short_duration_treasury
-    intermediate_duration:
+    us_equities:
+      ticker: SPY
+      role: equity_growth
+
+    intermediate_treasuries:
       ticker: IEF
-      role: intermediate_duration_treasury
-    long_duration:
-      ticker: TLT
-      role: long_duration_treasury
+      role: intermediate_duration_bonds
+
+    gold:
+      ticker: GLD
+      role: gold_diversification
+
+    short_treasuries:
+      ticker: SHY
+      role: short_duration_defensive
+
+# ------------------------------------------------------------
+# FREQUENCY AND DATA
+# ------------------------------------------------------------
 
 frequency:
   raw_market_data: daily
@@ -32,10 +52,12 @@ data:
 
   market_source:
     provider: yfinance
+    auto_adjust: true
 
   macro_source:
     provider: FRED
 
+  # Candidate macro data for Level B
   rates:
     policy_rate: FEDFUNDS
     treasury_3m: DGS3MO
@@ -50,72 +72,183 @@ data:
     breakeven_5y: T5YIE
     breakeven_10y: T10YIE
 
-  rate_volatility:
-    preferred_source: Bloomberg
-    preferred_series: null
-    fallback: realized_yield_volatility
+# ------------------------------------------------------------
+# FEATURES AND SIGNALS
+# ------------------------------------------------------------
 
 features:
-  regime_dimensions:
-    - inflation
-    - rates
-    - yield_curve
-    - rate_volatility
-
-  yield_curve_spreads:
-    - 10y_2y
-    - 10y_3m
-    - 30y_10y
-
-regime:
-  baseline_method: deterministic
-  statistical_model: null
-  forecasting_model: null
-
-  rate_state_source: rates__treasury_2y
-  inflation_trend_weeks: 13
-  rate_trend_weeks: 13
-  volatility_min_history_weeks: 52
+  return_frequency: daily
+  macro_point_in_time_verified: false
 
 signals:
-  allowed_values:
-    - -1
-    - 0
-    - 1
+  allowed_values: [-1, 0, 1]
+
   convention:
     long: 1
     flat: 0
     short: -1
 
+# ------------------------------------------------------------
+# PORTFOLIO CONSTRAINTS
+# ------------------------------------------------------------
+
 portfolio:
-  allocation_method: null
+  long_only: true
+  fully_invested: true
+  allow_short: false
   leverage: 1.0
+
+# ------------------------------------------------------------
+# LEVEL A1 - BENCHMARKS
+# ------------------------------------------------------------
+
+benchmarks:
+  spy_buy_and_hold:
+    weights:
+      SPY: 1.0
+      IEF: 0.0
+      GLD: 0.0
+      SHY: 0.0
+    rebalance: none
+
+  sixty_forty:
+    weights:
+      SPY: 0.60
+      IEF: 0.40
+      GLD: 0.0
+      SHY: 0.0
+    rebalance: weekly
+
+  equal_weight:
+    weights:
+      SPY: 0.25
+      IEF: 0.25
+      GLD: 0.25
+      SHY: 0.25
+    rebalance: weekly
+
+  equal_weight_buy_and_hold:
+    weights:
+      SPY: 0.25
+      IEF: 0.25
+      GLD: 0.25
+      SHY: 0.25
+    rebalance: none
+
+# ------------------------------------------------------------
+# LEVEL A2 - VOLATILITY CONTROL
+# ------------------------------------------------------------
+
+strategies:
+  A1:
+    enabled: true
+    method: static_benchmarks
+
+  A2:
+    enabled: true
+    method: volatility_constrained_allocation
+
+    reference_portfolio: equal_weight
+    covariance_window: 126
+    annualization_factor: 252
+    target_volatility: 0.08
+
+    objective: minimum_squared_distance
+    optimizer: cvxpy
+    solver: CLARABEL
+
+    fallback: minimum_variance
+
+  # ----------------------------------------------------------
+  # LEVEL B - MACRO-FINANCIAL REGIMES
+  # ----------------------------------------------------------
+
+  B:
+    enabled: false
+    method: regime_based_allocation
+
+    regime_dimensions:
+      - inflation_pressure
+      - financial_stress
+
+    regime_model: null
+    regime_thresholds: null
+    allocation_rules: null
+
+    clustering_enabled: false
+    clustering_method: null
+
+  # ----------------------------------------------------------
+  # LEVEL C - ML AND AI AGENTS
+  # ----------------------------------------------------------
+
+  C:
+    enabled: false
+    method: machine_learning_allocation
+
+    prediction_target: null
+    forecasting_model: null
+    sentiment_enabled: false
+
+# ------------------------------------------------------------
+# TEMPORAL VALIDATION
+# ------------------------------------------------------------
 
 validation:
   method: chronological
+
+  train_start: "2005-05-20"
   train_end: "2016-12-31"
+
+  validation_start: "2017-01-01"
   validation_end: "2021-12-31"
+
   oos_start: "2022-01-01"
+
   walk_forward: false
-  
-evaluation:
-  annualization_factor: 52
-  evaluate_oos: false
+  development_only: true
+
+# ------------------------------------------------------------
+# EXECUTION AND TRANSACTION COSTS
+# ------------------------------------------------------------
 
 execution:
   signal_frequency: weekly
-  execution_rule: next_available_period
-  initial_capital: 100000.0
-  commission_bps: 2      # commissione per operazione, in basis points
-  slippage_bps: 1        # differenza stimata tra prezzo atteso ed eseguito
+  execution_rule: next_available_trading_open
 
-benchmarks:
-  - equal_weight_buy_and_hold
-  - individual_asset_buy_and_hold
+  initial_capital: 100000.0
+
+  commission_bps: 2
+  slippage_bps: 1
+
+  cost_basis: traded_notional
+
+# ------------------------------------------------------------
+# PERFORMANCE EVALUATION
+# ------------------------------------------------------------
+
+evaluation:
+  annualization_factor: 252
+  risk_free_rate: 0.0
+  evaluate_oos: false
+
+  metrics:
+    - CAGR
+    - annualized_volatility
+    - sharpe_ratio
+    - sortino_ratio
+    - maximum_drawdown
+    - turnover
+    - transaction_costs
+
+# ------------------------------------------------------------
+# AI AGENTS
+# ------------------------------------------------------------
 
 agents:
   planned: true
   enabled: false
+
   roles:
     - orchestrator
     - macro_agent
@@ -124,12 +257,21 @@ agents:
     - risk_agent
     - critic_agent
 
+# ------------------------------------------------------------
+# PATHS
+# ------------------------------------------------------------
+
 paths:
   raw_data: data/raw
   processed_data: data/processed
   signals: data/signals
   results: data/results
 
+# ------------------------------------------------------------
+# PIPELINE
+# ------------------------------------------------------------
 
 pipeline:
+  active_level: A1
   run_data_acquisition: false
+  legacy_treasury_enabled: false

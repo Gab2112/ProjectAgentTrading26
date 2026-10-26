@@ -1,195 +1,186 @@
 # ProjectAgentTrading26
 
-**Progetto universitario di trading sistematico e finanza quantitativa**
-
-**Corso:** Data-Driven Models for Investment, LUISS Guido Carli
-
-**Docenti:** Antonio Simeone e Villy De Luca
-
-> **Stato attuale: Fase 0 - progettazione della nuova ricerca Multi-Asset.**
-> La strategia descritta qui non è ancora implementata. Il codice Python presente nel repository esegue tuttora la precedente pipeline sui Treasury statunitensi. Non interpretare i suoi output come risultati del nuovo progetto.
-
-## 1. Panoramica
-
-Il progetto studia se un'**allocazione dinamica tra azioni, Treasury statunitensi e oro** possa migliorare la performance corretta per il rischio e la protezione dalle perdite rispetto a portafogli diversificati statici.
-
-La nuova direzione di ricerca è denominata:
-
 **Regime-Aware Multi-Asset Allocation: Dynamic Risk-Adjusted Performance and Downside Protection**
 
-L'obiettivo tecnico è sviluppare, con complessità incrementale, tre livelli della medesima strategia: una baseline trasparente (**A**), un'allocazione condizionata ai regimi macro-finanziari (**B**) e una versione con **previsioni ML e agenti AI** (**C**).
+Progetto di ricerca in trading sistematico e finanza quantitativa per il corso **Data-Driven Models for Investment**, LUISS Guido Carli (docenti: Antonio Simeone e Villy De Luca).
 
-Il sistema deve essere valutabile e riproducibile. Non si assume che una strategia dinamica o un modello più complesso batta necessariamente un benchmark passivo.
+> **Stato al 26 ottobre 2026:** **Level A implementato e riprodotto localmente sul solo training**. A1 comprende quattro benchmark; A2 introduce un vincolo di volatilità stimata. La pipeline `main.py` esegue entrambi. **Validation 2017–2021 non valutata; OOS dal 2022 bloccato.** I livelli B (regimi) e C (ML/agenti) sono progettati ma **non implementati**. Nessun risultato riportato qui prova superiorità fuori campione.
 
-**Documento metodologico di riferimento:** [`docs/research_design.md`](docs/research_design.md). Il presente README fornisce una panoramica del progetto e dello stato del repository; il Research Design contiene ipotesi, vincoli e questioni ancora aperte.
+Il repository documenta anche la precedente ricerca Treasury, conservata nello storico Git e in [`docs/treasury_research_review.md`](docs/treasury_research_review.md). Il riferimento metodologico aggiornato è [`docs/research_design.md`](docs/research_design.md); la cronologia delle decisioni è in [`docs/decision_log.md`](docs/decision_log.md).
 
-## 2. Domande di ricerca e obiettivi
+## 1. Domanda di ricerca
 
-**Domanda principale:** un'allocazione dinamica basata su stati macro-finanziari identificabili con informazioni disponibili al momento della decisione può migliorare il rendimento corretto per il rischio di un portafoglio SPY-IEF-GLD-SHY rispetto a benchmark statici e a una semplice regola dinamica, senza compromettere la protezione dalle perdite?
+**Un sistema di allocazione multi-asset può migliorare il rendimento corretto per il rischio e la protezione dai drawdown rispetto a portafogli più semplici, quando vengono aggiunti progressivamente controllo del rischio, informazione macro-finanziaria e previsioni?**
 
-**Domanda incrementale:** previsioni di machine learning e segnali strutturati derivati da notizie aggiungono valore economico misurabile rispetto all'allocazione già condizionata ai regimi?
+La ricerca è volutamente incrementale:
 
-- **Obiettivo primario:** migliorare la performance corretta per il rischio, non massimizzare soltanto il rendimento assoluto.
-- **Obiettivo secondario:** contenere il *downside*, studiando drawdown, volatilità al ribasso, fasi di stress e partecipazione ai recuperi.
-- **Principio di valutazione:** una strategia che detiene quasi sempre l'asset meno rischioso non è automaticamente superiore; quando opportuno, i confronti devono tenere conto di budget di rischio comparabili.
+| Livello | Contenuto | Stato |
+|---|---|---|
+| **A1** | Benchmark con pesi prestabiliti | Implementato, training riprodotto |
+| **A2** | Equal Weight modificato quando il rischio stimato supera l'8% annualizzato | Implementato, training riprodotto |
+| **B** | Allocazione condizionata a inflazione e stress finanziario; clustering opzionale | Non implementato |
+| **C** | Forecasting ML e, se i dati lo consentono, agenti/notizie con timestamp verificabili | Non implementato |
 
-## 3. Universo investibile proposto
+L'obiettivo non è ottenere la curva più redditizia sul campione già osservato. Ogni livello dovrà dimostrare il proprio **valore incrementale** con dati, convenzioni e costi confrontabili.
 
-| ETF | Esposizione | Ruolo economico ipotizzato |
-| --- | --- | --- |
-| **SPY** | Azioni statunitensi large cap | Crescita ed esposizione al rischio azionario |
-| **IEF** | Treasury USA a scadenza intermedia | Duration e possibile diversificazione in recessioni disinflazionistiche |
-| **GLD** | Oro | Diversificazione in alcune condizioni di stress o shock monetari |
-| **SHY** | Treasury USA a breve durata | Componente difensiva con rischio di duration ridotto |
+## 2. Universo investibile e Level A
 
-**Ipotesi operative iniziali:** posizioni long-only, nessuna leva, nessuno short selling, capitale investito nei quattro ETF salvo decisione esplicita sulla liquidità, ribilanciamento mensile, limiti di concentrazione e costi di transazione.
+| ETF | Esposizione | Ruolo nel portafoglio |
+|---|---|---|
+| **SPY** | Azioni statunitensi large cap | Crescita e rischio azionario |
+| **IEF** | Treasury USA a duration intermedia | Esposizione ai tassi e diversificazione potenziale |
+| **GLD** | Oro | Diversificazione potenziale tra asset class |
+| **SHY** | Treasury USA a duration breve | Componente relativamente difensiva |
 
-**Attenzione:** obbligazioni e oro non sono coperture universali. IEF può perdere valore quando i rendimenti salgono; GLD può scendere anche durante una crisi; SHY non equivale a una posizione in contanti priva di rischio. Le caratteristiche difensive degli asset devono essere verificate sui dati.
+**Regole operative A:** long-only, senza leva o vendite allo scoperto; pesi target non negativi e somma pari a 1. Il cash serve alla contabilità e alla fase iniziale, **non** è un asset di allocazione strategica. Nessun ETF è garantito come copertura o privo di rischio.
 
-L'universo e le regole operative sono **proposte di Fase 0**, ancora soggette ad audit e approvazione metodologica.
+### A1: quattro benchmark
 
-## 4. Architettura sperimentale: A -> B -> C
+| Identificatore negli output | Pesi target | Ribilanciamento |
+|---|---|---|
+| `spy_buy_and_hold` | SPY 100% | Solo allocazione iniziale |
+| `sixty_forty` | SPY 60%, IEF 40% | Settimanale |
+| `equal_weight` | 25% ciascuno dei quattro ETF | Settimanale |
+| `equal_weight_buy_and_hold` | 25% ciascuno dei quattro ETF | Solo allocazione iniziale |
 
-I tre livelli non sono strategie indipendenti: ogni livello deve permettere di misurare il valore incrementale dei moduli aggiunti.
+**Importante:** un portafoglio *buy-and-hold* non viene riportato ai pesi iniziali dopo il primo acquisto. I portafogli settimanali, invece, ricevono un nuovo target a ogni decisione. Non vanno confusi i pesi **target** con i pesi **effettivi** dopo il movimento dei prezzi.
 
-### Livello A - Benchmark e baseline semplice
+### A2: Volatility Control
 
-- **A1, benchmark statici:** SPY buy-and-hold; portafoglio 60% SPY / 40% IEF; portafoglio equal-weight sui quattro ETF.
-- **A2, baseline dinamica:** una regola interpretabile da scegliere *prima* della valutazione, candidata tra controllo del trend azionario e gestione della volatilità.
-- **Domanda:** una semplice gestione dinamica migliora un'allocazione diversificata statica?
+A2 parte dal benchmark `equal_weight` (25% per ETF):
 
-### Livello B - Allocazione basata sui regimi
+1. Per ogni decisione settimanale calcola i rendimenti giornalieri storicamente disponibili degli ultimi **126 giorni di negoziazione**.
+2. Stima la covarianza campionaria e la annualizza moltiplicandola per **252**.
+3. Se la volatilità **stimata** dell'Equal Weight è al massimo **8%**, mantiene i quattro pesi al 25%.
+4. Altrimenti minimizza la distanza quadratica dall'Equal Weight con vincoli long-only, somma dei pesi pari a 1 e volatilità stimata al massimo dell'8%, tramite **CVXPY + CLARABEL**.
+5. Se il limite è matematicamente non fattibile, la regola prevista è il portafoglio a **varianza minima**, con gli stessi vincoli di investimento.
 
-- **B1:** classificazione macro-finanziaria interpretabile, inizialmente fondata su stress finanziario e pressioni inflazionistiche.
-- **B2, opzionale:** clustering statistico, per esempio K-means o GMM, se motivato e valutabile senza informazioni future.
-- **Domanda:** conoscere il regime aggiunge valore rispetto alla baseline A2, al netto dei costi?
+L'8% è un **budget di rischio previsto dalla stima**, non un limite alla volatilità effettivamente realizzata. Non è un rendimento obiettivo, una previsione del mercato o una garanzia sul drawdown. La soglia è stata definita nel percorso di ricerca sul training; non va trattata come un parametro selezionato indipendentemente dai dati.
 
-### Livello C - Forecasting ML e agenti AI
+## 3. Dati, calendario e simulazione
 
-- **Previsione:** target primario da definire; candidati sono il rischio azionario nel mese successivo o la probabilità di una perdita significativa definita ex ante. Modelli semplici e benchmark predittivi vengono prima dei modelli complessi.
-- **Modulo regime:** classificazioni o probabilità di regime costruite con informazioni disponibili alla data della decisione.
-- **Agente notizie/sentiment:** segnali ottenuti da notizie storiche con timestamp verificabile. Senza un archivio adeguato, soltanto una dimostrazione contemporanea, senza attribuirle performance di backtest.
-- **Controllo del rischio:** vincoli quantitativi deterministici su pesi, concentrazione, rischio e turnover; nessun agente può superarli.
-- **Allocatore:** conversione esplicita e riproducibile degli output in pesi di portafoglio.
+- **Input principali:** CSV locali in `data/raw/market/` per SPY, IEF, GLD e SHY, con prezzi giornalieri Open/Close rettificati in modo coerente.
+- **Preparazione:** allineamento delle sedute effettivamente comuni ai quattro ETF, controlli su prezzi e date, senza riempire artificiosamente le quotazioni mancanti.
+- **Finestra preliminare di storico:** dal 2004 per il warm-up delle misure rolling; non costituisce performance valutata.
+- **Training:** dal **20 maggio 2005** al **31 dicembre 2016**; l'ultima seduta di trading è il **30 dicembre 2016**.
+- **Validation:** dal **1° gennaio 2017** al **31 dicembre 2021**, **non valutata nell'attuale Level A**.
+- **OOS finale:** dal **1° gennaio 2022**, bloccato durante lo sviluppo.
+- **Decisione:** dopo la chiusura dell'ultima seduta negoziabile della settimana, normalmente venerdì.
+- **Esecuzione:** all'**Open rettificato della seduta successiva**, senza possibilità di negoziare retroattivamente al Close che genera il segnale.
+- **Contabilità:** quantità di quote, liquidità e NAV giornaliero; nessun ribilanciamento giornaliero implicito.
+- **Costi modellati:** 2 bps di commissioni + 1 bp di slippage sul **nozionale lordo negoziato** (somma degli acquisti e delle vendite in valore assoluto).
+- **Capitale iniziale:** 100.000 USD. Il risk-free è impostato a **0** per le metriche diagnostiche iniziali.
 
-**Confronto incrementale previsto:** portafogli statici -> A2 -> B -> C senza notizie -> C con notizie, se i dati lo consentono.
+Il pannello processato può contenere osservazioni del periodo di sviluppo necessarie alla preparazione; **pesi, backtest e metriche dell'attuale A sono circoscritti al training**. L'ultima decisione settimanale del training non viene eseguita se la prima apertura successiva ricadrebbe nella validation.
 
-## 5. Dati e metodo di valutazione
+L'uso di Open/Close **rettificati** è una proxy pratica del total return e dell'esecuzione, non una ricostruzione perfetta di prezzi realmente negoziabili, dividendi, spread o qualità di esecuzione storica.
 
-**Fonti candidate:** prezzi giornalieri rettificati degli ETF, VIX, serie Treasury, CPI e altre misure di stress finanziario. Yahoo Finance e FRED sono fonti possibili, da verificare prima dell'utilizzo.
+## 4. Installazione ed esecuzione locale
 
-Prima dei backtest devono essere controllati:
+Ambiente verificato sul Mac di sviluppo: **Python 3.11**, `pandas==3.0.6`, `numpy==2.4.6`, `scipy==1.17.1`, `cvxpy==1.9.3`, `clarabel==0.11.1`; le altre dipendenze sono in `requirements.txt`.
 
-- disponibilità storica e negoziabilità effettiva degli ETF;
-- trattamento di distribuzioni, split e rendimenti *total return*;
-- calendari di mercato, dati mancanti, duplicati e anomalie;
-- date di pubblicazione e revisioni delle serie macroeconomiche (*point-in-time*);
-- assenza di informazioni future in feature, preprocessing, target e classificazioni di regime;
-- riproducibilità dei risultati a partire dai dati originali.
+Dalla radice del repository:
 
-**Frequenza proposta:** dati giornalieri per indicatori e monitoraggio; decisioni di allocazione mensili.
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -r requirements.txt
+python3 -m pip check
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+python3 main.py --level ALL
+```
 
-### Separazione temporale
+Esecuzioni alternative:
 
-| Campione | Periodo candidato | Stato |
-| --- | --- | --- |
-| Training | 2005-2016 | Da confermare dopo l'audit dei dati |
-| Validation | 2017-2021 | Da confermare e utilizzare con disciplina |
-| Test finale | Dal 2022 | **Bloccato durante lo sviluppo** |
+```bash
+python3 main.py --level A1
+python3 main.py --level A2
+python3 main.py                 # usa pipeline.active_level del config.yaml
+```
 
-Questi intervalli non sono ancora congelati per la nuova ricerca. Il periodo dal 2022 è già stato osservato in precedenti analisi Treasury: pertanto non va presentato come storicamente ignoto ai ricercatori. Le eventuali conoscenze pregresse pertinenti dovranno essere dichiarate e non utilizzate per ottimizzare il nuovo modello.
+**Per default non viene eseguito alcun download.** Impostare `pipeline.run_data_acquisition: true` soltanto se si intende aggiornare deliberatamente i CSV grezzi: dati diversi possono cambiare i risultati. `main.py --level B` e `--level C` falliscono esplicitamente perché tali livelli non esistono ancora.
 
-**Esecuzione:** i segnali devono usare dati disponibili a un timestamp esplicito ed essere negoziati soltanto nella prima finestra realistica successiva. Il semplice ritardo di una riga nei pesi non garantisce, da solo, un backtest eseguibile.
+La configurazione è centralizzata in `config.yaml`; la versione Python/pip effettivamente verificata è quella di `requirements.txt`. Il file alternativo `environment-multiasset.yml` va allineato prima del push, se si vuole mantenerlo come seconda modalità di installazione.
 
-**Costi:** commissioni, slippage/spread e turnover devono essere inclusi. Il protocollo e i valori operativi definitivi restano da fissare.
+## 5. Risultati Level A: training soltanto
 
-**Metriche:** rendimento cumulato, CAGR, volatilità annualizzata, Sharpe, Sortino, massimo drawdown, turnover, costi, allocazioni e risultati per sottoperiodo. Le metriche previsionali ML devono rimanere distinte dalle metriche economiche.
+Backtest giornaliero sul periodo **20/05/2005–30/12/2016**, costi inclusi, Sharpe con `rf = 0` e metriche annualizzate con **252 sedute**. Valori arrotondati come nell'esecuzione locale del 26/10/2026.
 
-I requisiti didattici sui segnali discreti `-1`, `0`, `+1` devono essere verificati: nell'architettura iniziale long-only sono previsti soltanto segnali `0` e `+1`, distinti dai pesi effettivi del portafoglio.
+| Strategia | CAGR | Volatilità | Sharpe | Max drawdown | NAV finale (USD) |
+|---|---:|---:|---:|---:|---:|
+| SPY Buy & Hold | 7,77% | 19,68% | 0,479 | −55,19% | 238.298,26 |
+| 60/40 settimanale | 7,13% | 10,88% | 0,688 | −32,00% | 222.430,62 |
+| Equal Weight settimanale | 6,54% | 6,99% | 0,942 | −15,69% | 208.608,24 |
+| Equal Weight Buy & Hold | 6,16% | 8,75% | 0,727 | −17,63% | 200.164,62 |
+| **A2 Volatility Control** | **6,24%** | **6,41%** | **0,977** | **−14,28%** | **201.948,33** |
 
-## 6. Stato effettivo del codice
+Rispetto all'Equal Weight settimanale, A2 registra **−0,30 punti percentuali di CAGR**, **−0,58 punti di volatilità**, **+0,035 circa di Sharpe** e **+1,41 punti di drawdown massimo** (meno negativo). Non si è verificato un miglioramento del rendimento assoluto né una superiorità statisticamente dimostrata.
 
-| Componente | Stato corrente |
-| --- | --- |
-| Research Design Multi-Asset | Documento di Fase 0 presente |
-| Dati SPY e GLD | Non ancora acquisiti e verificati nella nuova pipeline |
-| Pipeline `main.py` | **Ancora basata sulla ricerca Treasury precedente** |
-| Configurazione `config.yaml` | **Ancora specifica per Treasury SHY/IEF/TLT** |
-| Backtesting e valutazione | Moduli da verificare e adattare |
-| Test automatici | Test della pipeline precedente, non validazione Multi-Asset |
-| Clustering, forecasting e agenti Multi-Asset | Non ancora integrati nella nuova strategia |
+**Diagnostica A2 verificata localmente:** 607 date decisionali nel training; `equal_weight = 520`, `ottimizzato = 87`, `fallback_minimum_variance = 0`. Le strategie settimanali hanno **606 esecuzioni**, perché l'ultima decisione non può essere negoziata nel training; i buy-and-hold ne hanno una. Le 87 ottimizzazioni non equivalgono automaticamente a 87 operazioni: riguardano il calcolo del target alla data decisionale.
 
-**Avvertenza operativa:** eseguire `python3 main.py` allo stato attuale significa eseguire la **vecchia strategia Treasury**, non il nuovo sistema multi-asset. Non utilizzarne i risultati per valutare il nuovo progetto.
-
-### Struttura essenziale del repository
+## 6. Struttura e output
 
 ```text
 ProjectAgentTrading26/
-|-- README.md
-|-- config.yaml
-|-- main.py
-|-- requirements.txt
-|-- docs/
-|   |-- research_design.md
-|   |-- decision_log.md
-|   `-- treasury_research_review.md
-|-- data/
-|   `-- raw/
-|-- src/
-|   |-- data_loader.py
-|   |-- time_split.py
-|   |-- data_acquisition.py
-|   |-- data_transformation.py
-|   |-- feature_engineering.py
-|   |-- regime_model.py
-|   |-- signal_generation.py
-|   |-- portfolio.py
-|   |-- backtester.py
-|   |-- evaluator.py
-|   `-- agents/
-`-- tests/
+├── config.yaml
+├── main.py                        # punto d'ingresso A1/A2
+├── requirements.txt
+├── environment-multiasset.yml     # alternativa da allineare
+├── README.md
+├── docs/
+│   ├── research_design.md
+│   ├── decision_log.md
+│   └── treasury_research_review.md
+├── data/
+│   ├── raw/market/                 # CSV di input versionati
+│   ├── processed/                  # output generati, esclusi da Git
+│   ├── signals/                    # output generati, esclusi da Git
+│   └── results/                    # output generati, esclusi da Git
+├── src/
+│   ├── data_acquisition.py
+│   ├── data_loader.py
+│   ├── data_transformation.py
+│   ├── time_split.py
+│   ├── utils.py
+│   ├── portfolio.py
+│   ├── multiasset_allocator.py
+│   ├── multiasset_backtester.py
+│   ├── backtester.py
+│   └── evaluator.py
+└── tests/
+    ├── test_pipeline_invariants.py
+    └── test_time_split.py
 ```
 
-Questa struttura rappresenta i **componenti principali ancora presenti**, non l'architettura definitiva. Durante la migrazione alcuni moduli saranno adattati o sostituiti; la presenza di un agente nel repository non implica che sia già connesso alla pipeline corrente.
+File principali prodotti da `python3 main.py --level ALL`:
 
-### Ambiente e verifiche
+| Contenuto | Percorso |
+|---|---|
+| Prezzi giornalieri allineati | `data/processed/market_daily.csv` |
+| Calendario decisionale | `data/processed/weekly_decision_dates.csv` |
+| Pesi target | `data/signals/A1/<strategia>/target_weights.csv` e `data/signals/A2/volatility_control/target_weights.csv` |
+| Stato dell'ottimizzatore | `data/signals/A2/volatility_control/diagnostics.csv` |
+| Simulazione giornaliera | `data/results/<livello>/<strategia>/backtest_daily.csv` |
+| Metriche e curve per livello | `data/results/A1/evaluation_metrics.csv`, `data/results/A2/evaluation_metrics.csv` (e rispettivi `evaluation_curves.csv`) |
+| Confronto A1/A2 | `data/results/multiasset_level_a_comparison.csv` |
 
-Le dipendenze sono dichiarate in `requirements.txt`. Per preparare un ambiente locale:
+`data/processed/`, `data/signals/` e `data/results/` sono **rigenerabili e ignorati da Git**. I dati raw necessari alla replica devono invece essere mantenuti e tracciabili. Gli esperimenti e i vecchi moduli Treasury non partecipano alla pipeline attiva.
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install -r requirements.txt
-```
+## 7. Verifiche e limiti
 
-Per eseguire i test esistenti:
+- **60/60 test superati** sul Mac prima della rimozione del codice legacy: 40 test su pipeline e invarianti, 20 test sui confini temporali. Inclusi test numerici con CVXPY/CLARABEL.
+- **`main.py --level ALL` rieseguito con successo dopo la rimozione dei moduli legacy**, senza differenze nelle metriche riportate.
+- Il conteggio diagnostico **520/87** è stato confermato leggendo `diagnostics.csv`.
+- **Rimane da ripetere la suite da 60 test dopo la pulizia** come ultimo controllo prima del commit.
 
-```bash
-python3 -m unittest discover -s tests -v
-```
+**Limiti metodologici:** risultati solo in-sample; soglia 8% definita durante esplorazioni sul training; dati di mercato rettificati e costi semplificati; assenza di confronto con serie storiche risk-free; nessun test di significatività, analisi a parità di rischio o robustezza fuori campione; dati macro *point-in-time* non ancora ricostruiti per B. Una suite verde verifica gli invarianti implementati, non l'esistenza di un *trading edge*.
 
-I 31 test della precedente pipeline sono stati superati prima della transizione documentale. Ciò **non** certifica la nuova strategia Multi-Asset: i test andranno aggiornati quando cambieranno i moduli.
+## 8. Stato del lavoro e prossimo ordine operativo
 
-## 7. Ricerca Treasury precedente e conservazione Git
+1. **Finitura locale:** ripetere i 60 test dopo la rimozione legacy; controllare i file versionati e allineare `environment-multiasset.yml` a `requirements.txt` oppure rimuoverne l'ambiguità; correggere eventuali riferimenti testuali obsoleti.
+2. **Revisione della documentazione:** assicurare coerenza tra README, Research Design, Decision Log, codice e output.
+3. **Git:** esaminare `git diff --check` e `git status --short`, verificare i tag storici, poi effettuare **commit/push manuale sul branch `gianluca`**, senza toccare il branch condiviso `main`.
+4. **Punto metodologico personale:** comprendere A1/A2, matematica, implementazione, assunzioni e interpretazione dei risultati.
+5. **Solo dopo:** avviare l'implementazione del Level B, con un protocollo di confronto e validazione deciso prima di consultare nuovi risultati.
 
-La precedente fase studiava una strategia su SHY, IEF e TLT. Le sue verifiche e i suoi risultati, inclusi gli esiti negativi del forecasting Ridge e della validazione Momentum 30Y, sono documentati in [`docs/treasury_research_review.md`](docs/treasury_research_review.md) e nel registro decisionale [`docs/decision_log.md`](docs/decision_log.md).
-
-Il lavoro è stato conservato su GitHub tramite i tag:
-
-- `archive/treasury-gianluca-final`: stato completo della ricerca Treasury al commit `0f13c76`;
-- `archive/treasury-forecasting`: precedente sviluppo sperimentale, commit `a8bd531`.
-
-**Branch di lavoro:** `gianluca`. **Branch ufficiale condiviso:** `main`. La transizione non richiede un nuovo branch, riscritture della cronologia o modifiche a `main`.
-
-La pulizia dei file Treasury sul branch attivo avverrà in modo selettivo, tramite modifiche revisionate e commit espliciti; non saranno eliminati i moduli generali soltanto perché utilizzati nella ricerca precedente.
-
-## 8. Prossime attività (Fase 0)
-
-1. Completare l'audit conoscitivo del repository e identificare il codice realmente riutilizzabile.
-2. Confermare l'universo investibile, la disponibilità dei dati e il calendario storico comune.
-3. Scegliere una sola regola dinamica A2 e definire la metrica primaria di valutazione.
-4. Definire limiti di portafoglio, convenzione di esecuzione, costi e disciplina temporale.
-5. Congelare un protocollo di ricerca prima di iniziare i nuovi backtest.
-6. Implementare progressivamente A, B e C, conservando anche i risultati negativi.
-
-**Regola di sviluppo:** nessuna modifica automatica a `main`, nessun accesso anticipato ai risultati del test, nessun commit o push non revisionato. Il primo obiettivo è un problema economico ben definito e falsificabile, non una curva dei rendimenti attraente a posteriori.
+La precedente ricerca Treasury è descritta in [`docs/treasury_research_review.md`](docs/treasury_research_review.md). I tag di archivio menzionati nella documentazione storica (`archive/treasury-gianluca-final` e `archive/treasury-forecasting`) devono essere verificati con `git tag --list 'archive/treasury*'` sul clone locale prima di considerarli disponibili.

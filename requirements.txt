@@ -1,16 +1,21 @@
-# Python 3.14.0
+# Python 3.11 (ambiente virtuale del progetto)
 #
-# Installazione (dalla cartella principale del progetto):
-#   python3.14 -m venv .venv
+# Installazione dalla cartella principale del progetto:
+#   python3.11 -m venv .venv
 #   source .venv/bin/activate
-#   pip install -r requirements.txt
+#   python3 -m pip install -r requirements.txt
 
 # Elaborazione dati
 pandas==3.0.6
-numpy==2.5.4
+numpy==2.4.6
 PyYAML==6.0.3
 
-# Download dei dati (usati solo con run_data_acquisition: true)
+# Ottimizzazione e backtesting Multi-Asset (A1/A2)
+scipy==1.17.1
+cvxpy==1.9.3
+clarabel==0.11.1
+
+# Acquisizione dati (solo quando abilitata esplicitamente)
 yfinance==1.7.0
 pandas_datareader==0.11.1
 
@@ -18,7 +23,9 @@ pandas_datareader==0.11.1
 matplotlib==3.11.2
 seaborn==0.13.2
 
-# Lettura di formati aggiuntivi in src/data_loader.py (Excel, Parquet, Feather)
+# Lettura Excel / Parquet / Feather
 openpyxl==3.1.5
 pyarrow==25.0.1
+
+# Metodi statistici e machine learning (livelli B/C)
 scikit-learn==1.8.0

@@ -1,5 +1,0 @@
-{
-    "sma_window": 20,
-    "ema_window": 15,
-    "price_col": "TLT_close"
-}
