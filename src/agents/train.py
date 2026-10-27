@@ -5,6 +5,7 @@ Script di training e tuning dei parametri per tutti gli agenti del framework:
 - SMAEMAAgent          (Trend-Following basato su Crossover SMA/EMA)
 - ZScoreAgent          (Breakout/Momentum & Mean-Reversion con Isteresi)
 - MacroYieldCurveAgent (Macro Quantitativo: Yield Curve, Tassi e Inflazione)
+- RandomForestAgent    (Machine Learning Supervisionato: Feature Importance & Pattern Non-Lineari)
 - OrchestratorAgent    (Ensemble Multi-Agente: pesi e soglie decisionali ottimizzate)
 
 Funzionalita principali:
@@ -12,12 +13,13 @@ Funzionalita principali:
 - Finestra mobile: 5 anni di training In-Sample -> 1 anno di test Out-Of-Sample.
 - Funzione obiettivo: 'profit_oriented' (priorita al rendimento cumulato e alla stabilita di profitto).
 - Rispetta il vincolo OOS lock: training limitato fino al 2021 (max_train_year = 2021).
-- Salva tutti i file JSON di configurazione in src/agents/config/.
+- Salva tutti i file JSON e i modelli serializzati (.joblib) in src/agents/config/.
 - Genera per ciascuno dei 3 indici i seguenti DataFrame (2 colonne: 'signal', 'confidence'):
-    * data/signals/signals_sma_ema_{asset}.csv       (SMA/EMA Agent)
-    * data/signals/signals_zscore_{asset}.csv        (Z-Score Agent)
-    * data/signals/signals_macro_{asset}.csv         (MacroYieldCurveAgent)
-    * data/signals/signals_orchestrator_{asset}.csv  (Orchestratore: 4 agenti indipendenti con FinBERT)
+    * data/signals/signals_sma_ema_{asset}.csv        (SMA/EMA Agent)
+    * data/signals/signals_zscore_{asset}.csv         (Z-Score Agent)
+    * data/signals/signals_macro_{asset}.csv          (MacroYieldCurveAgent)
+    * data/signals/signals_random_forest_{asset}.csv   (RandomForestAgent)
+    * data/signals/signals_orchestrator_{asset}.csv   (Orchestratore con pool multi-agente e FinBERT)
 """
 
 import json
@@ -39,6 +41,11 @@ from src.agents.base_agent import calculate_performance_metrics, compute_objecti
 from src.agents.EMA_EMW_agent import SMAEMAAgent, SMAEMAOptimizer, WalkForwardTrainer as SMAEMATrainer
 from src.agents.ZScore_agent import ZScoreAgent, ZScoreOptimizer, ZScoreWalkForwardTrainer
 from src.agents.macro_yield_curve_agent import MacroYieldCurveAgent
+from src.agents.random_forest_agent import (
+    RandomForestAgent,
+    RandomForestOptimizer,
+    RandomForestWalkForwardTrainer,
+)
 from src.agents.orchestrator_agent import (
     OrchestratorAgent,
     OrchestratorOptimizer,
@@ -471,6 +478,93 @@ def train_macro_asset(
 
 
 # =====================================================================
+# PIPELINE DI TRAINING RANDOM FOREST PER SINGOLO ASSET
+# =====================================================================
+def train_random_forest_asset(
+    asset: str,
+    df: pd.DataFrame,
+    config_dir: Path,
+    signals_dir: Path,
+    max_train_year: int = 2021,
+    objective_metric: str = "profit_oriented",
+    train_window_years: int = 5,
+) -> Tuple["RandomForestAgent", pd.DataFrame]:
+    """
+    Esegue il training Walk-Forward per il RandomForestAgent su un singolo asset,
+    salva la configurazione JSON e il modello serializzato (.joblib),
+    e genera il DataFrame dei segnali (signal, confidence).
+
+    Cosa viene ottimizzato:
+    ========================
+    La Random Forest estrae pattern non lineari tra variabili macro e rendimenti.
+    Attraverso la validazione Walk-Forward rolling (5 anni Train -> 1 anno Val):
+    1. Grid search su max_depth [2, 3, 4], min_samples_leaf [15, 25, 35],
+       prob_threshold [0.51, 0.52, 0.53, 0.54], n_estimators [100, 150].
+    2. Selezione della combinazione piu frequente (moda statistica) tra le finestre.
+    3. Fit finale consolidato sul campione In-Sample (<= max_train_year).
+    4. Serializzazione del modello su disco (.joblib) e salvataggio dei metadati (.json).
+
+    Ritorna:
+        - L'istanza RandomForestAgent addestrata.
+        - Il DataFrame dei segnali (signal, confidence) sull'intero dataset.
+    """
+    price_col = f"{asset}_close"
+    if price_col not in df.columns:
+        raise KeyError(f"Colonna '{price_col}' non trovata nel dataset.")
+
+    print("\n" + "#" * 80)
+    print(f"### AVVIO TRAINING & WALK-FORWARD: RandomForestAgent - {asset}")
+    print("#" * 80)
+
+    opt = RandomForestOptimizer(
+        target_asset=asset,
+        price_col=price_col,
+        objective_metric=objective_metric,
+    )
+    trainer = RandomForestWalkForwardTrainer(
+        optimizer=opt,
+        train_window_years=train_window_years,
+        target_asset=asset,
+    )
+    res = trainer.run(df, max_year=max_train_year)
+
+    rf_config_file = config_dir / f"random_forest_params_{asset.lower()}.json"
+    trainer.save_final_agent_config(rf_config_file)
+
+    final_agent = trainer.final_agent
+    sig_rf, conf_rf = final_agent.predict_with_confidence(df)
+
+    df_rf_signals = pd.DataFrame(
+        {"signal": sig_rf.astype(int), "confidence": conf_rf},
+        index=df.index,
+    )
+
+    output_csv = signals_dir / f"signals_random_forest_{asset.lower()}.csv"
+    df_rf_signals.to_csv(output_csv)
+    print(f"[{asset}] Segnali RandomForest salvati in: {output_csv}")
+
+    # Segnali OOS dedicati
+    oos_mask = df.index.year > max_train_year
+    if np.any(oos_mask):
+        oos_csv = signals_dir / f"oos_signals_random_forest_{asset.lower()}.csv"
+        df_rf_signals.loc[oos_mask].to_csv(oos_csv)
+
+    # Performance In-Sample
+    ret_asset = df[price_col].astype(float).pct_change().fillna(0.0)
+    train_mask = df.index.year <= max_train_year
+    pos = sig_rf.shift(1).fillna(0.0)
+    m = calculate_performance_metrics((pos * ret_asset)[train_mask])
+    t = int((pos.diff().fillna(0) != 0).sum())
+
+    print(f"\n  [IS Performance RandomForest - {asset}]")
+    print(f"  Cum Ret: {m['cumulative_return']*100:+.1f}% | Sharpe: {m['sharpe_ratio']:.3f} | "
+          f"MDD: {m['max_drawdown']*100:.1f}% | Trades: {t}")
+    print(f"  Distribuzione segnali: {dict(df_rf_signals['signal'].value_counts())}")
+
+    return final_agent, df_rf_signals
+
+
+# =====================================================================
 # PIPELINE DI TRAINING DELL'ORCHESTRATORE PER SINGOLO ASSET
 # =====================================================================
 def train_orchestrator_asset(
@@ -482,23 +576,24 @@ def train_orchestrator_asset(
     config_dir: Path,
     signals_dir: Path,
     results_dir: Path,
+    df_rf: Optional[pd.DataFrame] = None,
     max_train_year: int = 2021,
     objective_metric: str = "profit_oriented",
-    max_weight: float = 0.3,
+    max_weight: float = 0.35,
 ) -> Tuple["OrchestratorAgent", pd.DataFrame]:
     """
     Ottimizza i parametri dell'OrchestratorAgent per un singolo asset e salva i risultati.
 
     Cosa viene ottimizzato:
     ========================
-    L'OrchestratorAgent riceve in input i segnali gia prodotti da 4 agenti SEPARATI e
-    INDIPENDENTI — SMA/EMA, Z-Score, MacroYieldCurve e FinBERT Sentiment —
+    L'OrchestratorAgent riceve in input i segnali gia prodotti dagli agenti SEPARATI e
+    INDIPENDENTI — SMA/EMA, Z-Score, MacroYieldCurve, RandomForest e FinBERT Sentiment —
     e deve trovare la combinazione ottima dei seguenti parametri:
 
     1. PESI DEGLI AGENTI (w_1, ..., w_K):
-       - Ogni agente ha il proprio peso indipendente (SMA/EMA, Z-Score, Macro, FinBERT).
+       - Ogni agente ha il proprio peso indipendente.
        - VINCOLO DI DIVERSIFICAZIONE: ciascun agente puo avere al massimo il 35% del peso (max_weight = 0.35).
-         Questo previene la concentrazione eccessiva su un singolo agente (es. FinBERT dormiente).
+         Questo previene la concentrazione eccessiva su un singolo agente.
        - Esplorazione: grid search sul simplesso discreto con step 0.05 + campionamento
          Dirichlet vincolato (w_i <= 0.35 per ogni i).
        - I pesi vengono normalizzati a somma 1: w_k / sum(w).
@@ -521,14 +616,11 @@ def train_orchestrator_asset(
     La funzione obiettivo 'profit_oriented' premia direttamente il rendimento cumulato e la
     profittabilita, accettando un livello di drawdown fisiologico per cogliere i grandi cicli di mercato.
 
-    I segnali FinBERT Sentiment vengono caricati automaticamente da:
-        data/signals/signals_sentiment_{asset}.csv
-    Se il file non esiste viene emesso un warning e l'orchestratore gira sui 3 agenti rimanenti.
-
     Parametri:
         df_sma    : DataFrame (signal, confidence) del SMA/EMA Agent.
         df_zscore : DataFrame (signal, confidence) dello Z-Score Agent.
         df_macro  : DataFrame (signal, confidence) da MacroYieldCurveAgent.
+        df_rf     : DataFrame (signal, confidence) da RandomForestAgent (opzionale).
         max_weight: Limite massimo per il peso di ogni agente (default 0.35, ossia 35%).
 
     Ritorna:
@@ -539,22 +631,33 @@ def train_orchestrator_asset(
     print(f"### AVVIO TRAINING OrchestratorAgent: {asset} (Max Weight per agente: {max_weight*100:.0f}%)")
     print("#" * 80)
 
-    # Assemblaggio pool: tutti e 4 gli agenti SEPARATI e INDIPENDENTI
+    # Assemblaggio pool: agenti SEPARATI e INDIPENDENTI
     signals_pool: Dict[str, pd.DataFrame] = {
         "SMA_EMA_Agent":    df_sma,
         "ZScore_Agent":     df_zscore,
         "Macro_YieldCurve": df_macro,
     }
 
-    # FinBERT Sentiment — caricato sempre, automaticamente
+    # RandomForest Agent — incluso se passato o caricato da file
+    if df_rf is not None:
+        signals_pool["RandomForest_Agent"] = df_rf
+        print(f"  [INFO] RandomForest Agent incluso nell'Orchestratore.")
+    else:
+        rf_file = signals_dir / f"signals_random_forest_{asset.lower()}.csv"
+        if rf_file.exists():
+            df_rf_loaded = pd.read_csv(rf_file, index_col=0, parse_dates=True)[["signal", "confidence"]]
+            signals_pool["RandomForest_Agent"] = df_rf_loaded
+            print(f"  [INFO] RandomForest Agent caricato da file: {rf_file.name}")
+
+    # FinBERT Sentiment — caricato sempre se disponibile
     sentiment_file = signals_dir / f"signals_sentiment_{asset.lower()}.csv"
     if sentiment_file.exists():
         df_sent = pd.read_csv(sentiment_file, index_col=0, parse_dates=True)
         signals_pool["FinBERT_Sentiment"] = df_sent[["signal", "confidence"]].copy()
-        print(f"  [INFO] FinBERT Sentiment caricato: {sentiment_file}")
+        print(f"  [INFO] FinBERT Sentiment caricato: {sentiment_file.name}")
     else:
         print(f"  [WARN] File FinBERT non trovato ({sentiment_file.name}), "
-              f"orchestratore su 3 agenti.")
+              f"orchestratore sui restanti agenti.")
 
     # Serie rendimenti dell'asset
     price_col = f"{asset}_close"
@@ -619,6 +722,7 @@ def run_all_assets(
     objective_metric: str = "profit_oriented",
     max_weight: float = 0.35,
     train_macro: bool = True,
+    train_rf: bool = True,
     train_orchestrator: bool = True,
 ) -> Dict[str, Dict[str, pd.DataFrame]]:
     """
@@ -632,10 +736,11 @@ def run_all_assets(
         Dict[str, Dict[str, pd.DataFrame]]:
             {
               'SHY': {
-                  'sma':          df_sma,
-                  'zscore':       df_zscore,
-                  'macro':        df_macro,        # se train_macro=True
-                  'orchestrator': df_orch,          # se train_orchestrator=True
+                  'sma':           df_sma,
+                  'zscore':        df_zscore,
+                  'macro':         df_macro,        # se train_macro=True
+                  'random_forest': df_rf,           # se train_rf=True
+                  'orchestrator':  df_orch,         # se train_orchestrator=True
               },
               'IEF': {...},
               'TLT': {...},
@@ -666,9 +771,10 @@ def run_all_assets(
     print(f"[Train] Metrica obiettivo: '{objective_metric}'")
     print(f"[Train] Vincolo OOS Lock: training fino al {max_train_year}")
     print(f"[Train] Limite massimo peso per agente nell'Orchestratore: {max_weight*100:.0f}%")
-    print(f"[Train] Agenti: SMA/EMA, ZScore"
+    print(f"[Train] Agenti abilitati: SMA/EMA, ZScore"
           + (", MacroYieldCurve" if train_macro else "")
-          + (", FinBERT Sentiment (se disponibile)" if train_orchestrator else "")
+          + (", RandomForest" if train_rf else "")
+          + (", FinBERT Sentiment (se presente)" if train_orchestrator else "")
           + (", Orchestratore" if train_orchestrator else ""))
 
     all_outputs: Dict[str, Dict[str, pd.DataFrame]] = {}
@@ -701,21 +807,36 @@ def run_all_assets(
             )
             all_outputs[asset]["macro"] = df_macro
 
+        df_rf = None
+        if train_rf:
+            # --- FASE 3: RandomForestAgent (Walk-Forward) ---
+            _, df_rf = train_random_forest_asset(
+                asset=asset,
+                df=df,
+                config_dir=config_dir,
+                signals_dir=signals_dir,
+                max_train_year=max_train_year,
+                objective_metric=objective_metric,
+            )
+            all_outputs[asset]["random_forest"] = df_rf
+
         if train_orchestrator:
-            # --- FASE 3: OrchestratorAgent ---
-            # SMA/EMA e Z-Score entrano come agenti SEPARATI (pesi indipendenti).
-            # Se il macro non e stato addestrato ora, prova a caricare il CSV esistente.
+            # --- FASE 4: OrchestratorAgent (Pool Multi-Agente) ---
             if df_macro is None:
                 macro_csv = signals_dir / f"signals_macro_{asset.lower()}.csv"
                 if macro_csv.exists():
                     df_macro = pd.read_csv(macro_csv, index_col=0, parse_dates=True)[["signal", "confidence"]]
-                    print(f"  [INFO] Segnali macro caricati da file esistente: {macro_csv}")
+                    print(f"  [INFO] Segnali macro caricati da file esistente: {macro_csv.name}")
                 else:
-                    print(f"  [WARN] Segnali macro non disponibili per {asset}. "
-                          f"Orchestratore su solo SMA/EMA e ZScore.")
                     df_macro = pd.DataFrame(
                         {"signal": 0, "confidence": 0.0}, index=df.index
                     )
+
+            if df_rf is None:
+                rf_csv = signals_dir / f"signals_random_forest_{asset.lower()}.csv"
+                if rf_csv.exists():
+                    df_rf = pd.read_csv(rf_csv, index_col=0, parse_dates=True)[["signal", "confidence"]]
+                    print(f"  [INFO] Segnali RandomForest caricati da file esistente: {rf_csv.name}")
 
             _, df_orch = train_orchestrator_asset(
                 asset=asset,
@@ -723,6 +844,7 @@ def run_all_assets(
                 df_sma=df_sma,
                 df_zscore=df_zscore,
                 df_macro=df_macro,
+                df_rf=df_rf,
                 config_dir=config_dir,
                 signals_dir=signals_dir,
                 results_dir=results_dir,
@@ -738,14 +860,11 @@ def run_all_assets(
     print("\n" + "=" * 85)
     print("                 RIEPILOGO FINALE WALK-FORWARD PER I 3 INDICI")
     print("=" * 85)
-    print(f"{'Asset':<6} | {'SMA/EMA Opt':<18} | {'SMA OOS Sh':<10} | {'ZScore Opt':<24} | {'ZS OOS Sh':<10}")
-    print("-" * 85)
-    # Queste info non sono piu disponibili direttamente, stampiamo solo distribuzione segnali
     for asset in assets:
         print(f"\n  Asset: {asset}")
         for layer, df_s in all_outputs[asset].items():
             dist = dict(df_s["signal"].value_counts())
-            print(f"    [{layer:>13}] signal={df_s.shape} distribuzione={dist}")
+            print(f"    [{layer:>14}] signal={df_s.shape} distribuzione={dist}")
     print("=" * 85)
 
     print("\n[OK] Training completato. File salvati:")
@@ -757,6 +876,9 @@ def run_all_assets(
         if train_macro:
             print(f"  - data/signals/signals_macro_{asset.lower()}.csv")
             print(f"  - src/agents/config/macro_yield_params_{asset.lower()}.json")
+        if train_rf:
+            print(f"  - data/signals/signals_random_forest_{asset.lower()}.csv")
+            print(f"  - src/agents/config/random_forest_params_{asset.lower()}.json (.joblib)")
         if train_orchestrator:
             print(f"  - data/signals/signals_orchestrator_{asset.lower()}.csv")
             print(f"  - src/agents/config/orchestrator_params_{asset.lower()}.json")
@@ -794,6 +916,11 @@ if __name__ == "__main__":
         help="Salta il training del MacroYieldCurveAgent.",
     )
     parser.add_argument(
+        "--no-rf",
+        action="store_true",
+        help="Salta il training del RandomForestAgent.",
+    )
+    parser.add_argument(
         "--no-orchestrator",
         action="store_true",
         help="Salta il training dell'OrchestratorAgent.",
@@ -815,5 +942,6 @@ if __name__ == "__main__":
         objective_metric=args.metric,
         max_weight=args.max_weight,
         train_macro=not args.no_macro,
+        train_rf=not args.no_rf,
         train_orchestrator=not args.no_orchestrator,
     )

@@ -238,3 +238,9 @@ Before implementing `forecasting.py`, define:
 4. the exact training/validation procedure for model selection.
 
 No OOS data should be used in making these decisions.
+
+## 2026-10-22 - Train agenti completato
+Completato primo train agenti, 
+imposto vincolo dei pesi sull'orchestratore di assegnare pesi <= 35% ad ogni agente
+Risultati sul test OOS pessimi (forse dovuti alla struttura dei dati)
+

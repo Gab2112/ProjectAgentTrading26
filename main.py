@@ -43,6 +43,7 @@ from src.agents.base_agent import calculate_performance_metrics
 from src.agents.EMA_EMW_agent import SMAEMAAgent
 from src.agents.ZScore_agent import ZScoreAgent
 from src.agents.macro_yield_curve_agent import MacroYieldCurveAgent
+from src.agents.random_forest_agent import RandomForestAgent
 from src.agents.orchestrator_agent import OrchestratorAgent
 
 
@@ -377,7 +378,17 @@ def run_oos_prediction(
         )
 
         # -------------------------------------------------------------
-        # D. AGENTE 4: FinBERT Sentiment
+        # D. AGENTE 4: RandomForest Machine Learning
+        # -------------------------------------------------------------
+        rf_cfg_file = config_dir / f"random_forest_params_{asset_lower}.json"
+        sig_rf_full, conf_rf_full = None, None
+        if rf_cfg_file.exists():
+            rf_agent = RandomForestAgent(target_asset=asset_upper)
+            rf_agent.load_params(rf_cfg_file)
+            sig_rf_full, conf_rf_full = rf_agent.predict_with_confidence(df_features)
+
+        # -------------------------------------------------------------
+        # E. AGENTE 5: FinBERT Sentiment
         # -------------------------------------------------------------
         sent_csv = signals_dir / f"signals_sentiment_{asset_lower}.csv"
         if not sent_csv.exists():
@@ -386,7 +397,7 @@ def run_oos_prediction(
         df_sent_full = pd.read_csv(sent_csv, parse_dates=["Date"], index_col="Date")
 
         # -------------------------------------------------------------
-        # E. COMBINAZIONE TRAMITE ORCHESTRATORE OTTIMIZZATO
+        # F. COMBINAZIONE TRAMITE ORCHESTRATORE OTTIMIZZATO
         # -------------------------------------------------------------
         orch_cfg_file = config_dir / f"orchestrator_params_{asset_lower}.json"
         if not orch_cfg_file.exists():
@@ -403,8 +414,14 @@ def run_oos_prediction(
             "SMA_EMA_Agent": pd.DataFrame({"signal": sig_sma_full, "confidence": conf_sma_full}),
             "ZScore_Agent": pd.DataFrame({"signal": sig_zs_full, "confidence": conf_zs_full}),
             "Macro_YieldCurve": pd.DataFrame({"signal": m_sig, "confidence": m_conf_full}),
-            "FinBERT_Sentiment": df_sent_full[["signal", "confidence"]].copy(),
         }
+
+        if sig_rf_full is not None:
+            signals_pool_full["RandomForest_Agent"] = pd.DataFrame(
+                {"signal": sig_rf_full, "confidence": conf_rf_full}
+            )
+
+        signals_pool_full["FinBERT_Sentiment"] = df_sent_full[["signal", "confidence"]].copy()
 
         max_w = float(orch_cfg.get("max_weight", 0.35))
         orchestrator = OrchestratorAgent(
@@ -421,7 +438,7 @@ def run_oos_prediction(
         df_orchestrator_full = orchestrator.combine(signals_pool_full)
 
         # -------------------------------------------------------------
-        # F. ISOLAMENTO DELLA SOLA FINESTRA OUT-OF-SAMPLE (2022-2026)
+        # G. ISOLAMENTO DELLA SOLA FINESTRA OUT-OF-SAMPLE (2022-2026)
         # -------------------------------------------------------------
         df_oos_orch = df_orchestrator_full.loc[oos_mask, ["signal", "confidence"]].copy()
         df_oos_sma = signals_pool_full["SMA_EMA_Agent"].loc[oos_mask, ["signal", "confidence"]].copy()
@@ -435,6 +452,9 @@ def run_oos_prediction(
         df_oos_sma.to_csv(signals_dir / f"oos_signals_sma_ema_{asset_lower}.csv")
         df_oos_zs.to_csv(signals_dir / f"oos_signals_zscore_{asset_lower}.csv")
         df_oos_macro.to_csv(signals_dir / f"oos_signals_macro_{asset_lower}.csv")
+        if sig_rf_full is not None:
+            df_oos_rf = signals_pool_full["RandomForest_Agent"].loc[oos_mask, ["signal", "confidence"]].copy()
+            df_oos_rf.to_csv(signals_dir / f"oos_signals_random_forest_{asset_lower}.csv")
 
         print(f"  [OK] Segnali OOS Orchestratore salvati in: {out_orch_csv.relative_to(root_dir)}")
 
