@@ -1,0 +1,8 @@
+{
+    "window": 50,
+    "threshold": 0.75,
+    "exit_threshold": 0.0,
+    "stop_threshold": null,
+    "mode": "momentum",
+    "price_col": "SHY_close"
+}

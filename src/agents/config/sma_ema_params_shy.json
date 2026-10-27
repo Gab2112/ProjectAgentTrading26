@@ -1,0 +1,6 @@
+{
+    "sma_window": 60,
+    "ema_window": 20,
+    "dead_band": 0.0,
+    "price_col": "SHY_close"
+}

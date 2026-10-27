@@ -1,0 +1,6 @@
+{
+    "sma_window": 20,
+    "ema_window": 15,
+    "dead_band": 0.0,
+    "price_col": "TLT_close"
+}

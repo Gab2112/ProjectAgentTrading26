@@ -1,0 +1,8 @@
+{
+    "window": 40,
+    "threshold": 1.75,
+    "exit_threshold": 0.0,
+    "stop_threshold": null,
+    "mode": "momentum",
+    "price_col": "IEF_close"
+}
