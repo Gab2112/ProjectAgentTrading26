@@ -1,472 +1,383 @@
+"""Esecuzione e registrazione dei backtest del progetto Multi-Asset.
+
+Il modulo coordina le strategie A1 e A2 utilizzando un UNICO motore di
+simulazione, ``simula_portafoglio`` in ``multiasset_backtester.py``.
+Non implementa un secondo algoritmo di valorizzazione del portafoglio.
+
+Responsabilita':
+1. leggere prezzi Open/Close rettificati dal pannello giornaliero;
+2. leggere i pesi target prodotti da ``portfolio.py``;
+3. impedire che validation e OOS entrino nel backtest di training;
+4. eseguire gli ordini alla prima apertura successiva alla decisione;
+5. salvare NAV, rendimenti, turnover, costi e pesi effettivi per strategia.
+
+Le metriche finanziarie (CAGR, Sharpe, drawdown) spettano a ``evaluator.py``.
+La scelta della strategia avviene tramite ``level`` o ``pipeline.active_level``.
+
+Interfaccia pubblica:
+    run_backtest(config, root_dir, level=None, portfolios=None)
+
+Durante questa fase sono implementati soltanto i livelli A1 e A2,
+esclusivamente sul training. Non vengono mai eseguiti B, C o OOS.
 """
-backtester.py 
 
-Backtest settimanale della baseline Macro / Rates Regimes.
+from __future__ import annotations
 
-Questo modulo applica i target weights prodotti dal portafoglio.py ai
-rendimenti degli asset SHY, IEF e TLT.
-
-Principio temporale fondamentale da rispettare:
- - il portafoglio deciso alla settimana t utilizza info disponibili a t;
- - quel portafoglio NON può guadagnare il rendimento già osservato nella stessa settimana;
- - i pesi vengono quindi applicati dal periodo successivo tramite shift(1).
-
- In questo modo:
-
- info disponibili a t -> target weight a t -> esecuzione nel periodo t+1 
- -> rendimento realizzato in t+1
-
-Il modulo supporta inoltre costi di transazione e slittamento di prezzo 
-(come richiesto dalle istruzioni) configurabili in punti base.
-Se nel config.yaml tali valori sono nulll, la baseline usa 0 bps.
-"""
-
+import json
 from pathlib import Path
-from typing import Tuple
+import re
 
+import numpy as np
 import pandas as pd
 
 from src.data_loader import load_dataset
+from src.time_split import get_time_windows, is_oos_enabled
 from src.utils import get_tickers
 
-# =============================================================================
-# Lettura dei pesi di portafoglio
-# =============================================================================
 
-def load_portfolio_dataset(config: dict, root_dir: Path) -> pd.DataFrame:
-    """Carica il dataset settimanale prodotto da portfolio.py."""
-    path = (
-        root_dir
-        / config["paths"]["signals"]
-        / "portfolio_weights_weekly.csv"
-    )
-
-    return load_dataset(path)
+SUPPORTED_LEVELS = frozenset({"A1", "A2"})
+LEVEL_A_ASSETS = frozenset({"SPY", "IEF", "GLD", "SHY"})
+SAFE_NAME = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
-# =============================================================================
-# Parametri di esecuzione
-# =============================================================================
+def _select_level(config: dict, level: str | None) -> str:
+    """Identifica il livello richiesto e impedisce esecuzioni non implementate."""
+    selected = str(
+        level if level is not None else config.get("pipeline", {}).get("active_level", "A1")
+    ).upper()
 
-def _get_execution_parameters(config: dict) -> dict:
-    """
-    Recupera i parametri di esecuzione dal config.yaml.
-
-    Se commissioni o slippage sono null, vengono interpretati come 0 bps.
-    """
-    execution_config = config.get("execution", {})
-
-    initial_capital = float(
-        execution_config.get("initial_capital", 100000.0)
-    )
-
-    commission_bps = execution_config.get("commission_bps")
-    slippage_bps = execution_config.get("slippage_bps")
-
-    commission_bps = (
-        0.0 if commission_bps is None else float(commission_bps)
-    )
-
-    slippage_bps = (
-        0.0 if slippage_bps is None else float(slippage_bps)
-    )
-
-    execution_rule = (
-        execution_config.get("execution_rule")
-        or "next_available_period"
-    )
-
-    if initial_capital <= 0:
-        raise ValueError("initial_capital must be positive.")
-
-    if commission_bps < 0 or slippage_bps < 0:
-        raise ValueError(
-            "commission_bps and slippage_bps cannot be negative."
+    if selected not in SUPPORTED_LEVELS:
+        raise NotImplementedError(
+            f"Backtest del livello {selected} non implementato. "
+            "Al momento sono disponibili soltanto A1 e A2."
         )
 
-    if execution_rule != "next_available_period":
+    settings = config.get("strategies", {}).get(selected)
+    if not isinstance(settings, dict) or settings.get("enabled") is not True:
+        raise ValueError(f"Il livello {selected} non e' abilitato nel config.yaml.")
+
+    if config.get("pipeline", {}).get("legacy_treasury_enabled") is True:
+        raise ValueError("La pipeline Treasury precedente non deve essere abilitata.")
+
+    return selected
+
+
+def _strategy_names(config: dict, level: str) -> list[str]:
+    """Ricava i nomi delle strategie, senza dipendere dai file gia' presenti."""
+    if level == "A1":
+        benchmarks = config.get("benchmarks", {})
+        if not isinstance(benchmarks, dict) or not benchmarks:
+            raise ValueError("Mancano i benchmark A1 nel config.yaml.")
+        names = config["strategies"]["A1"].get("benchmark_names", list(benchmarks))
+        if not isinstance(names, list) or not names:
+            raise ValueError("La lista dei benchmark A1 non e' valida.")
+        if any(name not in benchmarks for name in names):
+            raise KeyError("La selezione A1 contiene benchmark non definiti nel YAML.")
+    else:
+        names = ["volatility_control"]
+
+    if len(set(names)) != len(names):
+        raise ValueError("I nomi delle strategie non possono essere duplicati.")
+    if any(not isinstance(name, str) or not SAFE_NAME.fullmatch(name) for name in names):
+        raise ValueError("I nomi delle strategie devono contenere soltanto lettere, numeri, '_' e '-'.")
+
+    return list(names)
+
+
+def _execution_parameters(config: dict) -> dict[str, float]:
+    """Legge costi e capitale iniziale, validando la convenzione esecutiva."""
+    execution = config.get("execution", {})
+    if not isinstance(execution, dict):
+        raise TypeError("La sezione 'execution' deve essere un dizionario.")
+
+    if execution.get("execution_rule") != "next_available_trading_open":
         raise ValueError(
-            "Unsupported execution_rule: "
-            f"{execution_rule}"
+            "A1/A2 richiedono execution_rule: next_available_trading_open."
+        )
+    if execution.get("signal_frequency") != "weekly":
+        raise ValueError("A1/A2 richiedono signal_frequency: weekly.")
+
+    keys = {
+        "initial_capital": 100000.0,
+        "commission_bps": 2.0,
+        "slippage_bps": 1.0,
+    }
+    values = {}
+    for key, default in keys.items():
+        try:
+            value = float(execution.get(key, default))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Parametro di esecuzione non numerico: {key}.") from exc
+        if not np.isfinite(value) or value < 0 or (key == "initial_capital" and value == 0):
+            raise ValueError(f"Parametro di esecuzione non valido: {key}.")
+        values[key] = value
+
+    return values
+
+
+def _validate_index(frame: pd.DataFrame, label: str) -> None:
+    """Verifica le date prima di applicare ordinamenti o filtri temporali."""
+    index = frame.index
+    if not isinstance(index, pd.DatetimeIndex):
+        raise TypeError(f"{label}: e' richiesto un DatetimeIndex.")
+    if index.hasnans or index.tz is not None or index.has_duplicates:
+        raise ValueError(f"{label}: date mancanti, duplicate o con fuso orario.")
+    if not index.is_monotonic_increasing:
+        raise ValueError(f"{label}: le date non sono in ordine crescente.")
+
+
+def load_market_prices(
+    config: dict, root_dir: Path,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Legge i prezzi e seleziona esclusivamente le sedute di training.
+
+    I dati precedenti a ``train_start`` servono a ``portfolio.py`` per gli
+    indicatori, ma NON entrano nel periodo contabile del backtest.
+    Le osservazioni di validation e OOS vengono escluse prima della
+    chiamata al motore di simulazione.
+    """
+    tickers = get_tickers(config)
+    if len(tickers) != 4 or set(tickers) != LEVEL_A_ASSETS:
+        raise ValueError("Il backtest A1/A2 richiede SPY, IEF, GLD e SHY.")
+
+    # Impedisci lo sblocco accidentale del test finale in questa fase.
+    if is_oos_enabled(config):
+        raise ValueError("Backtest OOS non autorizzato: questa pipeline e' limitata al training.")
+
+    windows = get_time_windows(config)
+    start, end = windows["train_start"], windows["train_end"]
+    if start is None:
+        raise ValueError("Occorre impostare 'validation.train_start' nel config.yaml.")
+
+    path = Path(root_dir) / config["paths"]["processed_data"] / "market_daily.csv"
+    panel = load_dataset(path, strict=True)
+    _validate_index(panel, "market_daily.csv")
+    panel = panel.loc[(panel.index >= start) & (panel.index <= end)].copy()
+    if len(panel) < 2:
+        raise ValueError("Servono almeno due sedute valide nel training.")
+
+    fields = ("open", "close")
+    missing = [
+        f"{ticker}_{field}"
+        for ticker in tickers
+        for field in fields
+        if f"{ticker}_{field}" not in panel.columns
+    ]
+    if missing:
+        raise KeyError("Colonne prezzi mancanti: " + ", ".join(missing))
+
+    prices = {}
+    for field in fields:
+        columns = [f"{ticker}_{field}" for ticker in tickers]
+        frame = panel.loc[:, columns].copy()
+        frame.columns = tickers
+        for ticker in tickers:
+            frame[ticker] = pd.to_numeric(frame[ticker], errors="raise")
+        values = frame.to_numpy(dtype=float)
+        if not np.isfinite(values).all() or np.any(values <= 0):
+            raise ValueError(f"I prezzi {field} contengono valori mancanti o non positivi.")
+        prices[field] = frame
+
+    return prices["open"], prices["close"]
+
+
+def load_target_weights(
+    config: dict, root_dir: Path, level: str, name: str,
+) -> pd.DataFrame:
+    """Carica i pesi generati da ``portfolio.py`` per una singola strategia."""
+    path = (
+        Path(root_dir)
+        / config["paths"]["signals"]
+        / level
+        / name
+        / "target_weights.csv"
+    )
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Pesi target non trovati: {path}. "
+            f"Eseguire prima run_portfolio(..., level='{level}')."
+        )
+    return load_dataset(path, strict=True)
+
+
+def _validate_targets(
+    targets: pd.DataFrame,
+    prices: pd.DataFrame,
+    config: dict,
+    name: str,
+) -> pd.DataFrame:
+    """Convalida pesi, calendario e rispetto dei confini di training."""
+    if not isinstance(targets, pd.DataFrame):
+        raise TypeError(f"{name}: i pesi target devono essere un DataFrame.")
+    _validate_index(targets, f"Target {name}")
+    if targets.empty:
+        raise ValueError(f"{name}: non ci sono decisioni di portafoglio.")
+
+    tickers = list(prices.columns)
+    if set(targets.columns) != set(tickers) or len(targets.columns) != len(tickers):
+        raise ValueError(f"{name}: i pesi devono contenere esattamente {tickers}.")
+
+    windows = get_time_windows(config)
+    if targets.index.min() < windows["train_start"] or targets.index.max() > windows["train_end"]:
+        raise ValueError(f"{name}: i target devono appartenere soltanto al training.")
+    if not targets.index.isin(prices.index).all():
+        raise ValueError(f"{name}: alcune decisioni non corrispondono a sedute di mercato.")
+
+    # Non riordinare silenziosamente i pesi: l'ordine canonico e' quello dei prezzi.
+    ordered = targets.loc[:, tickers].copy()
+    for ticker in tickers:
+        ordered[ticker] = pd.to_numeric(ordered[ticker], errors="raise")
+    values = ordered.to_numpy(dtype=float)
+    if (
+        not np.isfinite(values).all()
+        or np.any(values < -1e-7)
+        or np.any(values > 1 + 1e-7)
+        or not np.allclose(values.sum(axis=1), 1.0, atol=1e-7, rtol=0)
+    ):
+        raise ValueError(f"{name}: pesi non validi (richiesti long-only e somma 100%).")
+
+    # Il motore gestira' soltanto le decisioni con almeno una seduta successiva.
+    return ordered
+
+
+def _validate_simulation(
+    result: pd.DataFrame,
+    opens: pd.DataFrame,
+    targets: pd.DataFrame,
+    name: str,
+) -> dict:
+    """Verifica gli invarianti contabili essenziali dopo il backtest."""
+    if not result.index.equals(opens.index):
+        raise RuntimeError(f"{name}: il motore ha alterato il calendario delle sedute.")
+
+    required = [
+        "nav", "rendimento_lordo", "rendimento_netto", "turnover",
+        "costo_transazione", "operazione_eseguita",
+    ]
+    missing = [column for column in required if column not in result.columns]
+    if missing:
+        raise RuntimeError(f"{name}: colonne di simulazione mancanti: {missing}.")
+
+    for field in required[:-1]:
+        series = pd.to_numeric(result[field], errors="raise")
+        if not np.isfinite(series.to_numpy(dtype=float)).all():
+            raise RuntimeError(f"{name}: valori non finiti nel campo '{field}'.")
+
+    if (result["nav"] <= 0).any():
+        raise RuntimeError(f"{name}: NAV non positivo.")
+    if (result["turnover"] < 0).any() or (result["costo_transazione"] < 0).any():
+        raise RuntimeError(f"{name}: turnover o costi negativi.")
+    if (result["rendimento_netto"] <= -1).any():
+        raise RuntimeError(f"{name}: rendimento giornaliero minore o uguale a -100%.")
+
+    # Un segnale all'ultima chiusura del training NON viene eseguito nella
+    # validation: questa omissione e' deliberata e contabilizzata nel report.
+    executable = int(targets.index.isin(opens.index[:-1]).sum())
+    trades = int(result["operazione_eseguita"].sum())
+    if executable == 0 or trades != executable:
+        raise RuntimeError(
+            f"{name}: decisioni eseguibili={executable}, operazioni={trades}."
         )
 
     return {
-        "initial_capital": initial_capital,
-        "commission_bps": commission_bps,
-        "slippage_bps": slippage_bps,
-        "execution_rule": execution_rule,
+        "decisioni_ricevute": int(len(targets)),
+        "decisioni_non_eseguibili": int(len(targets) - executable),
+        "operazioni_eseguite": trades,
+        "prima_operazione": result.index[result["operazione_eseguita"]][0].date().isoformat(),
+        "ultima_operazione": result.index[result["operazione_eseguita"]][-1].date().isoformat(),
     }
 
-
-# =============================================================================
-# Applicazione temporale dei pesi
-# =============================================================================
-
-def apply_execution_lag(
-    portfolio: pd.DataFrame,
-    config: dict,
-) -> pd.DataFrame:
-    """
-    Sposta i target weights di una settimana in avanti.
-
-    I target weights calcolati alla data t diventano quindi le posizioni
-    effettivamente applicate al rendimento tra t e t+1.
-
-    Questo passaggio è essenziale per evitare look-ahead bias.
-    """
-    backtest = portfolio.copy()
-
-    for asset in get_tickers(config):
-        target_column = f"{asset}_weight"
-        applied_column = f"{asset}_applied_weight"
-
-        if target_column not in backtest.columns:
-            raise KeyError(
-                f"Missing portfolio column: {target_column}"
-            )
-
-        backtest[applied_column] = (
-            backtest[target_column]
-            .shift(1)
-            .fillna(0.0)
-        )
-
-    return backtest
-
-
-# =============================================================================
-# Calcolo dei rendimenti del portafoglio
-# =============================================================================
-
-def calculate_strategy_returns(
-    backtest: pd.DataFrame,
-    config: dict,
-) -> pd.DataFrame:
-    """
-    Calcola rendimento lordo, turnover, costi e rendimento netto.
-
-    Rendimento lordo:
-        somma(weight_i * return_i)
-
-    Turnover:
-        somma delle variazioni assolute dei pesi applicati.
-
-    Costi:
-        turnover * costo totale in basis points.
-
-    Rendimento netto:
-        rendimento lordo - costi.
-    """
-    result = backtest.copy()
-    params = _get_execution_parameters(config)
-
-    asset_returns = []
-    applied_weights = []
-
-    for asset in get_tickers(config):
-        return_column = f"{asset}_return_1w"
-        weight_column = f"{asset}_applied_weight"
-
-        if return_column not in result.columns:
-            raise KeyError(
-                f"Missing weekly return column: {return_column}"
-            )
-
-        asset_returns.append(return_column)
-        applied_weights.append(weight_column)
-
-    # -------------------------------------------------------------------------
-    # Rendimento lordo della strategia.
-    # -------------------------------------------------------------------------
-    result["strategy_gross_return"] = 0.0
-
-    for return_column, weight_column in zip(
-        asset_returns,
-        applied_weights,
-    ):
-        result["strategy_gross_return"] += (
-            result[weight_column]
-            * result[return_column].fillna(0.0)
-        )
-
-    # -------------------------------------------------------------------------
-    # Turnover del portafoglio.
-    # -------------------------------------------------------------------------
-    # Misuriamo quanto cambiano le posizioni rispetto alla settimana precedente.
-    # Esempio: passare da TLT +1 a IEF +1 implica turnover pari a 2.
-    result["turnover"] = 0.0
-
-    for weight_column in applied_weights:
-        result["turnover"] += (
-            result[weight_column]
-            .diff()
-            .abs()
-            .fillna(result[weight_column].abs())
-        )
-
-    # -------------------------------------------------------------------------
-    # Costi di transazione.
-    # -------------------------------------------------------------------------
-    total_cost_bps = (
-        params["commission_bps"]
-        + params["slippage_bps"]
-    )
-
-    result["transaction_cost"] = (
-        result["turnover"]
-        * total_cost_bps
-        / 10000.0
-    )
-
-    result["strategy_net_return"] = (
-        result["strategy_gross_return"]
-        - result["transaction_cost"]
-    )
-
-    return result
-
-
-# =============================================================================
-# Benchmark
-# =============================================================================
-
-def add_benchmarks(
-    backtest: pd.DataFrame,
-    config: dict,
-) -> pd.DataFrame:
-    """
-    Costruisce benchmark semplici e trasparenti.
-
-    1. Equal-weight buy-and-hold di SHY, IEF e TLT.
-    2. Rendimenti buy-and-hold individuali dei tre ETF.
-
-    Il benchmark equal-weight assegna un terzo del capitale a ciascun ETF e
-    viene RIBILANCIATO ogni settimana (media semplice dei rendimenti).
-
-    Attenzione: non è il benchmark ufficiale delle metriche. Le tabelle di
-    evaluation_metrics.csv usano il vero buy-and-hold senza ribilanciamento,
-    calcolato in evaluator.build_buy_and_hold_benchmark(). Il nome della
-    colonna contiene "rebalanced" proprio per evitare confusione.
-    """
-    result = backtest.copy()
-
-    tickers = get_tickers(config)
-
-    required_returns = [
-        f"{ticker}_return_1w"
-        for ticker in tickers
-    ]
-
-    missing = [
-        column
-        for column in required_returns
-        if column not in result.columns
-    ]
-
-    if missing:
-        raise KeyError(
-            f"Missing benchmark return columns: {', '.join(missing)}"
-        )
-
-    result["benchmark_equal_weight_rebalanced_return"] = (
-        result[required_returns]
-        .mean(axis=1)
-    )
-
-    for ticker in tickers:
-        result[f"benchmark_{ticker}_return"] = result[f"{ticker}_return_1w"]
-
-    return result
-
-
-# =============================================================================
-# Equity curves
-# =============================================================================
-
-def add_equity_curves(
-    backtest: pd.DataFrame,
-    config: dict,
-) -> pd.DataFrame:
-    """
-    Costruisce equity curve monetarie e indici normalizzati a 100.
-
-    Le curve complete vengono salvate qui; l'evaluator deciderà in seguito
-    quale intervallo utilizzare per IS / validation / OOS.
-    """
-    result = backtest.copy()
-    params = _get_execution_parameters(config)
-
-    initial_capital = params["initial_capital"]
-
-    result["strategy_equity"] = (
-        initial_capital
-        * (1.0 + result["strategy_net_return"])
-        .cumprod()
-    )
-
-    result["benchmark_equal_weight_rebalanced_equity"] = (
-        initial_capital
-        * (1.0 + result["benchmark_equal_weight_rebalanced_return"].fillna(0.0))
-        .cumprod()
-    )
-
-    # Indici base 100, utili per confrontare visivamente strategia e benchmark.
-    result["strategy_index_100"] = (
-        100.0
-        * (1.0 + result["strategy_net_return"])
-        .cumprod()
-    )
-
-    result["benchmark_equal_weight_rebalanced_index_100"] = (
-        100.0
-        * (1.0 + result["benchmark_equal_weight_rebalanced_return"].fillna(0.0))
-        .cumprod()
-    )
-
-    return result
-
-
-# =============================================================================
-# Controlli di coerenza
-# =============================================================================
-
-def validate_backtest(backtest: pd.DataFrame) -> None:
-    """
-    Esegue alcuni controlli minimi prima di salvare i risultati.
-    """
-    required_columns = [
-        "strategy_gross_return",
-        "strategy_net_return",
-        "turnover",
-        "transaction_cost",
-        "strategy_equity",
-    ]
-
-    for column in required_columns:
-        if column not in backtest.columns:
-            raise KeyError(
-                f"Backtest output missing column: {column}"
-            )
-
-    # Una perdita settimanale inferiore a -100% sarebbe impossibile
-    # con il livello di leva attuale e segnala quasi certamente un errore.
-    if (backtest["strategy_net_return"] <= -1.0).any():
-        raise ValueError(
-            "Strategy return <= -100% detected."
-        )
-
-    if (backtest["strategy_equity"] <= 0).any():
-        raise ValueError(
-            "Non-positive strategy equity detected."
-        )
-
-
-# =============================================================================
-# Pipeline del backtest
-# =============================================================================
 
 def run_backtest(
     config: dict,
     root_dir: Path,
-) -> Tuple[pd.DataFrame, dict]:
-    """
-    Esegue il backtest completo del baseline e salva l'output.
+    level: str | None = None,
+    portfolios: dict[str, pd.DataFrame] | None = None,
+) -> tuple[dict[str, pd.DataFrame], dict[str, dict]]:
+    """Esegue i backtest di un livello e salva un output per strategia.
+
+    Se ``portfolios`` e' fornito, usa i DataFrame gia' prodotti da
+    ``run_portfolio``. Altrimenti legge i file ``target_weights.csv``.
 
     Output:
-        data/results/backtest_weekly.csv
+        data/results/A1/<benchmark>/backtest_daily.csv
+        data/results/A1/<benchmark>/execution_summary.json
+        data/results/A2/volatility_control/backtest_daily.csv
+        data/results/A2/volatility_control/execution_summary.json
 
-    Le metriche di performance vere e proprie verranno calcolate
-    separatamente in evaluator.py.
+    Restituisce due dizionari: risultati giornalieri e riepiloghi operativi.
+    Non calcola indici di performance finanziaria: li produrra' l'evaluator.
     """
-    results_dir = root_dir / config["paths"]["results"]
-    results_dir.mkdir(parents=True, exist_ok=True)
+    from src.multiasset_backtester import simula_portafoglio
 
-    portfolio = load_portfolio_dataset(config, root_dir)
+    root_dir = Path(root_dir)
+    selected = _select_level(config, level)
+    names = _strategy_names(config, selected)
+    execution = _execution_parameters(config)
+    opens, closes = load_market_prices(config, root_dir)
 
-    # Finché l'OOS è bloccato, il backtest si ferma alla fine della
-    # validation: in questo modo né l'equity finale stampata né il file
-    # backtest_weekly.csv contengono i rendimenti del periodo OOS.
-    evaluate_oos = bool(
-        config.get("evaluation", {}).get("evaluate_oos", False)
-    )
+    if portfolios is not None:
+        if not isinstance(portfolios, dict) or set(portfolios) != set(names):
+            raise ValueError("I portafogli forniti non coincidono con le strategie del livello.")
 
-    if not evaluate_oos:
-        validation_end = pd.Timestamp(
-            config["validation"]["validation_end"]
+    daily_results: dict[str, pd.DataFrame] = {}
+    summaries: dict[str, dict] = {}
+
+    for name in names:
+        targets = (
+            portfolios[name]
+            if portfolios is not None
+            else load_target_weights(config, root_dir, selected, name)
         )
-        portfolio = portfolio.loc[portfolio.index <= validation_end]
+        targets = _validate_targets(targets, opens, config, name)
 
-    backtest = apply_execution_lag(portfolio, config)
-    backtest = calculate_strategy_returns(backtest, config)
-    backtest = add_benchmarks(backtest, config)
-    backtest = add_equity_curves(backtest, config)
+        # Tutta la contabilità e' demandata a un unico motore gia' esistente.
+        result = simula_portafoglio(
+            aperture=opens,
+            chiusure=closes,
+            pesi_target=targets,
+            capitale_iniziale=execution["initial_capital"],
+            commission_bps=execution["commission_bps"],
+            slippage_bps=execution["slippage_bps"],
+        )
+        checks = _validate_simulation(result, opens, targets, name)
+        summary = {
+            "livello": selected,
+            "strategia": name,
+            "periodo": "training",
+            "inizio_training": opens.index[0].date().isoformat(),
+            "fine_training": opens.index[-1].date().isoformat(),
+            "capitale_iniziale": execution["initial_capital"],
+            "nav_finale": float(result["nav"].iloc[-1]),
+            "turnover_totale": float(result["turnover"].sum()),
+            "costi_transazione_totali": float(result["costo_transazione"].sum()),
+            "commission_bps": execution["commission_bps"],
+            "slippage_bps": execution["slippage_bps"],
+            **checks,
+        }
 
-    validate_backtest(backtest)
+        # Ogni strategia ha un percorso distinto, senza sovrascrivere altre
+        # strategie o i risultati della vecchia pipeline Treasury.
+        output_dir = root_dir / config["paths"]["results"] / selected / name
+        output_dir.mkdir(parents=True, exist_ok=True)
+        result.to_csv(output_dir / "backtest_daily.csv", index_label="Date")
+        (output_dir / "execution_summary.json").write_text(
+            json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
 
-    output_path = results_dir / "backtest_weekly.csv"
-    backtest.to_csv(output_path)
-
-    params = _get_execution_parameters(config)
-
-    # La prima settimana realmente investita è quella in cui almeno un peso
-    # applicato è diverso da zero.
-    applied_columns = [
-        f"{ticker}_applied_weight"
-        for ticker in get_tickers(config)
-    ]
-
-    active = (
-        backtest[applied_columns]
-        .abs()
-        .sum(axis=1)
-        > 0
-    )
-
-    first_active = (
-        backtest.index[active][0]
-        if active.any()
-        else None
-    )
-
-    summary = {
-        "rows": len(backtest),
-        "first_active_week": first_active,
-        "final_equity": float(
-            backtest["strategy_equity"].iloc[-1]
-        ),
-        "total_turnover": float(
-            backtest["turnover"].sum()
-        ),
-        "commission_bps": params["commission_bps"],
-        "slippage_bps": params["slippage_bps"],
-    }
-
-    print("\n[Backtester] Baseline completed successfully")
-    print(f"  Dataset:          {output_path}")
-    print(f"  Rows:             {len(backtest):,}")
-    print(
-        "  Last week:         "
-        f"{backtest.index.max().date()}"
-        + ("" if evaluate_oos else " (OOS locked)")
-    )
-
-    if first_active is not None:
+        daily_results[name] = result
+        summaries[name] = summary
         print(
-            "  First active week: "
-            f"{first_active.date()}"
+            f"[Backtester] {selected}/{name}: "
+            f"{checks['operazioni_eseguite']} operazioni, "
+            f"NAV finale {summary['nav_finale']:,.2f}, "
+            f"costi {summary['costi_transazione_totali']:,.2f}"
         )
+        if checks["decisioni_non_eseguibili"]:
+            print(
+                f"  {checks['decisioni_non_eseguibili']} decisione/i a fine "
+                "training non eseguita/e, per non entrare nella validation."
+            )
 
-    print(
-        "  Final equity:      "
-        f"{summary['final_equity']:,.2f}"
-    )
-    print(
-        "  Total turnover:    "
-        f"{summary['total_turnover']:.2f}"
-    )
-    print(
-        "  Trading costs:     "
-        f"{params['commission_bps'] + params['slippage_bps']:.2f} bps"
-    )
-
-    return backtest, summary
+    return daily_results, summaries
