@@ -72,6 +72,9 @@ data:
     breakeven_5y: T5YIE
     breakeven_10y: T10YIE
 
+  stress:
+    equity_implied_volatility: VIXCLS
+
 # ------------------------------------------------------------
 # FEATURES AND SIGNALS
 # ------------------------------------------------------------
@@ -164,8 +167,15 @@ strategies:
   # ----------------------------------------------------------
 
   B:
-    enabled: false
+    enabled: true
     method: regime_based_allocation
+
+    research_mode: exploratory_training_only
+    position_mode: long_short
+
+    annual_borrow_rate: 0.01
+    additional_margin_rate: 0.50
+    cash_interest_rate: 0.0
 
     regime_dimensions:
       - inflation_pressure

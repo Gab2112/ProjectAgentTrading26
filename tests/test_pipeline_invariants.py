@@ -207,7 +207,7 @@ class TestProjectConfiguration(unittest.TestCase):
         self.assertEqual(get_tickers(config), list(ASSETS))
         self.assertEqual(
             {name for name, params in config["strategies"].items() if params.get("enabled")},
-            {"A1", "A2"},
+            {"A1", "A2", "B"},
         )
         self.assertFalse(is_oos_enabled(config))
         self.assertTrue(config["validation"].get("development_only"))

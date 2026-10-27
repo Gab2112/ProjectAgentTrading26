@@ -252,7 +252,7 @@ def download_market_data(config: dict, root_dir: Path) -> Dict[str, pd.DataFrame
 def _get_fred_series(config: dict) -> Dict[str, str]:
     """Associa i nomi logici alle serie FRED presenti in configurazione."""
     series: Dict[str, str] = {}
-    for section in ("rates", "inflation"):
+    for section in ("rates", "inflation", "stress"):
         for name, series_id in config["data"].get(section, {}).items():
             if not series_id:
                 continue
