@@ -1,12 +1,11 @@
-"""One-off diagnostic of the frozen B_v2 strategy on held-out dates.
+"""Manual, one-off validation diagnostic for frozen B_v2 (2017-2021 only).
 
-Run from the repository root after copying this file there:
-    python3 holdout_diagnostic_bv2.py --through 2021-12-31
-    python3 holdout_diagnostic_bv2.py --through 2025-12-31
+Run from the repository root:
+    python3 tests/holdout_diagnostic_bv2.py --through 2021-12-31
 
-No modifications to main.py, config.yaml, frozen B_v1/B_v2 artifacts,
-or signal-generation source files. This script does NOT establish
-point-in-time validity of FRED macro series.
+This is not a unittest and is excluded from test_*.py discovery.
+It does not alter main.py, config.yaml or frozen B_v1/B_v2 artifacts.
+FRED macro series point-in-time validity is not established.
 """
 
 from __future__ import annotations
@@ -16,18 +15,23 @@ from copy import deepcopy
 import hashlib
 import json
 from pathlib import Path
+import sys
+
+# The script lives under tests/; ensure imports and data paths use repo root.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import numpy as np
 import pandas as pd
 import yaml
 
-from src.data_loader import load_dataset
+from src.data_transformation import load_dataset
 from src.regime_allocator import ASSETS
 from src.regime_strategy import build_level_b_v2_training
 from src.longshort_backtester import simulate_longshort_daily
 from src.evaluator import calculate_metrics
 
-ROOT = Path(__file__).resolve().parent
 TRAIN_END = pd.Timestamp("2016-12-31")
 VALIDATION_END = pd.Timestamp("2021-12-31")
 OOS_START = pd.Timestamp("2022-01-01")
@@ -102,8 +106,8 @@ def metric_record(name: str, frame: pd.DataFrame, rf_daily: float,
 
 
 def run(through: pd.Timestamp) -> None:
-    if through not in (VALIDATION_END, pd.Timestamp("2025-12-31")):
-        raise ValueError("Allowed --through dates: 2021-12-31 or 2025-12-31")
+    if through != VALIDATION_END:
+        raise ValueError("Only the pre-inspected 2017-2021 validation is allowed")
 
     cfg_path = ROOT / "config.yaml"
     with cfg_path.open("r", encoding="utf-8") as stream:
@@ -223,12 +227,6 @@ def run(through: pd.Timestamp) -> None:
         bt.loc[(bt.index > TRAIN_END) & (bt.index <= VALIDATION_END)],
         rf_daily, ann,
     )]
-    if through >= OOS_START:
-        results.append(metric_record(
-            "oos_2022_2025",
-            bt.loc[(bt.index >= OOS_START) & (bt.index <= through)],
-            rf_daily, ann,
-        ))
 
     print("\nB_v2 | HELD-OUT DIAGNOSTIC | NO PARAMETER CHANGES")
     table = pd.DataFrame(results).set_index("period")
@@ -248,7 +246,7 @@ def run(through: pd.Timestamp) -> None:
         "description": "One-off held-out diagnostic of previously frozen B_v2",
         "observed_through": through.date().isoformat(),
         "validation_inspected": True,
-        "oos_inspected": through >= OOS_START,
+        "oos_inspected": False,
         "source_config_sha256": config_hash_before,
         "frozen_artifact_sha256": before,
         "method": "causal deterministic replay, continuous NAV, isolated period metrics",
@@ -267,8 +265,8 @@ def run(through: pd.Timestamp) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--through", required=True, choices=("2021-12-31", "2025-12-31"),
-        help="Last calendar date to evaluate (2025 requires 2022+ market/macro data)",
+        "--through", required=True, choices=("2021-12-31",),
+        help="Last date of the previously inspected validation period",
     )
     args = parser.parse_args()
     run(pd.Timestamp(args.through))

@@ -4,7 +4,7 @@
 
 Quantitative investment research for **Data-Driven Models for Investment**.
 
-> **Status, 27 October 2026 (local working tree):** A1, A2 and B are implemented. **B_v2** is the training-selected Long/Flat candidate; its **2017-2021 validation has been examined** in a separate, unchanged-model diagnostic. **2022+ has not been evaluated for the new Multi-Asset strategy.** Clustering and the ML/agent modules are not yet integrated into the shared allocation pipeline.
+> **Status, 28 October 2026 (local working tree):** A1, A2 and B are implemented and the A/B modules have been consolidated; 123 unit tests passed locally after the cleanup. **B_v2** is the training-selected Long/Flat candidate; its **2017-2021 validation has been examined** in a separate, unchanged-model diagnostic. **2022+ has not been evaluated for the new Multi-Asset strategy.** Clustering and the ML/agent modules are not yet integrated into the shared allocation pipeline.
 
 ## 1. Research question and system
 
@@ -57,10 +57,10 @@ python3 main.py --level B --b-version v1    # Historical B baseline
 The previously performed B_v2 validation diagnostic is reproducible, provided ETF and macro data cover 2021:
 
 ```bash
-python3 holdout_diagnostic_bv2.py --through 2021-12-31
+python3 tests/holdout_diagnostic_bv2.py --through 2021-12-31
 ```
 
-Do not extend the diagnostic into 2022+ during development of the integrated system.
+This manual diagnostic is excluded from `test_*.py` discovery and accepts **only** `2021-12-31`; it does not open the 2022+ final test. Its validation results have already been inspected, so it should be rerun only for explicit reproducibility checks. It requires the original frozen B artifacts and adequate historical data coverage.
 
 ## 4. Observed results
 
@@ -82,9 +82,11 @@ B_v2's drawdown is lower than A2's on training, but **its return and Sharpe are 
 
 ## 5. Architecture and next steps
 
-- A1/A2: `src/multiasset_allocator.py`, `src/portfolio.py`, `src/backtester.py`, `src/evaluator.py`.
-- B: `src/macro_availability.py`, `src/macro_features.py`, `src/regime_signals.py`, `src/regime_allocator.py`, `src/regime_strategy.py`, `src/longshort_backtester.py`, `src/regime_contract.py`.
-- `src/regime_contract.py` validates dated regime labels and converts them to budgets through an **explicit mapping**; clustering itself is not yet implemented in this component.
+- **Data and timing:** `src/data_acquisition.py`, `src/data_transformation.py` (including the data-loader API), `src/time_split.py`, and `src/macro_availability.py` (macro features and deterministic regime classification).
+- **A1/A2:** `src/portfolio.py` (including the CVXPY A2 optimizer), `src/backtester.py`, and `src/evaluator.py`.
+- **B:** `src/regime_allocator.py` (regime-label validation, explicit cluster-to-budget contract, signal construction and volatility caps), `src/regime_strategy.py` (B_v1/B_v2 composition), and `src/longshort_backtester.py` (the shared daily self-financing simulation, including Long/Flat as a special case).
+- **Legacy agents:** `src/agents/` retains the earlier SHY/IEF/TLT Treasury research components. They are not yet integrated into the current SPY/IEF/GLD/SHY A/B pipeline. Previously generated `signals_statistical_{shy,ief,tlt}.csv` files are not part of the tracked A/B source; the agent code can generate statistical signals when suitable source features are available.
+- **Diagnostics:** `tests/holdout_diagnostic_bv2.py` is a manual validation-only script, not an automated unit test. `tests/test_*.py` contains the regression/invariant tests.
 - Generated outputs under `data/processed/`, `data/signals/` and `data/results/` are Git-ignored. The frozen B output directories are `data/results/B/regime_longshort/` and `data/results/B/regime_longflat_v2/`.
 - Details and research decisions: [`docs/research_design.md`](docs/research_design.md) and [`docs/decision_log.md`](docs/decision_log.md); earlier Treasury-only research: [`docs/treasury_research_review.md`](docs/treasury_research_review.md).
 

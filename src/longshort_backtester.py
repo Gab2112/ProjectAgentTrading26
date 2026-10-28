@@ -1,4 +1,4 @@
-"""Long/Short backtesting engine for Level B."""
+"""Shared A/B portfolio backtesting engine; one execution/accounting model."""
 
 import numpy as np
 import pandas as pd
@@ -532,3 +532,124 @@ def simulate_longshort_daily(
         previous_nav = report["nav"]
 
     return pd.DataFrame(rows).set_index("Date")
+
+
+# A1/A2 input validation and legacy result schema.
+# Core execution remains in simulate_longshort_daily above.
+
+def _prepare_long_only_targets(
+    aperture: pd.DataFrame,
+    chiusure: pd.DataFrame,
+    pesi_target: pd.DataFrame,
+) -> pd.DataFrame:
+    """Validate A1/A2 restrictions, preserving numerical clipping tolerance."""
+    for name, panel in (
+        ("aperture", aperture),
+        ("chiusure", chiusure),
+        ("pesi_target", pesi_target),
+    ):
+        if not isinstance(panel, pd.DataFrame) or panel.empty:
+            raise ValueError(f"{name}: DataFrame mancante o vuoto")
+        if not isinstance(panel.index, pd.DatetimeIndex):
+            raise TypeError(f"{name}: richiesto DatetimeIndex")
+        if (
+            panel.index.hasnans
+            or panel.index.has_duplicates
+            or not panel.index.is_monotonic_increasing
+            or panel.index.tz is not None
+        ):
+            raise ValueError(f"{name}: date non valide")
+        if panel.columns.has_duplicates:
+            raise ValueError(f"{name}: colonne duplicate")
+
+    if not aperture.index.equals(chiusure.index):
+        raise ValueError("Open e Close non hanno lo stesso calendario")
+    if not aperture.columns.equals(chiusure.columns):
+        raise ValueError("Open e Close non hanno lo stesso universo")
+    if set(aperture.columns) != set(ASSETS) or set(pesi_target.columns) != set(ASSETS):
+        raise ValueError("L'universo A1/A2 deve essere SPY, IEF, GLD, SHY")
+    if not pesi_target.index.isin(aperture.index).all():
+        raise ValueError("Le decisioni devono corrispondere a sedute effettive")
+
+    for name, panel in (("Open", aperture), ("Close", chiusure)):
+        try:
+            values = panel.to_numpy(dtype=float)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name}: prezzi non numerici") from exc
+        if not np.isfinite(values).all() or (values <= 0).any():
+            raise ValueError(f"{name}: prezzi mancanti o non positivi")
+
+    try:
+        weights = pesi_target.loc[:, list(ASSETS)].to_numpy(dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Pesi target non numerici") from exc
+    if (
+        not np.isfinite(weights).all()
+        or np.any(weights < -1e-7)
+        or np.any(weights > 1.0 + 1e-7)
+        or np.any(np.abs(weights.sum(axis=1) - 1.0) > 1e-7)
+    ):
+        raise ValueError("A1/A2 richiedono pesi long-only interamente investiti")
+
+    # Same small numerical tolerance and normalization as the original A engine.
+    weights = np.clip(weights, 0.0, 1.0)
+    weights /= weights.sum(axis=1, keepdims=True)
+    return pd.DataFrame(weights, index=pesi_target.index, columns=list(ASSETS))
+
+
+def simula_portafoglio(
+    aperture: pd.DataFrame,
+    chiusure: pd.DataFrame,
+    pesi_target: pd.DataFrame,
+    capitale_iniziale: float = 100000.0,
+    commission_bps: float = 2.0,
+    slippage_bps: float = 1.0,
+) -> pd.DataFrame:
+    """Run A1/A2 on the shared engine; preserve the original return schema."""
+    for label, value, strictly_positive in (
+        ("capitale_iniziale", capitale_iniziale, True),
+        ("commission_bps", commission_bps, False),
+        ("slippage_bps", slippage_bps, False),
+    ):
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{label}: parametro non numerico") from exc
+        if not np.isfinite(numeric) or (numeric <= 0 if strictly_positive else numeric < 0):
+            raise ValueError(f"{label}: parametro non valido")
+
+    targets = _prepare_long_only_targets(aperture, chiusure, pesi_target)
+    opens = aperture.loc[:, list(ASSETS)]
+    closes = chiusure.loc[:, list(ASSETS)]
+
+    # The shared scheduling function also rejects unexecutable-only decisions.
+    scheduled = schedule_next_open_executions(targets, opens.index)
+    common = simulate_longshort_daily(
+        open_prices=opens,
+        close_prices=closes,
+        target_weights=targets,
+        initial_capital=float(capitale_iniziale),
+        commission_bps=float(commission_bps),
+        slippage_bps=float(slippage_bps),
+        annual_borrow_rate=0.0,
+    )
+
+    # Historical A1/A2 output schema, with the same approximate gross-return
+    # diagnostic: daily net return plus direct trading cost / previous NAV.
+    previous_nav = common["nav"].shift(1)
+    previous_nav.iloc[0] = float(capitale_iniziale)
+
+    result = pd.DataFrame(index=common.index)
+    result["nav"] = common["nav"]
+    result["rendimento_lordo"] = (
+        common["daily_return"] + common["transaction_cost"] / previous_nav
+    )
+    result["rendimento_netto"] = common["daily_return"]
+    result["turnover"] = common["turnover"]
+    result["costo_transazione"] = common["transaction_cost"]
+    # Preserve the pre-refactor A convention even for zero-notional orders.
+    result["operazione_eseguita"] = result.index.isin(scheduled.index)
+    for ticker in aperture.columns:
+        result[f"{ticker}_peso_effettivo"] = common[f"{ticker}_weight"]
+
+    return result

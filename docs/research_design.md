@@ -1,7 +1,7 @@
 # Disegno della ricerca: Regime-Aware Multi-Asset Allocation
 
 **Progetto:** ProjectAgentTrading26 | LUISS, *Data-Driven Models for Investment*\
-**Stato al 27 ottobre 2026:** A1, A2 e B implementati localmente; B_v2 congelata dopo la selezione sul training; validation 2017–2021 esaminata successivamente; test finale dal 2022 non eseguito per questo sistema Multi-Asset.\
+**Stato al 28 ottobre 2026:** A1, A2 e B implementati e consolidati localmente; 123 test unitari superati dopo il refactoring; B_v2 congelata dopo la selezione sul training; validation 2017–2021 esaminata successivamente; test finale dal 2022 non eseguito per questo sistema Multi-Asset.\
 **Archivio della ricerca precedente:** [`treasury_research_review.md`](treasury_research_review.md) documenta lo studio su SHY/IEF/TLT. Le sue regole e i suoi risultati non descrivono la strategia Multi-Asset attuale, basata su SPY/IEF/GLD/SHY.
 
 ## 1. Obiettivo e ipotesi di ricerca
@@ -121,12 +121,12 @@ python3 -m unittest discover -s tests -p 'test_*.py' -v
 python3 main.py --level ALL
 python3 main.py --level B --b-version v1
 python3 main.py --level B --b-version v2
-python3 holdout_diagnostic_bv2.py --through 2021-12-31
+python3 tests/holdout_diagnostic_bv2.py --through 2021-12-31
 ```
 
-`main.py --level B` utilizza v1 come default per compatibilità con il codice precedente. Entrambe le versioni B sono state riprodotte senza sovrascrivere gli output congelati (B6.8); l'interfaccia dei regimi ha riprodotto i budget esistenti e superato test con etichette sintetiche di clustering (B6.9). La suite va rieseguita sul codice effettivamente integrato prima del commit/push: i precedenti test superati non garantiscono che la versione ottenuta dal merge sia già verificata.
+`main.py --level B` utilizza v1 come default per compatibilità con il codice precedente. Entrambe le versioni B sono state riprodotte senza sovrascrivere gli output congelati (B6.8); l'interfaccia dei regimi ha riprodotto i budget esistenti e superato test con etichette sintetiche di clustering (B6.9). La suite locale di 123 test è stata superata dopo il consolidamento A/B del 28 ottobre 2026. I test e i backtest dovranno comunque essere rieseguiti sul codice risultante dall'integrazione in `main`: la verifica del branch locale non sostituisce la verifica successiva al merge.
 
-**Moduli principali:** `src/macro_availability.py` (allineamento delle date di osservazione), `src/macro_features.py` (feature e regimi), `src/regime_signals.py` (momentum e filtri), `src/regime_allocator.py` (budget e limite di volatilità), `src/regime_strategy.py` (composizione B_v1/v2), `src/longshort_backtester.py` (motore giornaliero con contabilità autofinanziante) e `src/regime_contract.py` (interfaccia dei regimi). `main.py` seleziona le versioni; `src/evaluator.py` calcola le metriche confrontabili. A1/A2 mantengono il percorso consolidato per allocazione e backtesting.
+**Moduli principali (dopo il consolidamento del 28 ottobre):** `src/data_transformation.py` contiene anche l'API `load_dataset`; `src/macro_availability.py` realizza l'allineamento delle osservazioni macro, le feature e la classificazione deterministica dei regimi. `src/regime_allocator.py` comprende la validazione delle etichette di regime, il contratto esplicito cluster-budget, i segnali momentum, i filtri e i vincoli di volatilità. `src/regime_strategy.py` compone B_v1 e B_v2; `src/longshort_backtester.py` esegue la simulazione giornaliera con contabilità autofinanziante, anche per Long/Flat. `src/portfolio.py` contiene A1/A2 e l'ottimizzatore CVXPY; `src/backtester.py` coordina il percorso A; `src/evaluator.py` calcola le metriche e `src/time_split.py` gestisce i confini temporali. `main.py` seleziona le versioni. I vecchi moduli `multiasset_allocator.py`, `macro_features.py`, `regime_signals.py`, `regime_contract.py` e `data_loader.py` sono stati assorbiti nei moduli indicati e non devono essere importati.
 
 **Interfaccia per il clustering:** una serie temporale di etichette deve essere allineata alle date di decisione e ai confini del periodo; è necessaria una politica di associazione **esplicita e non anticipativa** fra etichette e budget. `cluster_0` non equivale automaticamente a `low_low`. L'interfaccia è stata testata, ma **non** addestra i cluster, non ne certifica la stabilità e non valida la politica di associazione appresa.
 
@@ -141,5 +141,5 @@ python3 holdout_diagnostic_bv2.py --through 2021-12-31
 ## 8. Prossime fasi della ricerca
 
 1. **Stabilizzare e pubblicare l'infrastruttura comune:** aggiornare README, Research Design e Decision Log esistenti; proteggere gli output congelati; eseguire test di regressione e di invarianti; integrare il lavoro con il `main` remoto più recente senza sovrascrivere i contributi dei colleghi.
-2. **Clustering:** fornire una nuova serie di regimi tramite `regime_contract.py`, mantenendo invariati momentum, riduzione del rischio e backtester; misurare se il nuovo classificatore aggiunge valore rispetto ai regimi deterministici e ai budget fissi.
+2. **Clustering:** fornire una nuova serie di regimi tramite il contratto `validate_regime_series` / `build_regime_budget_panel` in `src/regime_allocator.py`, mantenendo invariati momentum, riduzione del rischio e backtester; misurare se il nuovo classificatore aggiunge valore rispetto ai regimi deterministici e ai budget fissi.
 3. **Forecasting e agenti:** definire **prima dell'addestramento** variabile target, orizzonte, benchmark e protocollo walk-forward. Valutare separatamente capacità predittiva e risultati economici netti. Le notizie storiche richiedono timestamp verificabili. Il test finale dal 2022 è destinato alla valutazione conclusiva, non allo sviluppo.

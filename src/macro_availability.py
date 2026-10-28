@@ -1,4 +1,6 @@
-"""Temporal alignment of verified daily macro-financial observations."""
+"""Temporal alignment of verified releases and conservative date-based proxies."""
+
+from collections.abc import Mapping
 
 import pandas as pd
 
@@ -105,3 +107,133 @@ def align_daily_observation_proxy(
         raise ValueError("Missing or stale macro observations")
 
     return aligned.set_index("decision_date")
+
+def align_daily_macro_panel(
+    decision_dates: pd.DatetimeIndex,
+    daily_observations: Mapping[str, pd.Series],
+) -> pd.DataFrame:
+    """Align several *daily* FRED proxies on actual session decision dates.
+
+    Every observation is strictly earlier than its decision date and at most
+    seven calendar days old. Each value retains its observation date for audit.
+    This does NOT establish publication timestamps or historical vintages.
+    Monthly/low-frequency releases should use verified event availability,
+    not this seven-day observation-date proxy.
+    """
+    if not isinstance(daily_observations, Mapping) or not daily_observations:
+        raise ValueError("Expected a nonempty mapping of daily macro series")
+
+    panel = pd.DataFrame(index=decision_dates)
+    panel.index.name = "Date"
+    for name, series in daily_observations.items():
+        if (not isinstance(name, str) or not name.isidentifier()
+                or name.endswith("_observation_date") or name in panel.columns):
+            raise ValueError(f"Invalid or duplicate macro name: {name!r}")
+        if not isinstance(series, pd.Series):
+            raise TypeError(f"Daily macro input {name!r} must be a Series")
+        aligned = align_daily_observation_proxy(decision_dates, series)
+        panel[name] = pd.to_numeric(aligned["value"], errors="raise").to_numpy()
+        panel[f"{name}_observation_date"] = aligned["observation_date"].to_numpy()
+    return panel
+
+
+# Macro feature construction on the available historical observation proxies.
+
+def build_macro_feature_levels(
+    decision_dates: pd.DatetimeIndex,
+    vix: pd.Series,
+    breakeven_10y: pd.Series,
+) -> pd.DataFrame:
+    """Build candidate features. Not point-in-time verified."""
+
+    vix_data = align_daily_observation_proxy(decision_dates, vix)
+
+    breakeven_data = align_daily_observation_proxy(
+        decision_dates, breakeven_10y
+    )
+
+    features = pd.DataFrame(index=vix_data.index)
+
+    features["vix_level"] = vix_data["value"]
+    features["breakeven_10y"] = breakeven_data["value"]
+
+    # Preserve observation dates for temporal auditing.
+    features["vix_observation_date"] = vix_data["observation_date"]
+    features["breakeven_observation_date"] = (
+        breakeven_data["observation_date"]
+    )
+    # Four-week changes, measured in index points
+    # and percentage points, respectively.
+    features["vix_change_4w"] = (
+        features["vix_level"].diff(4)
+    )
+
+    features["breakeven_change_4w"] = (
+        features["breakeven_10y"].diff(4)
+    )
+    return features
+
+
+def classify_macro_regimes(
+    features: pd.DataFrame,
+    min_history: int = 52,
+    window_weeks: int | None = None,
+) -> pd.DataFrame:
+    """Experimental classifier. Not PIT-certified."""
+
+    required = {"vix_level", "breakeven_10y"}
+    if not required.issubset(features.columns):
+        raise ValueError("Missing macro features")
+
+    if min_history < 1:
+        raise ValueError("Invalid minimum history")
+
+    if window_weeks is not None and window_weeks < min_history:
+        raise ValueError("Rolling window shorter than minimum history")
+
+    result = pd.DataFrame(index=features.index)
+
+    def past_median(column):
+        past = features[column].shift(1)
+
+        if window_weeks is None:
+            return past.expanding(
+                min_periods=min_history
+            ).median()
+
+        return past.rolling(
+            window=window_weeks,
+            min_periods=min_history
+        ).median()
+
+    result["vix_threshold"] = past_median("vix_level")
+
+    result["breakeven_threshold"] = past_median(
+        "breakeven_10y"
+    )
+    valid = result.notna().all(axis=1)
+
+    result["stress_state"] = pd.Series(
+        pd.NA, index=features.index, dtype="string"
+    )
+    result["inflation_comp_state"] = pd.Series(
+        pd.NA, index=features.index, dtype="string"
+    )
+
+    result.loc[valid, "stress_state"] = (
+        features.loc[valid, "vix_level"]
+        .gt(result.loc[valid, "vix_threshold"])
+        .map({True: "high", False: "low"})
+    )
+
+    result.loc[valid, "inflation_comp_state"] = (
+        features.loc[valid, "breakeven_10y"]
+        .gt(result.loc[valid, "breakeven_threshold"])
+        .map({True: "high", False: "low"})
+    )
+
+    result["regime"] = result["stress_state"].str.cat(
+        result["inflation_comp_state"], sep="_"
+    )
+
+    return result

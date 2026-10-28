@@ -1,7 +1,7 @@
 """Esecuzione e registrazione dei backtest del progetto Multi-Asset.
 
 Il modulo coordina le strategie A1 e A2 utilizzando un UNICO motore di
-simulazione, ``simula_portafoglio`` in ``multiasset_backtester.py``.
+simulazione, ``simula_portafoglio`` in ``longshort_backtester.py``.
 Non implementa un secondo algoritmo di valorizzazione del portafoglio.
 
 Responsabilita':
@@ -30,7 +30,7 @@ import re
 import numpy as np
 import pandas as pd
 
-from src.data_loader import load_dataset
+from src.data_transformation import load_dataset
 from src.time_split import get_time_windows, is_oos_enabled
 from src.utils import get_tickers
 
@@ -308,7 +308,7 @@ def run_backtest(
     Restituisce due dizionari: risultati giornalieri e riepiloghi operativi.
     Non calcola indici di performance finanziaria: li produrra' l'evaluator.
     """
-    from src.multiasset_backtester import simula_portafoglio
+    from src.longshort_backtester import simula_portafoglio
 
     root_dir = Path(root_dir)
     selected = _select_level(config, level)

@@ -38,9 +38,9 @@ import pandas as pd
 import yaml
 
 from src.backtester import run_backtest
-from src.data_loader import load_dataset
+from src.data_transformation import load_dataset
 from src.evaluator import calculate_metrics, run_evaluation
-from src.multiasset_backtester import simula_portafoglio
+from src.longshort_backtester import simula_portafoglio
 from src.portfolio import (
     _get_a2_parameters,
     build_a1_weights,
@@ -176,7 +176,7 @@ def write_processed_data(root: Path, panel: pd.DataFrame, decisions: pd.DataFram
 
 def fake_a2_allocator(captured: list[pd.DataFrame] | None = None):
     """Sostituisce esclusivamente il risolutore nei test di integrazione."""
-    module = types.ModuleType("src.multiasset_allocator")
+    module = types.ModuleType("mocked_a2_allocator")
 
     def calculate(returns, finestra=126, volatilita_massima=0.08):
         if captured is not None:
@@ -321,7 +321,7 @@ class TestA2Causality(unittest.TestCase):
 
     def test_only_last_126_past_returns_reach_allocator(self):
         captured = []
-        with patch.dict(sys.modules, {"src.multiasset_allocator": fake_a2_allocator(captured)}):
+        with patch("src.portfolio.calcola_pesi_a2", fake_a2_allocator(captured).calcola_pesi_a2):
             weights, diagnostics = build_a2_weights(
                 self.panel, self.decisions, self.config, list(ASSETS)
             )
@@ -342,9 +342,9 @@ class TestA2Causality(unittest.TestCase):
         altered = self.panel.copy(deep=True)
         # La variazione inizia dopo la prima chiusura decisionale.
         altered.loc[altered.index > self.decisions[0], "SPY_close"] *= 1.05
-        with patch.dict(sys.modules, {"src.multiasset_allocator": fake_a2_allocator(first_run)}):
+        with patch("src.portfolio.calcola_pesi_a2", fake_a2_allocator(first_run).calcola_pesi_a2):
             build_a2_weights(self.panel, self.decisions, self.config, list(ASSETS))
-        with patch.dict(sys.modules, {"src.multiasset_allocator": fake_a2_allocator(second_run)}):
+        with patch("src.portfolio.calcola_pesi_a2", fake_a2_allocator(second_run).calcola_pesi_a2):
             build_a2_weights(altered, self.decisions, self.config, list(ASSETS))
 
         pd.testing.assert_frame_equal(first_run[0], second_run[0])
@@ -352,7 +352,7 @@ class TestA2Causality(unittest.TestCase):
 
     def test_insufficient_warmup_is_an_error(self):
         shortened = self.panel.loc["2020-05-25":].copy()
-        with patch.dict(sys.modules, {"src.multiasset_allocator": fake_a2_allocator()}):
+        with patch("src.portfolio.calcola_pesi_a2", fake_a2_allocator().calcola_pesi_a2):
             with self.assertRaisesRegex(ValueError, "Storico insufficiente"):
                 build_a2_weights(shortened, self.decisions, self.config, list(ASSETS))
 
@@ -369,7 +369,7 @@ class TestA2NumericalAllocator(unittest.TestCase):
         return pd.DataFrame(data, index=index, columns=ASSETS)
 
     def test_equal_weight_if_estimated_risk_below_limit(self):
-        from src.multiasset_allocator import calcola_pesi_a2
+        from src.portfolio import calcola_pesi_a2
         daily = self.returns([0.001, 0.0008, 0.0012, 0.0003])
         weights, info = calcola_pesi_a2(daily, finestra=126, volatilita_massima=0.08)
         np.testing.assert_allclose(weights.to_numpy(), [0.25] * 4, atol=1e-12)
@@ -378,7 +378,7 @@ class TestA2NumericalAllocator(unittest.TestCase):
         self.assertLess(info["volatilita_ew"], 0.08)
 
     def test_feasible_constraint_reduces_risk_with_actual_solver(self):
-        from src.multiasset_allocator import calcola_pesi_a2
+        from src.portfolio import calcola_pesi_a2
         daily = self.returns([0.025, 0.003, 0.015, 0.0006])
         weights, info = calcola_pesi_a2(daily, finestra=126, volatilita_massima=0.08)
         self.assertEqual(info["stato"], "ottimizzato")
@@ -390,7 +390,7 @@ class TestA2NumericalAllocator(unittest.TestCase):
         self.assertLess(weights["SPY"], 0.25)
 
     def test_infeasible_constraint_uses_minimum_variance_fallback(self):
-        from src.multiasset_allocator import calcola_pesi_a2
+        from src.portfolio import calcola_pesi_a2
         rng = np.random.default_rng(212)
         common = rng.normal(0, 0.025, size=156)
         noise = rng.normal(0, 0.0004, size=(156, 4))
@@ -407,7 +407,7 @@ class TestA2NumericalAllocator(unittest.TestCase):
         self.assertGreaterEqual(weights.min(), -1e-7)
 
     def test_covariance_uses_last_126_observations_and_252_days(self):
-        from src.multiasset_allocator import calcola_pesi_a2
+        from src.portfolio import calcola_pesi_a2
         daily = self.returns([0.004, 0.003, 0.006, 0.001])
         weights, info = calcola_pesi_a2(daily, finestra=126, volatilita_massima=1.0)
         cov_annual = daily.tail(126).cov().to_numpy(dtype=float) * 252
@@ -423,7 +423,7 @@ class TestA2NumericalAllocator(unittest.TestCase):
         self.assertAlmostEqual(info["volatilita_ew"], with_older_history["volatilita_ew"])
 
     def test_invalid_prices_or_short_history_are_rejected_by_allocator(self):
-        from src.multiasset_allocator import calcola_pesi_a2
+        from src.portfolio import calcola_pesi_a2
         valid = self.returns([0.003] * 4)
         bad = valid.copy()
         bad.iloc[4, 0] = np.nan
@@ -732,7 +732,7 @@ class TestPipelineIntegration(unittest.TestCase):
 
     def test_a2_integration_uses_the_same_backtest_engine_as_equal_weight(self):
         _, a1, _, _, _ = self.run_a1()
-        with patch.dict(sys.modules, {"src.multiasset_allocator": fake_a2_allocator()}):
+        with patch("src.portfolio.calcola_pesi_a2", fake_a2_allocator().calcola_pesi_a2):
             with redirect_stdout(StringIO()):
                 a2_weights = run_portfolio(self.config, self.root, level="A2")
         with redirect_stdout(StringIO()):
