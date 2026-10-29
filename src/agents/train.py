@@ -1,27 +1,43 @@
 """
 train.py
 
-Script di training e tuning dei parametri per gli agenti statistici:
-- SMAEMAAgent (Trend-Following)
-- ZScoreAgent (Breakout/Momentum & Mean-Reversion con Isteresi)
+Script di training e tuning dei parametri per tutti gli agenti quantitativi di ProjectAgentTrading26:
+- Agenti Statistici:
+    * SMAEMAAgent (Trend-Following)
+    * ZScoreAgent (Breakout/Momentum & Mean-Reversion con Isteresi)
+- Agente Machine Learning:
+    * RandomForestAgent (Pattern non lineari, interazioni macro e feature price-lagged)
+- Agente Macro:
+    * MacroYieldCurveAgent (Inversione e pendenza della curva dei rendimenti, regimi macro)
+- Agente Orchestratore:
+    * OrchestratorAgent (Ensemble quantitativo con pesi sul simplesso, boost di consenso e penalizzazione conflitto)
 
-Funzionalita principali:
-- Esegue l'ottimizzazione Walk-Forward su tutti i 3 asset dell'universo (SHY, IEF, TLT).
-- Finestra mobile: 5 anni di training (In-Sample) -> test sull'anno successivo (Out-Of-Sample).
-- Funzione obiettivo di stabilita e penalizzazione del Max Drawdown ('sharpe_mdd').
-- Rispetta rigorosamente il vincolo OOS lock: training limitato fino al 2021 (max_train_year = 2021).
-- Salva i file JSON di configurazione in src/agents/config/.
-- Esporta il log completo di TUTTE le combinazioni testate (fold-by-fold e riepilogo aggregato)
-  in data/results/ e src/agents/logs/.
-- Genera per ciascuno dei 3 indici un DataFrame dedicato con esattamente 2 colonne:
-    1. 'signal' (discreto: {-1, 0, 1})
-    2. 'confidence' (continuo: probabilita / confidenza in [0.0, 1.0])
-- Salva i 3 DataFrame in data/signals/signals_statistical_{asset}.csv.
+Funzionalità principali:
+- Supporta l'universo multi-asset a 4 classi: SPY (Azionario), IEF (Obbligazionario 7-10y), GLD (Oro), SHY (Liquidità/Breve termine).
+- Esegue l'ottimizzazione Walk-Forward rolling (5 anni di training In-Sample -> 1 anno di test Validation Out-Of-Sample).
+- Rispetta rigorosamente il vincolo OOS lock del progetto: training e selezione limitati al periodo <= 2021 (max_train_year = 2021).
+- Funzione obiettivo di stabilità e penalizzazione del Max Drawdown ('sharpe_mdd').
+- Salva tutti i file di configurazione JSON e i modelli serializzati (.joblib) in src/agents/config/:
+    * sma_ema_params_{asset}.json
+    * zscore_params_{asset}.json
+    * random_forest_params_{asset}.json (e .joblib)
+    * orchestrator_params_{asset}.json
+- Esporta i log dettagliati di tutte le combinazioni testate in data/results/:
+    * grid_search_combinations_sma_ema_{asset}.csv
+    * summary_combinations_sma_ema_{asset}.csv
+    * grid_search_combinations_zscore_{asset}.csv
+    * summary_combinations_zscore_{asset}.csv
+    * summary_combinations_orchestrator_{asset}.csv
+- Salva i DataFrame dei segnali pronti per backtesting e allocation in data/signals/:
+    * signals_statistical_{asset}.csv
+    * signals_random_forest_{asset}.csv
+    * signals_orchestrator_{asset}.csv
 """
 
-import sys
+import argparse
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+import sys
+from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
@@ -33,9 +49,24 @@ if str(PROJECT_ROOT) not in sys.path:
 if str(CURRENT_DIR) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR))
 
-from src.agents.base_agent import BaseAgent, DEFAULT_ASSETS, calculate_performance_metrics
+from src.agents.base_agent import (
+    BaseAgent,
+    DEFAULT_ASSETS,
+    calculate_performance_metrics,
+    compute_objective_score,
+)
 from src.agents.EMA_EMW_agent import SMAEMAAgent, SMAEMAOptimizer, WalkForwardTrainer as SMAEMATrainer
 from src.agents.ZScore_agent import ZScoreAgent, ZScoreOptimizer, ZScoreWalkForwardTrainer
+from src.agents.macro_yield_curve_agent import MacroYieldCurveAgent
+from src.agents.random_forest_agent import (
+    RandomForestAgent,
+    RandomForestOptimizer,
+    RandomForestWalkForwardTrainer,
+)
+from src.agents.orchestrator_agent import (
+    OrchestratorAgent,
+    OrchestratorOptimizer,
+)
 
 
 # =====================================================================
@@ -120,156 +151,256 @@ def train_single_asset(
     results_dir: Path,
     max_train_year: int = 2021,
     objective_metric: str = "sharpe_mdd",
-) -> Tuple[Dict, Dict, pd.DataFrame]:
+    train_rf: bool = True,
+    train_orchestrator: bool = True,
+) -> Dict[str, Any]:
     """
-    Esegue il training Walk-Forward per un asset specifico (es. 'SHY', 'IEF', 'TLT'),
-    salva le configurazioni ottimali, esporta i log di tutte le combinazioni testate
-    e restituisce il DataFrame (signal, confidence).
+    Esegue il training Walk-Forward completo per un asset specifico ('SPY', 'IEF', 'GLD', 'SHY'):
+    1. Agente SMA/EMA (Trend-Following) -> config JSON & log combinazioni.
+    2. Agente Z-Score (Momentum/Mean-Reversion) -> config JSON & log combinazioni.
+    3. Ensemble Statistico -> signals_statistical_{asset}.csv.
+    4. Agente Random Forest (Machine Learning) -> config JSON, modello .joblib & signals_random_forest_{asset}.csv.
+    5. Agente Macro Yield Curve -> segnali macro allineati.
+    6. Agente Orchestratore (Ensemble Quantitativo) -> orchestrator_params_{asset}.json & signals_orchestrator_{asset}.csv.
     """
-    price_col = f"{asset}_close"
+    asset_upper = asset.upper()
+    asset_lower = asset.lower()
+    price_col = f"{asset_upper}_close"
     if price_col not in df.columns:
         raise KeyError(f"Colonna '{price_col}' non trovata nel dataset.")
 
-    print("\n" + "#" * 80)
-    print(f"### AVVIO TRAINING & OTTIMIZZAZIONE WALK-FORWARD: {asset} ({price_col})")
-    print("#" * 80)
+    print("\n" + "#" * 84)
+    print(f"### AVVIO TRAINING & OTTIMIZZAZIONE COMPLETA: {asset_upper} ({price_col})")
+    print("#" * 84)
 
-    # 1. Ottimizzazione SMA/EMA (Trend-Following)
-    print(f"\n[{asset}] >>> Walk-Forward: SMA/EMA Agent...")
+    # -----------------------------------------------------------------
+    # 1. OTTIMIZZAZIONE SMA/EMA (Trend-Following)
+    # -----------------------------------------------------------------
+    print(f"\n[{asset_upper}] >>> Walk-Forward: SMA/EMA Agent...")
     sma_opt = SMAEMAOptimizer(price_col=price_col, objective_metric=objective_metric)
     sma_trainer = SMAEMATrainer(optimizer=sma_opt, train_window_years=5, price_col=price_col)
     sma_res = sma_trainer.run(df, max_year=max_train_year)
 
-    sma_config_file = config_dir / f"sma_ema_params_{asset.lower()}.json"
+    sma_config_file = config_dir / f"sma_ema_params_{asset_lower}.json"
     sma_trainer.save_final_agent_config(sma_config_file)
 
-    # Salvataggio log di tutte le combinazioni testate per SMA/EMA
-    sma_comb_log_file = results_dir / f"grid_search_combinations_sma_ema_{asset.lower()}.csv"
+    sma_comb_log_file = results_dir / f"grid_search_combinations_sma_ema_{asset_lower}.csv"
     sma_trainer.save_combinations_log(sma_comb_log_file)
 
-    sma_comb_sum_file = results_dir / f"summary_combinations_sma_ema_{asset.lower()}.csv"
+    sma_comb_sum_file = results_dir / f"summary_combinations_sma_ema_{asset_lower}.csv"
     sma_trainer.save_combinations_summary(sma_comb_sum_file)
 
-    # Stampa le prime 5 combinazioni SMA/EMA più frequenti/performanti
     sma_sum_df = sma_trainer.get_combinations_summary()
-    print(f"\n[{asset}] Top 5 Combinazioni SMA/EMA per performance OOS aggregata:")
+    print(f"\n[{asset_upper}] Top 3 Combinazioni SMA/EMA per performance OOS aggregata:")
     print(
-        sma_sum_df.head(5)[
+        sma_sum_df.head(3)[
             ["sma_window", "ema_window", "times_best", "selection_pct", "mean_oos_sharpe", "mean_oos_return_pct", "oos_win_rate_pct"]
         ].to_string(index=False)
     )
 
-    # 2. Ottimizzazione Z-Score (Momentum / Mean-Reversion con Isteresi)
-    print(f"\n[{asset}] >>> Walk-Forward: Z-Score Agent...")
+    # -----------------------------------------------------------------
+    # 2. OTTIMIZZAZIONE Z-SCORE (Momentum / Mean-Reversion con Isteresi)
+    # -----------------------------------------------------------------
+    print(f"\n[{asset_upper}] >>> Walk-Forward: Z-Score Agent...")
     zs_opt = ZScoreOptimizer(price_col=price_col, exit_threshold=0.0, objective_metric=objective_metric)
     zs_trainer = ZScoreWalkForwardTrainer(optimizer=zs_opt, train_window_years=5, price_col=price_col)
     zs_res = zs_trainer.run(df, max_year=max_train_year)
 
-    zs_config_file = config_dir / f"zscore_params_{asset.lower()}.json"
+    zs_config_file = config_dir / f"zscore_params_{asset_lower}.json"
     zs_trainer.save_final_agent_config(zs_config_file)
 
-    # Salvataggio log di tutte le combinazioni testate per Z-Score
-    zs_comb_log_file = results_dir / f"grid_search_combinations_zscore_{asset.lower()}.csv"
+    zs_comb_log_file = results_dir / f"grid_search_combinations_zscore_{asset_lower}.csv"
     zs_trainer.save_combinations_log(zs_comb_log_file)
 
-    zs_comb_sum_file = results_dir / f"summary_combinations_zscore_{asset.lower()}.csv"
+    zs_comb_sum_file = results_dir / f"summary_combinations_zscore_{asset_lower}.csv"
     zs_trainer.save_combinations_summary(zs_comb_sum_file)
 
-    # Stampa le prime 5 combinazioni Z-Score più frequenti/performanti
     zs_sum_df = zs_trainer.get_combinations_summary()
-    print(f"\n[{asset}] Top 5 Combinazioni Z-Score per performance OOS aggregata:")
+    print(f"\n[{asset_upper}] Top 3 Combinazioni Z-Score per performance OOS aggregata:")
     print(
-        zs_sum_df.head(5)[
+        zs_sum_df.head(3)[
             ["window", "threshold", "mode", "times_best", "selection_pct", "mean_oos_sharpe", "mean_oos_return_pct", "oos_win_rate_pct"]
         ].to_string(index=False)
     )
 
-    # 3. Istanziazione Agenti Ottimizzati e Predizione con Confidenza
-    sma_agent = SMAEMAAgent(price_col=price_col)
+    # -----------------------------------------------------------------
+    # 3. ISTANZIAZIONE ED ENSEMBLE STATISTICO
+    # -----------------------------------------------------------------
+    sma_agent = SMAEMAAgent(price_col=price_col, target_asset=asset_upper)
     sma_agent.load_params(sma_config_file)
     sig_sma, conf_sma = sma_agent.predict_with_confidence(df)
 
-    zs_agent = ZScoreAgent(price_col=price_col)
+    zs_agent = ZScoreAgent(price_col=price_col, target_asset=asset_upper)
     zs_agent.load_params(zs_config_file)
     sig_zs, conf_zs = zs_agent.predict_with_confidence(df)
 
-    # 4. Generazione DataFrame con le 2 colonne richieste: 'signal' e 'confidence'
-    df_signals = combine_statistical_signals(
+    df_stat = combine_statistical_signals(
         signals_sma=sig_sma,
         conf_sma=conf_sma,
         signals_zs=sig_zs,
         conf_zs=conf_zs,
     )
+    stat_csv = signals_dir / f"signals_statistical_{asset_lower}.csv"
+    df_stat.to_csv(stat_csv)
+    print(f"\n[{asset_upper}] Segnali statistici salvati in: {stat_csv}")
 
-    assert list(df_signals.columns) == ["signal", "confidence"], (
-        f"Errore formato colonne: atteso ['signal', 'confidence'], ottenuto {list(df_signals.columns)}"
-    )
+    # -----------------------------------------------------------------
+    # 4. AGENTE MACHINE LEARNING RANDOM FOREST
+    # -----------------------------------------------------------------
+    rf_res = None
+    df_rf = None
+    if train_rf:
+        print(f"\n[{asset_upper}] >>> Walk-Forward: Random Forest Agent...")
+        rf_opt = RandomForestOptimizer(
+            target_asset=asset_upper,
+            price_col=price_col,
+            depth_candidates=[2, 3],
+            min_leaf_candidates=[20, 30],
+            threshold_candidates=[0.51, 0.52, 0.53],
+            n_estimators_candidates=[100],
+            objective_metric=objective_metric,
+        )
+        rf_trainer = RandomForestWalkForwardTrainer(
+            optimizer=rf_opt,
+            train_window_years=5,
+            target_asset=asset_upper,
+        )
+        rf_res = rf_trainer.run(df, max_year=max_train_year)
 
-    # 5. Salvataggio DataFrame segnali
-    output_csv = signals_dir / f"signals_statistical_{asset.lower()}.csv"
-    df_signals.to_csv(output_csv)
-    print(f"\n[{asset}] Segnali statistici salvati in: {output_csv}")
+        rf_config_file = config_dir / f"random_forest_params_{asset_lower}.json"
+        rf_trainer.save_final_agent_config(rf_config_file)
 
-    # 6. Calcolo metriche storiche comparative sul periodo IS (fino al 2021)
-    ret_asset = df[price_col].astype(float).pct_change().fillna(0.0)
+        sig_rf, conf_rf = rf_trainer.final_agent.predict_with_confidence(df)
+        df_rf = pd.DataFrame({"signal": sig_rf, "confidence": conf_rf}, index=df.index)
+        rf_csv = signals_dir / f"signals_random_forest_{asset_lower}.csv"
+        df_rf.to_csv(rf_csv)
+        print(f"[{asset_upper}] Segnali Random Forest salvati in: {rf_csv}")
+
+    # -----------------------------------------------------------------
+    # 5. AGENTE MACRO YIELD CURVE
+    # -----------------------------------------------------------------
+    macro_agent = MacroYieldCurveAgent(target_asset=asset_upper)
+    macro_multi = macro_agent.predict_multi_asset(df, assets=[asset_upper])
+    m_sig = macro_multi[f"{asset_upper}_signal"]
+    macro_score = macro_agent.calculate_macro_score(df)
+    m_conf = (macro_score.abs() / 2.0).clip(0.0, 1.0).round(4)
+    m_conf = pd.Series(np.where(m_sig != 0, np.maximum(0.50, m_conf), 0.0), index=df.index)
+    df_macro = pd.DataFrame({"signal": m_sig, "confidence": m_conf}, index=df.index)
+
+    # -----------------------------------------------------------------
+    # 6. AGENTE ORCHESTRATORE (Ensemble Ottimizzato)
+    # -----------------------------------------------------------------
+    orch_res = None
+    df_orch = None
+    if train_orchestrator:
+        print(f"\n[{asset_upper}] >>> Ottimizzazione Agente Orchestratore...")
+        signals_pool = {
+            "Statistical_Agent": df_stat,
+            "Macro_YieldCurve_Agent": df_macro,
+        }
+        if df_rf is not None:
+            signals_pool["RandomForest_Agent"] = df_rf
+
+        ret_asset = df[price_col].astype(float).pct_change().fillna(0.0)
+
+        orch_opt = OrchestratorOptimizer(
+            objective_metric=objective_metric,
+            max_train_year=max_train_year,
+            weight_step=0.05,
+            threshold_range=(0.15, 0.50, 0.05),
+        )
+        best_orch_agent, df_summary_orch = orch_opt.optimize(
+            signals_dict=signals_pool,
+            returns_or_prices=ret_asset,
+            asset_name=asset_upper,
+        )
+
+        orch_config_file = config_dir / f"orchestrator_params_{asset_lower}.json"
+        orch_opt.save_final_config(orch_config_file)
+
+        orch_summary_file = results_dir / f"summary_combinations_orchestrator_{asset_lower}.csv"
+        df_summary_orch.to_csv(orch_summary_file, index=False)
+
+        df_orch = best_orch_agent.combine(signals_pool)
+        orch_csv = signals_dir / f"signals_orchestrator_{asset_lower}.csv"
+        df_orch.to_csv(orch_csv)
+        print(f"[{asset_upper}] Segnali finali Orchestratore salvati in: {orch_csv}")
+        orch_res = orch_opt.best_params
+
+    # -----------------------------------------------------------------
+    # 7. TABELLA COMPARATIVA PERFORMANCE IN-SAMPLE (<= max_train_year)
+    # -----------------------------------------------------------------
     train_mask = df.index.year <= max_train_year
+    ret_asset = df[price_col].astype(float).pct_change().fillna(0.0)
 
     pos_sma = sig_sma.shift(1).fillna(0.0)
     pos_zs = sig_zs.shift(1).fillna(0.0)
-    pos_comb = df_signals["signal"].shift(1).fillna(0.0)
+    pos_stat = df_stat["signal"].shift(1).fillna(0.0)
+    pos_macro = df_macro["signal"].shift(1).fillna(0.0)
 
     strat_sma = (pos_sma * ret_asset)[train_mask]
     strat_zs = (pos_zs * ret_asset)[train_mask]
-    strat_comb = (pos_comb * ret_asset)[train_mask]
+    strat_stat = (pos_stat * ret_asset)[train_mask]
+    strat_macro = (pos_macro * ret_asset)[train_mask]
 
     m_sma = calculate_performance_metrics(strat_sma)
     m_zs = calculate_performance_metrics(strat_zs)
-    m_comb = calculate_performance_metrics(strat_comb)
+    m_stat = calculate_performance_metrics(strat_stat)
+    m_macro = calculate_performance_metrics(strat_macro)
 
-    t_sma = int((pos_sma.diff().fillna(0) != 0).sum())
-    t_zs = int((pos_zs.diff().fillna(0) != 0).sum())
-    t_comb = int((pos_comb.diff().fillna(0) != 0).sum())
+    print("\n" + "-" * 88)
+    print(f"  CONFRONTO FINALE IN-SAMPLE (2004-{max_train_year}) - ASSET: {asset_upper}")
+    print("-" * 88)
+    print(f"{'Modello / Agente':<28} | {'Cum Ret':<9} | {'Sharpe':<7} | {'Max DD':<7} | {'Prof Fact':<9} | {'Score Obj':<9}")
+    print("-" * 88)
+    print(f"{'SMA/EMA Agent':<28} | {m_sma['cumulative_return']*100:+7.1f}% | {m_sma['sharpe_ratio']:>7.2f} | {m_sma['max_drawdown']*100:>5.1f}% | {m_sma['profit_factor']:>9.2f} | {compute_objective_score(m_sma, objective_metric):>9.2f}")
+    print(f"{'Z-Score Agent':<28} | {m_zs['cumulative_return']*100:+7.1f}% | {m_zs['sharpe_ratio']:>7.2f} | {m_zs['max_drawdown']*100:>5.1f}% | {m_zs['profit_factor']:>9.2f} | {compute_objective_score(m_zs, objective_metric):>9.2f}")
+    print(f"{'Ensemble Statistico':<28} | {m_stat['cumulative_return']*100:+7.1f}% | {m_stat['sharpe_ratio']:>7.2f} | {m_stat['max_drawdown']*100:>5.1f}% | {m_stat['profit_factor']:>9.2f} | {compute_objective_score(m_stat, objective_metric):>9.2f}")
+    print(f"{'Macro Yield Curve Agent':<28} | {m_macro['cumulative_return']*100:+7.1f}% | {m_macro['sharpe_ratio']:>7.2f} | {m_macro['max_drawdown']*100:>5.1f}% | {m_macro['profit_factor']:>9.2f} | {compute_objective_score(m_macro, objective_metric):>9.2f}")
 
-    print("\n" + "-" * 78)
-    print(f"  PERFORMANCE IN-SAMPLE (2004-{max_train_year}) - ASSET: {asset}")
-    print("-" * 78)
-    print(f"{'Agente / Ensemble':<24} | {'Cum Ret':<10} | {'Sharpe':<8} | {'Max DD':<8} | {'Prof Fact':<10} | {'Trades':<6}")
-    print("-" * 78)
-    print(
-        f"{'SMA/EMA Agent':<24} | {m_sma['cumulative_return']*100:+8.1f}% | "
-        f"{m_sma['sharpe_ratio']:>8.2f} | {m_sma['max_drawdown']*100:>6.1f}% | {m_sma['profit_factor']:>10.2f} | {t_sma:>6d}"
-    )
-    print(
-        f"{'Z-Score Agent':<24} | {m_zs['cumulative_return']*100:+8.1f}% | "
-        f"{m_zs['sharpe_ratio']:>8.2f} | {m_zs['max_drawdown']*100:>6.1f}% | {m_zs['profit_factor']:>10.2f} | {t_zs:>6d}"
-    )
-    print(
-        f"{'Ensemble Statistico':<24} | {m_comb['cumulative_return']*100:+8.1f}% | "
-        f"{m_comb['sharpe_ratio']:>8.2f} | {m_comb['max_drawdown']*100:>6.1f}% | {m_comb['profit_factor']:>10.2f} | {t_comb:>6d}"
-    )
-    print("-" * 78)
+    if df_rf is not None:
+        pos_rf = df_rf["signal"].shift(1).fillna(0.0)
+        strat_rf = (pos_rf * ret_asset)[train_mask]
+        m_rf = calculate_performance_metrics(strat_rf)
+        print(f"{'Random Forest Agent':<28} | {m_rf['cumulative_return']*100:+7.1f}% | {m_rf['sharpe_ratio']:>7.2f} | {m_rf['max_drawdown']*100:>5.1f}% | {m_rf['profit_factor']:>9.2f} | {compute_objective_score(m_rf, objective_metric):>9.2f}")
 
-    return sma_res, zs_res, df_signals
+    if df_orch is not None:
+        pos_orch = df_orch["signal"].shift(1).fillna(0.0)
+        strat_orch = (pos_orch * ret_asset)[train_mask]
+        m_orch = calculate_performance_metrics(strat_orch)
+        print("-" * 88)
+        print(f"{'ORCHESTRATORE (OTTIMIZZATO)':<28} | {m_orch['cumulative_return']*100:+7.1f}% | {m_orch['sharpe_ratio']:>7.2f} | {m_orch['max_drawdown']*100:>5.1f}% | {m_orch['profit_factor']:>9.2f} | {compute_objective_score(m_orch, objective_metric):>9.2f}  <-- OTTIMO")
+
+    print("-" * 88)
+
+    return {
+        "asset": asset_upper,
+        "sma": sma_res,
+        "zscore": zs_res,
+        "random_forest": rf_res,
+        "orchestrator": orch_res,
+        "signals_statistical": df_stat,
+        "signals_random_forest": df_rf,
+        "signals_orchestrator": df_orch,
+    }
 
 
 # =====================================================================
-# MAIN ORCHESTRATOR
+# MAIN PIPELINE MULTI-ASSET
 # =====================================================================
 def run_all_assets(
     assets: Optional[List[str]] = None,
     max_train_year: int = 2021,
     objective_metric: str = "sharpe_mdd",
-) -> Dict[str, pd.DataFrame]:
+    train_rf: bool = True,
+    train_orchestrator: bool = True,
+) -> Dict[str, Dict[str, Any]]:
     """
-    Esegue il training Walk-Forward completo per tutti gli asset specificati
-    e restituisce un dizionario contenente i 3 DataFrame (uno per ciascun indice).
-
-    Ritorna:
-        Dict[str, pd.DataFrame]: {'SHY': df_shy, 'IEF': df_ief, 'TLT': df_tlt}
-        ciascuno con esattamente 2 colonne: ['signal', 'confidence'].
+    Esegue il workflow completo di training su tutti gli asset specificati
+    (default: universe a 4 asset SPY, IEF, GLD, SHY).
     """
     if assets is None:
-        assets = list(DEFAULT_ASSETS)  # SPY, IEF, GLD, SHY
+        assets = list(DEFAULT_ASSETS)
 
     config_dir = CURRENT_DIR / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
@@ -280,18 +411,17 @@ def run_all_assets(
     results_dir = PROJECT_ROOT / "data" / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    # Caricamento robusto tramite BaseAgent con supporto per il nuovo dataset multi-asset
+    # Caricamento centralizzato dataset con feature macro e prezzi di tutti gli asset
     df = BaseAgent.load_complete_dataset(root_dir=PROJECT_ROOT, save_features_weekly_csv=True)
-    print(f"[Train] Dataset caricato: {len(df)} righe dal {df.index[0].date()} al {df.index[-1].date()}")
-    print(f"[Train] Asset da ottimizzare: {assets}")
+    print(f"[Train] Dataset caricato: {len(df)} settimane dal {df.index[0].date()} al {df.index[-1].date()}")
+    print(f"[Train] Universo Asset da ottimizzare: {assets}")
     print(f"[Train] Metrica obiettivo: '{objective_metric}'")
-    print(f"[Train] Vincolo OOS Lock: train e selezione limitati rigorosamente fino al {max_train_year}")
+    print(f"[Train] Vincolo OOS Lock: training e tuning rigorosamente entro il {max_train_year}")
 
-    results = {}
-    signal_dataframes = {}
+    all_results = {}
 
     for asset in assets:
-        sma_res, zs_res, df_sig = train_single_asset(
+        res = train_single_asset(
             asset=asset,
             df=df,
             config_dir=config_dir,
@@ -299,46 +429,78 @@ def run_all_assets(
             results_dir=results_dir,
             max_train_year=max_train_year,
             objective_metric=objective_metric,
+            train_rf=train_rf,
+            train_orchestrator=train_orchestrator,
         )
-        results[asset] = {"sma": sma_res, "zscore": zs_res}
-        signal_dataframes[asset] = df_sig
+        all_results[asset.upper()] = res
 
-    # Riepilogo finale comparativo
-    print("\n" + "=" * 85)
-    print("                 RIEPILOGO FINALE WALK-FORWARD PER GLI ASSET")
-    print("=" * 85)
-    print(f"{'Asset':<6} | {'SMA/EMA Opt':<18} | {'SMA OOS Sh':<10} | {'ZScore Opt':<24} | {'ZS OOS Sh':<10}")
-    print("-" * 85)
+    # -----------------------------------------------------------------
+    # RIEPILOGO FINALE GENERALE
+    # -----------------------------------------------------------------
+    print("\n" + "=" * 90)
+    print("                    RIEPILOGO FINALE CONFIGURAZIONI & PARAMETRI")
+    print("=" * 90)
+    header = f"{'Asset':<6} | {'SMA/EMA Opt':<14} | {'ZScore Opt':<18} | {'Random Forest':<18} | {'Orchestrator Best':<20}"
+    print(header)
+    print("-" * 90)
+
     for asset in assets:
-        sma_r = results[asset]["sma"]
-        zs_r = results[asset]["zscore"]
-        sma_opt_str = f"S={sma_r['sma_window']}, E={sma_r['ema_window']}"
-        sma_sh = f"{sma_r['summary_metrics']['mean_oos_sharpe']:+.2f}"
-        zs_opt_str = f"W={zs_r['window']}, Th={zs_r['threshold']:.2f}, {zs_r['mode'][:3]}"
-        zs_sh = f"{zs_r['summary_metrics']['mean_oos_sharpe']:+.2f}"
-        print(f"{asset:<6} | {sma_opt_str:<18} | {sma_sh:<10} | {zs_opt_str:<24} | {zs_sh:<10}")
-    print("=" * 85)
-
-    print("\n[OK] Tutti i DataFrame dei segnali e i log delle combinazioni sono stati generati:")
-    for asset, sig_df in signal_dataframes.items():
-        print(
-            f"  - {asset}: shape={sig_df.shape}, colonne={list(sig_df.columns)}, "
-            f"distribuzione segnali={dict(sig_df['signal'].value_counts())}"
+        r = all_results[asset.upper()]
+        sma_s = f"S={r['sma']['sma_window']}, E={r['sma']['ema_window']}"
+        zs_s = f"W={r['zscore']['window']}, Th={r['zscore']['threshold']:.1f}"
+        rf_s = (
+            f"d={r['random_forest']['max_depth']}, l={r['random_forest']['min_samples_leaf']}, th={r['random_forest']['prob_threshold']:.2f}"
+            if r.get("random_forest")
+            else "N/A"
         )
-    print(f"\n[OK] I log completi delle combinazioni sono disponibili in: '{results_dir.resolve()}'.")
+        if r.get("orchestrator"):
+            orch_s = f"Th={r['orchestrator']['threshold']:.2f}, Sh={r['orchestrator']['sharpe_ratio']:.2f}"
+        else:
+            orch_s = "N/A"
+        print(f"{asset:<6} | {sma_s:<14} | {zs_s:<18} | {rf_s:<18} | {orch_s:<20}")
 
-    return signal_dataframes
+    print("=" * 90)
+    print("\n[OK] Configurazione e salvataggio completati. Tutti i parametri sono pronti per la predizione:")
+    print(f"  - Config JSON salvati in : {config_dir.resolve()}")
+    print(f"  - Segnali CSV salvati in : {signals_dir.resolve()}")
+    print(f"  - Log e summary salvati in: {results_dir.resolve()}\n")
+
+    return all_results
 
 
+# =====================================================================
+# CLI ENTRY POINT
+# =====================================================================
 if __name__ == "__main__":
-    target_arg = sys.argv[1] if len(sys.argv) > 1 else "ALL"
-    metric_arg = sys.argv[2] if len(sys.argv) > 2 else "sharpe_mdd"
+    parser = argparse.ArgumentParser(description="Script di training e tuning parametri per gli agenti quantitativi.")
+    parser.add_argument(
+        "target",
+        nargs="?",
+        default="ALL",
+        help="Asset target ('ALL', 'SPY', 'IEF', 'GLD', 'SHY' o 'LEGACY_TREASURY'). Default: 'ALL'",
+    )
+    parser.add_argument(
+        "metric",
+        nargs="?",
+        default="sharpe_mdd",
+        help="Metrica obiettivo per l'ottimizzazione ('sharpe_mdd', 'sharpe', 'calmar', 'return'). Default: 'sharpe_mdd'",
+    )
+    parser.add_argument("--skip-rf", action="store_true", help="Salta l'addestramento dell'agente Random Forest")
+    parser.add_argument("--skip-orch", action="store_true", help="Salta l'ottimizzazione dell'Orchestratore")
 
-    if target_arg.upper() == "ALL":
+    args = parser.parse_args()
+
+    if args.target.upper() == "ALL":
         target_assets = list(DEFAULT_ASSETS)
-    elif target_arg.upper() == "LEGACY_TREASURY":
+    elif args.target.upper() == "LEGACY_TREASURY":
         target_assets = ["SHY", "IEF", "TLT"]
     else:
-        target_assets = [target_arg.upper()]
+        target_assets = [args.target.upper()]
 
-    run_all_assets(assets=target_assets, max_train_year=2021, objective_metric=metric_arg)
+    run_all_assets(
+        assets=target_assets,
+        max_train_year=2021,
+        objective_metric=args.metric,
+        train_rf=not args.skip_rf,
+        train_orchestrator=not args.skip_orch,
+    )

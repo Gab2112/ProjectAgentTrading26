@@ -588,5 +588,8 @@ def compute_objective_score(
         return float(ann_ret / max(mdd, 0.02))
     elif metric_type == "return":
         return float(metrics["cumulative_return"])
+    elif metric_type in ("profit_oriented", "profit"):
+        pf = metrics.get("profit_factor", 1.0)
+        return float(pf * (1.0 - min(mdd, 0.99)))
     else:
         raise ValueError(f"Metrica obiettivo '{metric_type}' non riconosciuta.")

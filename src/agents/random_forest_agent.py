@@ -394,14 +394,14 @@ class RandomForestOptimizer:
 
     def __init__(
         self,
-        target_asset: str = "TLT",
+        target_asset: str = "SPY",
         price_col: Optional[str] = None,
         feature_cols: Optional[List[str]] = None,
-        depth_candidates: List[Optional[int]] = [2, 3, 4],
-        min_leaf_candidates: List[int] = [15, 25, 35],
-        threshold_candidates: List[float] = [0.51, 0.52, 0.53, 0.54],
-        n_estimators_candidates: List[int] = [100, 150],
-        objective_metric: str = "profit_oriented",
+        depth_candidates: List[Optional[int]] = [2, 3],
+        min_leaf_candidates: List[int] = [20, 30],
+        threshold_candidates: List[float] = [0.51, 0.52, 0.53],
+        n_estimators_candidates: List[int] = [100],
+        objective_metric: str = "sharpe_mdd",
         random_state: int = 42,
     ):
         self.target_asset = target_asset.upper()
@@ -570,7 +570,7 @@ class RandomForestWalkForwardTrainer:
         self,
         optimizer: RandomForestOptimizer,
         train_window_years: int = 5,
-        target_asset: str = "TLT",
+        target_asset: str = "SPY",
     ):
         self.optimizer = optimizer
         self.train_window_years = train_window_years
