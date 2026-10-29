@@ -35,15 +35,29 @@ if str(CURRENT_DIR) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR))
 
 try:
-    from src.agents.base_agent import BaseAgent, calculate_performance_metrics, compute_objective_score
+    from src.agents.base_agent import (
+        BaseAgent,
+        DEFAULT_ASSETS,
+        get_project_root,
+        calculate_performance_metrics,
+        compute_objective_score,
+    )
     from src.agents.macro_yield_curve_agent import MacroYieldCurveAgent
     from src.agents.EMA_EMW_agent import SMAEMAAgent
     from src.agents.ZScore_agent import ZScoreAgent
+    from src.agents.random_forest_agent import RandomForestAgent
 except ImportError:
-    from .base_agent import BaseAgent, calculate_performance_metrics, compute_objective_score
+    from .base_agent import (
+        BaseAgent,
+        DEFAULT_ASSETS,
+        get_project_root,
+        calculate_performance_metrics,
+        compute_objective_score,
+    )
     from .macro_yield_curve_agent import MacroYieldCurveAgent
     from .EMA_EMW_agent import SMAEMAAgent
     from .ZScore_agent import ZScoreAgent
+    from .random_forest_agent import RandomForestAgent
 
 
 # =====================================================================
@@ -149,16 +163,24 @@ class OrchestratorAgent(BaseAgent):
         consensus_boost: float = 0.15,
         conflict_penalty: float = 0.25,
         min_active_agents: int = 1,
-        name: str = "OrchestratorAgent",
+        include_rf: bool = True,
+        target_asset: Optional[str] = None,
+        name: Optional[str] = None,
         output_format: str = "numeric",
     ):
-        super().__init__(name=name, output_format=output_format)
+        agent_name = name or (f"Orchestrator_{target_asset.upper()}" if target_asset else "OrchestratorAgent")
+        super().__init__(
+            name=agent_name,
+            target_asset=target_asset,
+            output_format=output_format,
+        )
         self.weights = weights or {}
         self.threshold_buy = float(threshold_buy)
         self.threshold_sell = float(threshold_sell)
         self.consensus_boost = float(consensus_boost)
         self.conflict_penalty = float(conflict_penalty)
         self.min_active_agents = int(min_active_agents)
+        self.include_rf = bool(include_rf)
 
         self.params = {
             "weights": self.weights,
@@ -167,10 +189,15 @@ class OrchestratorAgent(BaseAgent):
             "consensus_boost": self.consensus_boost,
             "conflict_penalty": self.conflict_penalty,
             "min_active_agents": self.min_active_agents,
+            "include_rf": self.include_rf,
+            "target_asset": self.target_asset,
         }
 
     def _apply_params(self, params: Dict[str, Any]) -> None:
         """Aggiorna i parametri dell'orchestratore dopo il caricamento da JSON."""
+        super()._apply_params(params)
+        if "target_asset" in params:
+            self.target_asset = str(params["target_asset"]).upper()
         if "weights" in params:
             self.weights = {str(k): float(v) for k, v in params["weights"].items()}
         if "threshold_buy" in params:
@@ -186,6 +213,8 @@ class OrchestratorAgent(BaseAgent):
             self.conflict_penalty = float(params["conflict_penalty"])
         if "min_active_agents" in params:
             self.min_active_agents = int(params["min_active_agents"])
+        if "include_rf" in params:
+            self.include_rf = bool(params["include_rf"])
 
         self.params = {
             "weights": self.weights,
@@ -194,6 +223,8 @@ class OrchestratorAgent(BaseAgent):
             "consensus_boost": self.consensus_boost,
             "conflict_penalty": self.conflict_penalty,
             "min_active_agents": self.min_active_agents,
+            "include_rf": self.include_rf,
+            "target_asset": self.target_asset,
         }
 
     def combine(
@@ -203,6 +234,7 @@ class OrchestratorAgent(BaseAgent):
         """
         Combina la serie di segnali in input e restituisce un DataFrame con esattamente
         due colonne: 'signal' e 'confidence'.
+        Implementazione ottimizzata e vettorizzata NumPy per massima reattività e velocità.
         """
         if isinstance(signals_input, list):
             signals_dict = {f"agent_{i+1}": df for i, df in enumerate(signals_input)}
@@ -239,66 +271,42 @@ class OrchestratorAgent(BaseAgent):
         # Punteggio base continuo: S_raw(t) = sum_k (w_k * x_k(t))
         raw_scores = np.dot(conviction_mat, weights_arr)
 
+        n_long = np.sum(signals_mat == 1, axis=1)
+        n_short = np.sum(signals_mat == -1, axis=1)
+        n_active = n_long + n_short
+
+        conflict_mask = (n_long > 0) & (n_short > 0)
+        unanimous_long = (n_long > 0) & (n_short == 0)
+        unanimous_short = (n_short > 0) & (n_long == 0)
+        unanimous_multi = (unanimous_long | unanimous_short) & (n_active >= 2)
+        unanimous_single = (unanimous_long | unanimous_short) & (n_active < 2)
+
+        adjusted_scores = np.zeros(n_steps, dtype=float)
+        adjusted_scores[conflict_mask] = raw_scores[conflict_mask] * (1.0 - self.conflict_penalty)
+        adjusted_scores[unanimous_single] = raw_scores[unanimous_single]
+        adjusted_scores[unanimous_multi] = np.sign(raw_scores[unanimous_multi]) * np.minimum(
+            1.0, np.abs(raw_scores[unanimous_multi]) * (1.0 + self.consensus_boost)
+        )
+        adjusted_scores[n_active < self.min_active_agents] = 0.0
+
         final_signals = np.zeros(n_steps, dtype=int)
+        final_signals[adjusted_scores >= self.threshold_buy] = 1
+        final_signals[adjusted_scores <= -self.threshold_sell] = -1
+
+        denom = max(1.0 - min(self.threshold_buy, self.threshold_sell), 0.10)
+        score_strength = np.minimum(1.0, np.abs(adjusted_scores) / denom)
+
         final_conf = np.zeros(n_steps, dtype=float)
-
-        for t in range(n_steps):
-            active_mask = signals_mat[t] != 0
-            n_active = np.sum(active_mask)
-
-            if n_active < self.min_active_agents:
-                final_signals[t] = 0
-                final_conf[t] = 0.0
+        for s_val in [1, -1]:
+            m = final_signals == s_val
+            if not np.any(m):
                 continue
-
-            active_signs = signals_mat[t, active_mask]
-            active_conf = conf_mat[t, active_mask]
-            active_weights = weights_arr[active_mask]
-
-            score_t = raw_scores[t]
-            n_long = np.sum(active_signs == 1)
-            n_short = np.sum(active_signs == -1)
-
-            # Caso A: Conflitto diretto (agenti con segnali opposti attivi contemporaneamente)
-            if n_long > 0 and n_short > 0:
-                adjusted_score = score_t * (1.0 - self.conflict_penalty)
-            # Caso B: Accordo unanime tra agenti attivi (tutti long o tutti short)
-            elif (n_long > 0 and n_short == 0) or (n_short > 0 and n_long == 0):
-                if n_active >= 2:
-                    adjusted_score = np.sign(score_t) * min(1.0, abs(score_t) * (1.0 + self.consensus_boost))
-                else:
-                    adjusted_score = score_t
-            else:
-                adjusted_score = 0.0
-
-            # Discretizzazione del segnale finale
-            if adjusted_score >= self.threshold_buy:
-                sig_out = 1
-            elif adjusted_score <= -self.threshold_sell:
-                sig_out = -1
-            else:
-                sig_out = 0
-
-            # Calcolo confidenza finale
-            if sig_out != 0:
-                # Media ponderata della confidenza degli agenti concordi
-                agreeing_mask = signals_mat[t] == sig_out
-                agreeing_w = weights_arr[agreeing_mask]
-                agreeing_c = conf_mat[t, agreeing_mask]
-
-                sum_w = np.sum(agreeing_w)
-                mean_agree_conf = float(np.sum(agreeing_w * agreeing_c) / sum_w) if sum_w > 0 else 0.50
-
-                denom = max(1.0 - min(self.threshold_buy, self.threshold_sell), 0.10)
-                score_strength = min(1.0, abs(adjusted_score) / denom)
-
-                c_combined = 0.50 + 0.50 * (0.60 * score_strength + 0.40 * mean_agree_conf)
-                conf_out = min(1.0, max(0.50, round(float(c_combined), 4)))
-            else:
-                conf_out = 0.0
-
-            final_signals[t] = sig_out
-            final_conf[t] = conf_out
+            agree_mask = signals_mat == s_val
+            sum_w = (agree_mask * weights_arr).sum(axis=1)
+            sum_wc = (agree_mask * weights_arr * conf_mat).sum(axis=1)
+            mean_conf = np.where(sum_w > 0, sum_wc / np.maximum(sum_w, 1e-12), 0.50)
+            c_combined = 0.50 + 0.50 * (0.60 * score_strength + 0.40 * mean_conf)
+            final_conf[m] = np.clip(np.round(c_combined[m], 4), 0.50, 1.0)
 
         df_out = pd.DataFrame(
             {
@@ -310,22 +318,145 @@ class OrchestratorAgent(BaseAgent):
 
         return df_out
 
+    def _build_signals_pool_from_df(self, df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
+        """
+        Costruisce automaticamente il pool di segnali (statistici, macro e machine learning Random Forest)
+        per il target_asset configurato.
+        Permette all'Orchestratore di ricevere direttamente il DataFrame di mercato e generare la sintesi.
+        """
+        asset = (self.target_asset or "SPY").upper()
+        root = get_project_root()
+        config_dir = root / "src" / "agents" / "config"
+        signals_dir = root / "data" / "signals"
+
+        # 1. Segnali Statistici (SMA/EMA e Z-Score combinati)
+        stat_file = signals_dir / f"signals_statistical_{asset.lower()}.csv"
+        if stat_file.exists():
+            df_stat = pd.read_csv(stat_file, index_col=0, parse_dates=True)
+            df_stat = df_stat.reindex(df.index).fillna({"signal": 0, "confidence": 0.0})
+        else:
+            sma_a = SMAEMAAgent(target_asset=asset)
+            zs_a = ZScoreAgent(target_asset=asset)
+            cfg_sma = config_dir / f"sma_ema_params_{asset.lower()}.json"
+            if cfg_sma.exists():
+                sma_a.load_params(cfg_sma)
+            else:
+                sma_a.sma_window = 20
+                sma_a.ema_window = 10
+
+            cfg_zs = config_dir / f"zscore_params_{asset.lower()}.json"
+            if cfg_zs.exists():
+                zs_a.load_params(cfg_zs)
+            else:
+                zs_a.window = 20
+                zs_a.threshold = 1.5
+
+            sig_s, conf_s = sma_a.predict_with_confidence(df)
+            sig_z, conf_z = zs_a.predict_with_confidence(df)
+
+            comb_sig = np.sign(sig_s + sig_z).astype(int)
+            comb_conf = np.maximum(conf_s, conf_z)
+            df_stat = pd.DataFrame({"signal": comb_sig, "confidence": comb_conf}, index=df.index)
+
+        # 2. Segnali Macro Yield Curve
+        macro_a = MacroYieldCurveAgent(target_asset=asset)
+        macro_multi = macro_a.predict_multi_asset(df, assets=[asset])
+        m_sig = macro_multi[f"{asset}_signal"]
+        macro_score = macro_a.calculate_macro_score(df)
+        m_conf = (macro_score.abs() / 2.0).clip(0.0, 1.0).round(4)
+        m_conf = pd.Series(np.where(m_sig != 0, np.maximum(0.50, m_conf), 0.0), index=df.index)
+        df_macro = pd.DataFrame({"signal": m_sig, "confidence": m_conf}, index=df.index)
+
+        pool = {
+            "Statistical_Agent": df_stat,
+            "Macro_YieldCurve_Agent": df_macro,
+        }
+
+        # 3. Segnali Machine Learning Random Forest
+        if self.include_rf:
+            rf_file = signals_dir / f"signals_random_forest_{asset.lower()}.csv"
+            if rf_file.exists():
+                df_rf = pd.read_csv(rf_file, index_col=0, parse_dates=True)
+                df_rf = df_rf.reindex(df.index).fillna({"signal": 0, "confidence": 0.0})
+            else:
+                rf_agent = RandomForestAgent(
+                    target_asset=asset,
+                    max_depth=3,
+                    n_estimators=100,
+                    min_samples_leaf=20,
+                )
+                cfg_rf = config_dir / f"random_forest_params_{asset.lower()}.json"
+                if cfg_rf.exists():
+                    try:
+                        rf_agent.load_params(cfg_rf)
+                    except Exception:
+                        rf_agent.fit(df, max_year=2021)
+                else:
+                    rf_agent.fit(df, max_year=2021)
+
+                sig_rf, conf_rf = rf_agent.predict_with_confidence(df)
+                df_rf = pd.DataFrame({"signal": sig_rf, "confidence": conf_rf}, index=df.index)
+
+            pool["RandomForest_Agent"] = df_rf
+
+        return pool
+
     def predict(self, df_or_signals: Union[pd.DataFrame, Dict[str, pd.DataFrame]]) -> pd.Series:
         """Restituisce la serie dei segnali operativi discreti {-1, 0, 1}."""
         if isinstance(df_or_signals, dict):
             df_combined = self.combine(df_or_signals)
+        elif isinstance(df_or_signals, pd.DataFrame):
+            signals_pool = self._build_signals_pool_from_df(df_or_signals)
+            df_combined = self.combine(signals_pool)
         else:
-            raise TypeError("predict richiede un dizionario di segnali {nome: df_segnali}")
+            raise TypeError("predict richiede un dizionario di segnali o un pd.DataFrame")
 
         return self._format_signals(df_combined["signal"])
 
     def predict_with_confidence(
         self,
-        signals_input: Union[Dict[str, pd.DataFrame], List[pd.DataFrame]],
+        df_or_signals: Union[pd.DataFrame, Dict[str, pd.DataFrame], List[pd.DataFrame]],
     ) -> Tuple[pd.Series, pd.Series]:
         """Restituisce la tupla (signal, confidence) allineata."""
-        df_combined = self.combine(signals_input)
+        if isinstance(df_or_signals, pd.DataFrame):
+            signals_pool = self._build_signals_pool_from_df(df_or_signals)
+            df_combined = self.combine(signals_pool)
+        else:
+            df_combined = self.combine(df_or_signals)
         return df_combined["signal"], df_combined["confidence"]
+
+    def predict_multi_asset(
+        self,
+        df: pd.DataFrame,
+        assets: Optional[Any] = None,
+    ) -> pd.DataFrame:
+        """
+        Genera i segnali e le confidenze dell'Orchestratore per tutti i 4 asset (default: SPY, IEF, GLD, SHY).
+        Restituisce un DataFrame con colonne:
+        - {asset}_signal
+        - {asset}_confidence
+        """
+        target_assets = [str(a).upper() for a in assets] if assets is not None else list(DEFAULT_ASSETS)
+        out_df = pd.DataFrame(index=df.index)
+
+        config_dir = get_project_root() / "src" / "agents" / "config"
+
+        for asset in target_assets:
+            orch = OrchestratorAgent(target_asset=asset)
+            cfg_file = config_dir / f"orchestrator_params_{asset.lower()}.json"
+            if cfg_file.exists():
+                try:
+                    with open(cfg_file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    orch._apply_params(data.get("best_params", {}))
+                except Exception:
+                    pass
+
+            sig, conf = orch.predict_with_confidence(df)
+            out_df[f"{asset}_signal"] = sig
+            out_df[f"{asset}_confidence"] = conf
+
+        return out_df
 
 
 # =====================================================================
@@ -679,10 +810,14 @@ def run_orchestrator_pipeline(
     assets: Optional[List[str]] = None,
     max_train_year: int = 2021,
     objective_metric: str = "sharpe_mdd",
+    include_rf: bool = True,
 ) -> Dict[str, pd.DataFrame]:
     """
     Esegue l'intero workflow quantitativo dell'agente orchestratore:
-    1. Carica i segnali generati dai singoli agenti specializzati per ciascun asset ('SHY', 'IEF', 'TLT').
+    1. Carica i segnali generati dai singoli agenti specializzati per ciascun asset ('SPY', 'IEF', 'GLD', 'SHY'):
+       - Agente Statistico (SMA/EMA & Z-Score)
+       - Agente Macro (Yield Curve & Macro Regimes)
+       - Agente Machine Learning (Random Forest)
     2. Ottimizza la combinazione di pesi e soglie sul campione In-Sample (2004-2021).
     3. Salva la configurazione JSON ottimale in src/agents/config/orchestrator_params_{asset}.json.
     4. Genera per ciascun asset il DataFrame finale con esattamente due colonne: 'signal' e 'confidence'.
@@ -701,20 +836,13 @@ def run_orchestrator_pipeline(
     results_dir.mkdir(parents=True, exist_ok=True)
 
     if assets is None:
-        assets = ["SHY", "IEF", "TLT"]
+        assets = list(BaseAgent.DEFAULT_ASSETS)
 
-    features_file = processed_dir / "features_weekly.csv"
-    if not features_file.exists():
-        features_file = processed_dir / "master_weekly.csv"
-
-    if not features_file.exists():
-        raise FileNotFoundError(f"File dati non trovato in: {features_file}")
-
-    df_features = pd.read_csv(features_file, index_col=0, parse_dates=True)
+    df_features = BaseAgent.load_complete_dataset(root_dir=PROJECT_ROOT)
 
     # Inizializza l'agente Macro Yield Curve
     macro_agent = MacroYieldCurveAgent()
-    macro_multi = macro_agent.predict_multi_asset(df_features)
+    macro_multi = macro_agent.predict_multi_asset(df_features, assets=assets)
 
     final_outputs = {}
 
@@ -729,13 +857,30 @@ def run_orchestrator_pipeline(
         # 1. Caricamento segnali statistici
         stat_file = signals_dir / f"signals_statistical_{asset_lower}.csv"
         if not stat_file.exists():
-            print(f"  [ATTENZIONE] File segnali statistici non trovato: {stat_file}. Generazione al volo...")
-            price_col = f"{asset_upper}_close"
-            sma_a = SMAEMAAgent(price_col=price_col)
-            zs_a = ZScoreAgent(price_col=price_col)
+            print(f"  [INFO] File segnali statistici non trovato: {stat_file}. Generazione al volo...")
+            sma_a = SMAEMAAgent(target_asset=asset_upper)
+            zs_a = ZScoreAgent(target_asset=asset_upper)
+
+            # Carica config se presente, altrimenti default robusti
+            cfg_sma = config_dir / f"sma_ema_params_{asset_lower}.json"
+            if cfg_sma.exists():
+                sma_a.load_params(cfg_sma)
+            else:
+                sma_a.sma_window = 50
+                sma_a.ema_window = 20
+
+            cfg_zs = config_dir / f"zscore_params_{asset_lower}.json"
+            if cfg_zs.exists():
+                zs_a.load_params(cfg_zs)
+            else:
+                zs_a.window = 20
+                zs_a.threshold = 1.5
+
             sig_s, conf_s = sma_a.predict_with_confidence(df_features)
             sig_z, conf_z = zs_a.predict_with_confidence(df_features)
-            df_stat = pd.DataFrame({"signal": sig_s, "confidence": conf_s}, index=df_features.index)
+            comb_sig = np.sign(sig_s + sig_z).astype(int)
+            comb_conf = np.maximum(conf_s, conf_z)
+            df_stat = pd.DataFrame({"signal": comb_sig, "confidence": comb_conf}, index=df_features.index)
         else:
             df_stat = pd.read_csv(stat_file, index_col=0, parse_dates=True)
 
@@ -747,11 +892,42 @@ def run_orchestrator_pipeline(
         m_conf = pd.Series(np.where(m_sig != 0, np.maximum(0.50, m_conf), 0.0), index=df_features.index)
         df_macro = pd.DataFrame({"signal": m_sig, "confidence": m_conf}, index=df_features.index)
 
-        # 3. Assemblaggio del pool di agenti
+        # 3. Segnali Machine Learning Random Forest
+        if include_rf:
+            rf_file = signals_dir / f"signals_random_forest_{asset_lower}.csv"
+            if rf_file.exists():
+                df_rf = pd.read_csv(rf_file, index_col=0, parse_dates=True)
+                df_rf = df_rf.reindex(df_features.index).fillna({"signal": 0, "confidence": 0.0})
+            else:
+                print(f"  [INFO] Addestramento In-Sample e inferenza Random Forest per {asset_upper}...")
+                rf_agent = RandomForestAgent(
+                    target_asset=asset_upper,
+                    max_depth=3,
+                    n_estimators=100,
+                    min_samples_leaf=20,
+                )
+                cfg_rf = config_dir / f"random_forest_params_{asset_lower}.json"
+                if cfg_rf.exists():
+                    try:
+                        rf_agent.load_params(cfg_rf)
+                    except Exception:
+                        rf_agent.fit(df_features, max_year=max_train_year)
+                else:
+                    rf_agent.fit(df_features, max_year=max_train_year)
+                    rf_agent.save_params(cfg_rf)
+
+                sig_rf, conf_rf = rf_agent.predict_with_confidence(df_features)
+                df_rf = pd.DataFrame({"signal": sig_rf, "confidence": conf_rf}, index=df_features.index)
+                df_rf.to_csv(rf_file)
+                print(f"  Segnali Random Forest salvati in: {rf_file}")
+
+        # 4. Assemblaggio del pool di agenti
         signals_pool = {
             "Statistical_Agent": df_stat,
             "Macro_YieldCurve_Agent": df_macro,
         }
+        if include_rf:
+            signals_pool["RandomForest_Agent"] = df_rf
 
         # Serie dei rendimenti dell'asset target
         ret_col = f"{asset_upper}_return_1w"
@@ -804,4 +980,14 @@ def run_orchestrator_pipeline(
 
 
 if __name__ == "__main__":
-    run_orchestrator_pipeline()
+    target_arg = sys.argv[1] if len(sys.argv) > 1 else "ALL"
+    metric_arg = sys.argv[2] if len(sys.argv) > 2 else "sharpe_mdd"
+
+    if target_arg.upper() == "ALL":
+        target_assets = list(BaseAgent.DEFAULT_ASSETS)
+    elif target_arg.upper() == "LEGACY_TREASURY":
+        target_assets = ["SHY", "IEF", "TLT"]
+    else:
+        target_assets = [target_arg.upper()]
+
+    run_orchestrator_pipeline(assets=target_assets, objective_metric=metric_arg)

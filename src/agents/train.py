@@ -33,7 +33,7 @@ if str(PROJECT_ROOT) not in sys.path:
 if str(CURRENT_DIR) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR))
 
-from src.agents.base_agent import calculate_performance_metrics
+from src.agents.base_agent import BaseAgent, DEFAULT_ASSETS, calculate_performance_metrics
 from src.agents.EMA_EMW_agent import SMAEMAAgent, SMAEMAOptimizer, WalkForwardTrainer as SMAEMATrainer
 from src.agents.ZScore_agent import ZScoreAgent, ZScoreOptimizer, ZScoreWalkForwardTrainer
 
@@ -269,7 +269,7 @@ def run_all_assets(
         ciascuno con esattamente 2 colonne: ['signal', 'confidence'].
     """
     if assets is None:
-        assets = ["SHY", "IEF", "TLT"]
+        assets = list(DEFAULT_ASSETS)  # SPY, IEF, GLD, SHY
 
     config_dir = CURRENT_DIR / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
@@ -280,14 +280,8 @@ def run_all_assets(
     results_dir = PROJECT_ROOT / "data" / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    data_path = PROJECT_ROOT / "data" / "processed" / "features_weekly.csv"
-    if not data_path.exists():
-        raise FileNotFoundError(
-            f"Dataset delle feature non trovato in: {data_path}. "
-            f"Assicurati di aver generato features_weekly.csv."
-        )
-
-    df = pd.read_csv(data_path, parse_dates=["Date"], index_col="Date")
+    # Caricamento robusto tramite BaseAgent con supporto per il nuovo dataset multi-asset
+    df = BaseAgent.load_complete_dataset(root_dir=PROJECT_ROOT, save_features_weekly_csv=True)
     print(f"[Train] Dataset caricato: {len(df)} righe dal {df.index[0].date()} al {df.index[-1].date()}")
     print(f"[Train] Asset da ottimizzare: {assets}")
     print(f"[Train] Metrica obiettivo: '{objective_metric}'")
@@ -311,7 +305,7 @@ def run_all_assets(
 
     # Riepilogo finale comparativo
     print("\n" + "=" * 85)
-    print("                 RIEPILOGO FINALE WALK-FORWARD PER I 3 INDICI")
+    print("                 RIEPILOGO FINALE WALK-FORWARD PER GLI ASSET")
     print("=" * 85)
     print(f"{'Asset':<6} | {'SMA/EMA Opt':<18} | {'SMA OOS Sh':<10} | {'ZScore Opt':<24} | {'ZS OOS Sh':<10}")
     print("-" * 85)
@@ -341,6 +335,8 @@ if __name__ == "__main__":
     metric_arg = sys.argv[2] if len(sys.argv) > 2 else "sharpe_mdd"
 
     if target_arg.upper() == "ALL":
+        target_assets = list(DEFAULT_ASSETS)
+    elif target_arg.upper() == "LEGACY_TREASURY":
         target_assets = ["SHY", "IEF", "TLT"]
     else:
         target_assets = [target_arg.upper()]

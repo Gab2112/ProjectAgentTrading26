@@ -339,15 +339,25 @@ class FinBERTAgent(BaseAgent):
         model_name: str = "ProsusAI/finbert",
         confidence_threshold: float = 0.50,
         text_col: str = "headline",
-        invert_sentiment: bool = True,  # Default True per ETF obbligazionari
+        invert_sentiment: Optional[bool] = None,
+        target_asset: Optional[str] = "SPY",
         output_format: str = "numeric",
         device: Optional[str] = None,
     ):
-        super().__init__(name="FinBERTAgent", output_format=output_format)
+        super().__init__(
+            name="FinBERTAgent",
+            target_asset=target_asset,
+            output_format=output_format,
+        )
         self.model_name = model_name
         self.confidence_threshold = float(confidence_threshold)
         self.text_col = text_col
-        self.invert_sentiment = bool(invert_sentiment)
+        self.target_asset = target_asset.upper() if target_asset else "SPY"
+        # Per ETF obbligazionari (TLT, IEF, SHY) default invert_sentiment=True; per azionario (SPY) e oro (GLD) False
+        if invert_sentiment is not None:
+            self.invert_sentiment = bool(invert_sentiment)
+        else:
+            self.invert_sentiment = self.target_asset in ("TLT", "IEF", "SHY")
         self.device = (
             device
             if device is not None
@@ -478,7 +488,7 @@ class FinBERTAgent(BaseAgent):
         self,
         news_df: pd.DataFrame,
         calendar_index: Optional[pd.DatetimeIndex] = None,
-        target_asset: str = "TLT",
+        target_asset: Optional[str] = None,
     ) -> pd.DataFrame:
         """
         Analizza l'intero database di notizie con FinBERT, aggrega i segnali e le confidenze
@@ -490,7 +500,14 @@ class FinBERTAgent(BaseAgent):
                 2. 'confidence': [0.0, 1.0]
             indicizzato per data settimanale, pronto come input per l'Agente Orchestratore.
         """
-        print(f"\n[FinBERTAgent] Generazione segnali sentiment per asset {target_asset} su {len(news_df)} notizie...")
+        asset = (target_asset or self.target_asset or "SPY").upper()
+        if calendar_index is None:
+            try:
+                calendar_index = self.load_market_data().index
+            except Exception:
+                pass
+
+        print(f"\n[FinBERTAgent] Generazione segnali sentiment per asset {asset} su {len(news_df)} notizie...")
 
         # 1. Inferenza a livello di singola notizia
         sig_news, conf_news = self.predict_with_confidence(news_df)

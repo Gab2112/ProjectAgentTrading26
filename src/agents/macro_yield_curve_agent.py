@@ -40,17 +40,21 @@ class MacroYieldCurveAgent(BaseAgent):
         slope_window: int = 4,
         rate_window: int = 4,
         score_threshold: float = 0.5,
-        target_asset: str = "TLT",
+        target_asset: Optional[str] = "IEF",
         output_format: str = "numeric",  # 'numeric' (-1, 0, 1) o 'string' ('SELL', 'HOLD', 'BUY')
     ):
-        super().__init__(name="MacroYieldCurveAgent", output_format=output_format)
+        super().__init__(
+            name="MacroYieldCurveAgent",
+            target_asset=target_asset,
+            output_format=output_format,
+        )
         self.slope_col = slope_col
         self.rate_change_col = rate_change_col
         self.inflation_col = inflation_col
         self.slope_window = slope_window
         self.rate_window = rate_window
         self.score_threshold = score_threshold
-        self.target_asset = target_asset
+        self.target_asset = (target_asset or "IEF").upper()
 
         self.params = {
             "slope_col": self.slope_col,
@@ -88,7 +92,16 @@ class MacroYieldCurveAgent(BaseAgent):
             - Valori positivi elevati: quadro favorevole a discesa dei rendimenti e TLT (Long Duration).
             - Valori negativi elevati: quadro ostile alla duration, tassi in salita o inflazione alta.
         """
-        # Verifica colonne necessarie
+        # Verifica ed eventuale arricchimento con colonne macro tramite BaseAgent
+        if self.slope_col not in df.columns or self.rate_change_col not in df.columns:
+            try:
+                macro_df = self.load_macro_data(decision_dates=df.index)
+                for c in macro_df.columns:
+                    if c not in df.columns:
+                        df[c] = macro_df[c]
+            except Exception:
+                pass
+
         for col in [self.slope_col, self.rate_change_col]:
             if col not in df.columns:
                 raise KeyError(
@@ -148,53 +161,71 @@ class MacroYieldCurveAgent(BaseAgent):
 
     def predict(self, df: pd.DataFrame) -> pd.Series:
         """
-        Calcola i segnali operativi discreti {-1, 0, 1} per l'asset target (default TLT).
+        Calcola i segnali operativi discreti {-1, 0, 1} per l'asset target (default IEF o configurato).
 
         - Score >= +score_threshold -> BUY (+1)
         - Score <= -score_threshold -> SELL (-1)
         - Altrimenti                -> HOLD (0)
         """
-        score = self.calculate_macro_score(df)
+        multi = self.predict_multi_asset(df, assets=[self.target_asset])
+        sig_col = f"{self.target_asset}_signal"
+        if sig_col in multi.columns:
+            return self._format_signals(multi[sig_col])
 
+        score = self.calculate_macro_score(df)
         raw_signals = np.where(
             score >= self.score_threshold,
             1,
             np.where(score <= -self.score_threshold, -1, 0),
         )
-
         signals = pd.Series(raw_signals, index=df.index, dtype=int)
-        # Warm-up handling: dove lo score non è affidabile, impostiamo HOLD (0)
         signals[score.isna()] = 0
-
         return self._format_signals(signals)
 
-    def predict_multi_asset(self, df: pd.DataFrame) -> pd.DataFrame:
+    def predict_multi_asset(
+        self,
+        df: pd.DataFrame,
+        assets: Optional[Any] = None,
+    ) -> pd.DataFrame:
         """
-        Genera i segnali per tutti i 3 asset dell'universo del portafoglio (SHY, IEF, TLT)
-        in perfetta conformità con le convenzioni del progetto:
-        - Score elevato (Bull / Discesa Tassi) -> TLT: +1, IEF: 0, SHY: 0
-        - Score basso (Bear / Salita Tassi)     -> TLT: -1, IEF: 0, SHY: +1
-        - Score intermedio (Quadro Misto)      -> TLT: 0, IEF: +1, SHY: 0
+        Genera i segnali per tutti gli asset specificati (default: SPY, IEF, GLD, SHY).
+        Supporta e preserva piena compatibilità con l'universo originario (SHY, IEF, TLT).
         """
         score = self.calculate_macro_score(df)
         multi = pd.DataFrame(index=df.index)
 
-        multi["SHY_signal"] = 0
-        multi["IEF_signal"] = 0
-        multi["TLT_signal"] = 0
+        target_assets = [str(a).upper() for a in assets] if assets is not None else list(self.DEFAULT_ASSETS)
 
         bull_mask = score >= self.score_threshold
         bear_mask = score <= -self.score_threshold
         neutral_mask = ~bull_mask & ~bear_mask & score.notna()
 
-        # Regime rialzista sui bond: preferenza per massima duration
-        multi.loc[bull_mask, "TLT_signal"] = 1
+        slope = df[self.slope_col].astype(float) if self.slope_col in df.columns else pd.Series(0.0, index=df.index)
 
-        # Regime ribassista sui bond: preferenza per breve duration / cash
-        multi.loc[bear_mask, "SHY_signal"] = 1
-        multi.loc[bear_mask, "TLT_signal"] = -1
+        for asset in target_assets:
+            sig_col = f"{asset}_signal"
+            multi[sig_col] = 0
 
-        # Regime intermedio: duration intermedia
-        multi.loc[neutral_mask, "IEF_signal"] = 1
+            if asset == "IEF":
+                # Intermediate duration: Long su discesa tassi/bull, Short su stretta forte, Flat/Long neutrale
+                multi.loc[bull_mask, sig_col] = 1
+                multi.loc[bear_mask, sig_col] = -1
+                multi.loc[neutral_mask, sig_col] = 1
+            elif asset == "SHY":
+                # Short duration / cash proxy: Long su salita tassi (rifugio), 0 su bull
+                multi.loc[bear_mask, sig_col] = 1
+                multi.loc[bull_mask, sig_col] = 0
+            elif asset == "TLT":
+                # Long duration (legacy): massima sensibilità a tassi in calo
+                multi.loc[bull_mask, sig_col] = 1
+                multi.loc[bear_mask, sig_col] = -1
+            elif asset == "SPY":
+                # Azionario USA: favorito da condizioni accomodanti con curva positiva, cauto/flat su inversione di curva
+                multi.loc[bull_mask & (slope >= 0), sig_col] = 1
+                multi.loc[bear_mask | (slope < 0), sig_col] = 0
+            elif asset == "GLD":
+                # Oro: bene rifugio anti-inflazione e protezione da tassi reali negativi
+                multi.loc[bull_mask | (score > 0), sig_col] = 1
+                multi.loc[bear_mask, sig_col] = 0
 
         return multi
