@@ -10,6 +10,8 @@ Esporta:
 - MacroYieldCurveAgent: Agente macroeconomico basato su pendenza di curva (10Y-2Y), regimi e inflazione
 - FinBERTAgent: Agente sentiment basato su transformer FinBERT (lazy loaded)
 - download_news_dataset: Funzione per acquisire e strutturare il database delle notizie finanziarie
+- SVMAgent: Agente quantitativo di Machine Learning basato su Support Vector Machine a margine massimo
+- SVMOptimizer, SVMWalkForwardTrainer: Moduli di ottimizzazione e Walk-Forward per SVM
 - OrchestratorAgent: Agente Orchestratore quantitativo per la sintesi e combinazione ottima di segnali
 - OrchestratorOptimizer: Modulo di ottimizzazione dei pesi e delle soglie decisionali per l'Orchestratore
 - WalkForwardOrchestrator: Modulo per la validazione walk-forward rolling dell'Orchestratore
@@ -19,6 +21,7 @@ from .base_agent import BaseAgent, DEFAULT_ASSETS, calculate_performance_metrics
 from .EMA_EMW_agent import EMA_EMW_Agent, SMAEMAAgent, SMAEMAOptimizer, WalkForwardTrainer
 from .ZScore_agent import ZScoreAgent, ZScoreOptimizer, ZScoreWalkForwardTrainer
 from .macro_yield_curve_agent import MacroYieldCurveAgent
+from .SVM_agent import SVMAgent, SVMOptimizer, SVMWalkForwardTrainer
 from .orchestrator_agent import (
     OrchestratorAgent,
     OrchestratorOptimizer,
@@ -52,6 +55,9 @@ __all__ = [
     "ZScoreOptimizer",
     "ZScoreWalkForwardTrainer",
     "MacroYieldCurveAgent",
+    "SVMAgent",
+    "SVMOptimizer",
+    "SVMWalkForwardTrainer",
     "FinBERTAgent",
     "download_news_dataset",
     "OrchestratorAgent",
