@@ -330,8 +330,9 @@ def train_single_asset(
         rf_trainer.save_final_agent_config(rf_config_file)
         save_training_provenance(rf_config_file, df, max_train_year)
 
-        sig_rf, conf_rf = rf_trainer.final_agent.predict_with_confidence(df)
-        df_rf = pd.DataFrame({"signal": sig_rf, "confidence": conf_rf}, index=df.index)
+        df_rf = rf_trainer.oof_signals.copy()
+        if df_rf.empty or df_rf[["signal", "confidence"]].isna().any().any():
+            raise ValueError("Predizioni OOF Random Forest assenti o incomplete.")
         df_rf.to_csv(rf_csv)
         print(f"[{asset_upper}] Segnali Random Forest salvati in: {rf_csv}")
     else:
@@ -366,8 +367,9 @@ def train_single_asset(
         svm_res = svm_trainer.run(df, max_year=max_train_year)
         svm_trainer.save_final_agent_config(svm_config_file)
         save_training_provenance(svm_config_file, df, max_train_year)
-        sig_svm, conf_svm = svm_trainer.final_agent.predict_with_confidence(df)
-        df_svm = pd.DataFrame({"signal": sig_svm, "confidence": conf_svm}, index=df.index)
+        df_svm = svm_trainer.oof_signals.copy()
+        if df_svm.empty or df_svm[["signal", "confidence"]].isna().any().any():
+            raise ValueError("Predizioni OOF SVM assenti o incomplete.")
         df_svm.to_csv(svm_csv)
         print(f"[{asset_upper}] Segnali SVM salvati in: {svm_csv}")
     else:
@@ -391,6 +393,15 @@ def train_single_asset(
     df_macro.to_csv(macro_csv)
     print(f"[{asset_upper}] Segnali Macro Yield Curve salvati in: {macro_csv}")
 
+    oof_index = df.index
+    for ml_signals in (df_rf, df_svm):
+        if ml_signals is not None:
+            if ml_signals.empty or not ml_signals.index.is_unique:
+                raise ValueError("Indice delle predizioni OOF non valido.")
+            oof_index = oof_index.intersection(ml_signals.index)
+
+    if oof_index.empty:
+        raise ValueError("Nessuna settimana OOF comune disponibile.")
     # -----------------------------------------------------------------
     # 7. AGENTE ORCHESTRATORE (Ensemble Multi-Agente)
     # -----------------------------------------------------------------
@@ -406,11 +417,18 @@ def train_single_asset(
             signals_pool["RandomForest_Agent"] = df_rf
         if df_svm is not None:
             signals_pool["SVM_Agent"] = df_svm
+        signals_pool = {
+            name: signals.loc[oof_index].copy()
+            for name, signals in signals_pool.items()
+        }
+
+        if any(s[["signal", "confidence"]].isna().any().any()
+            for s in signals_pool.values()):
+            raise ValueError("Il pool OOF contiene segnali mancanti.")
 
         print(f"\n[{asset_upper}] >>> Ottimizzazione Agente Orchestratore ({len(signals_pool)} Agenti: {', '.join(signals_pool.keys())})...")
 
-        ret_asset = df[price_col].astype(float).pct_change().fillna(0.0)
-
+        ret_asset = df[price_col].astype(float).pct_change().fillna(0.0).loc[oof_index]
         orch_opt = OrchestratorOptimizer(
             objective_metric=objective_metric,
             max_train_year=max_train_year,
@@ -439,7 +457,7 @@ def train_single_asset(
     # -----------------------------------------------------------------
     # 7. TABELLA COMPARATIVA PERFORMANCE IN-SAMPLE (<= max_train_year)
     # -----------------------------------------------------------------
-    train_mask = df.index.year <= max_train_year
+    train_mask = df.index.isin(oof_index)
     ret_asset = df[price_col].astype(float).pct_change().fillna(0.0)
 
     pos_sma = sig_sma.shift(1).fillna(0.0)
@@ -457,7 +475,7 @@ def train_single_asset(
     print("\n" + "-" * 88)
     print(
         f"  CONFRONTO FINALE IN-SAMPLE "
-        f"({df.index.min():%Y-%m-%d} - {df.index.max():%Y-%m-%d}) "
+        f"({oof_index.min():%Y-%m-%d} - {oof_index.max():%Y-%m-%d}) "
         f"- ASSET: {asset_upper}"
     )
     print("-" * 88)

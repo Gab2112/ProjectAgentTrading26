@@ -537,6 +537,7 @@ class SVMWalkForwardTrainer:
         self.history: List[Dict[str, Any]] = []
         self.selected_params: Optional[Dict[str, Any]] = None
         self.final_agent: Optional[SVMAgent] = None
+        self.oof_signals = pd.DataFrame(columns=["signal", "confidence"])
 
     def run(self, df: pd.DataFrame, max_year: int) -> Dict[str, Any]:
         """Esegue il ciclo completo di Walk-Forward."""
@@ -556,6 +557,8 @@ class SVMWalkForwardTrainer:
         print("-" * 75)
 
         self.history = []
+        self.oof_signals = pd.DataFrame(columns=["signal", "confidence"])
+        oof_chunks = []
 
         for i in range(len(all_years) - self.train_window_years):
             train_years = all_years[i : i + self.train_window_years]
@@ -565,6 +568,18 @@ class SVMWalkForwardTrainer:
             val_df = df[df.index.year == val_year]
 
             res = self.optimizer.fit(train_df=train_df, val_df=val_df)
+            if train_df.index.max() >= val_df.index.min():
+                raise ValueError("Fold OOF non cronologico.")
+
+            fold_agent = self.optimizer.best_agent
+            if fold_agent is None:
+                raise RuntimeError("Modello SVM del fold non disponibile.")
+
+            sig, conf = fold_agent.predict_with_confidence(val_df)
+            oof_chunks.append(pd.DataFrame(
+                {"signal": sig, "confidence": conf}, index=val_df.index
+            ))
+
             c_val, g_val, th = res["C"], res["gamma"], res["prob_threshold"]
             train_lbl = f"{train_years[0]}-{train_years[-1]}"
             combo_str = f"C={c_val}, g={g_val}, th={th:.2f}"
@@ -579,6 +594,10 @@ class SVMWalkForwardTrainer:
                 "gamma": g_val,
                 "prob_threshold": th,
             })
+
+        self.oof_signals = pd.concat(oof_chunks).sort_index()
+        if not self.oof_signals.index.is_unique:
+            raise ValueError("Date OOF SVM duplicate.")
 
         # Selezione dei parametri più frequenti (moda statistica)
         param_tuples = [(h["C"], h["gamma"], h["prob_threshold"]) for h in self.history]
