@@ -94,7 +94,7 @@ class RandomForestAgent(BaseAgent):
 
     def __init__(
         self,
-        target_asset: str = "TLT",
+        target_asset: str = "SPY",
         price_col: Optional[str] = None,
         feature_cols: Optional[List[str]] = None,
         n_estimators: int = 150,
@@ -107,7 +107,12 @@ class RandomForestAgent(BaseAgent):
         output_format: str = "numeric",  # 'numeric' (-1, 0, 1) o 'string' ('SELL', 'HOLD', 'BUY')
     ):
         agent_name = name or f"RandomForestAgent_{target_asset.upper()}"
-        super().__init__(name=agent_name, output_format=output_format)
+        super().__init__(
+            name=agent_name,
+            target_asset=target_asset,
+            price_col=price_col,
+            output_format=output_format,
+        )
 
         self.target_asset = target_asset.upper()
         self.price_col = price_col or f"{self.target_asset}_close"
@@ -175,11 +180,18 @@ class RandomForestAgent(BaseAgent):
         y_t = 1 se il rendimento a t+1 è positivo (R_{t+1} > 0), altrimenti 0.
         Garantisce assenza totale di look-ahead bias.
         """
-        if self.price_col not in df.columns:
-            raise KeyError(
-                f"Colonna prezzo '{self.price_col}' non trovata nel DataFrame. "
-                f"Colonne disponibili: {list(df.columns)}"
-            )
+        # Verifica ed eventuale arricchimento con feature macro da BaseAgent
+        missing_macro = [c for c in self.feature_cols if c not in df.columns]
+        if missing_macro:
+            try:
+                macro_df = self.load_macro_data(decision_dates=df.index)
+                for c in macro_df.columns:
+                    if c not in df.columns:
+                        df[c] = macro_df[c]
+            except Exception:
+                pass
+
+        price_col_resolved = self.resolve_price_col(df, price_col=self.price_col, target_asset=self.target_asset)
 
         # Selezione feature disponibili nel DataFrame
         active_features = [col for col in self.feature_cols if col in df.columns]
@@ -195,7 +207,7 @@ class RandomForestAgent(BaseAgent):
         X = df[active_features].copy()
 
         # Calcolo rendimenti futuri a t+1 (shift(-1) sul rendimento o prezzo)
-        price_series = df[self.price_col].astype(float)
+        price_series = df[price_col_resolved].astype(float)
         future_returns = price_series.pct_change().shift(-1)
         y = (future_returns > 0.0).astype(int)
 
@@ -382,14 +394,14 @@ class RandomForestOptimizer:
 
     def __init__(
         self,
-        target_asset: str = "TLT",
+        target_asset: str = "SPY",
         price_col: Optional[str] = None,
         feature_cols: Optional[List[str]] = None,
-        depth_candidates: List[Optional[int]] = [2, 3, 4],
-        min_leaf_candidates: List[int] = [15, 25, 35],
-        threshold_candidates: List[float] = [0.51, 0.52, 0.53, 0.54],
-        n_estimators_candidates: List[int] = [100, 150],
-        objective_metric: str = "profit_oriented",
+        depth_candidates: List[Optional[int]] = [2, 3],
+        min_leaf_candidates: List[int] = [20, 30],
+        threshold_candidates: List[float] = [0.51, 0.52, 0.53],
+        n_estimators_candidates: List[int] = [100],
+        objective_metric: str = "sharpe_mdd",
         random_state: int = 42,
     ):
         self.target_asset = target_asset.upper()
@@ -558,7 +570,7 @@ class RandomForestWalkForwardTrainer:
         self,
         optimizer: RandomForestOptimizer,
         train_window_years: int = 5,
-        target_asset: str = "TLT",
+        target_asset: str = "SPY",
     ):
         self.optimizer = optimizer
         self.train_window_years = train_window_years

@@ -2,7 +2,7 @@
 # Registro delle decisioni di ricerca (Decision Log)
 
 **Progetto:** ProjectAgentTrading26 | *Regime-Aware Multi-Asset Allocation*\
-**Aggiornato al:** 27 ottobre 2026\
+**Aggiornato al:** 28 ottobre 2026\
 **Scopo:** registrare le decisioni metodologiche e architetturali rilevanti, **non** ogni modifica al codice o ogni risultato intermedio. Metodologia completa e tabelle delle performance sono riportate in [`research_design.md`](research_design.md).
 
 ## 10–23 ottobre 2026 | Ricerca Treasury precedente (archiviata)
@@ -51,7 +51,7 @@
 
 ## 27 ottobre 2026 | Interfaccia d'integrazione e prossimi passi
 
-**Decisione: separare la fonte dei regimi.** `src/regime_contract.py` verifica una serie di etichette associate a date e le trasforma in vettori di budget SPY/IEF/GLD/SHY attraverso una politica esplicita. I test hanno confermato i budget deterministici già esistenti e accettato input sintetici `cluster_0`/`cluster_1`. Un'etichetta di cluster **non ha un significato economico intrinseco**; questa interfaccia **non** implementa né valida di per sé il clustering.
+**Decisione: separare la fonte dei regimi.** L'interfaccia, ora consolidata in `src/regime_allocator.py` (`validate_regime_series` e `build_regime_budget_panel`), verifica una serie di etichette associate a date e le trasforma in vettori di budget SPY/IEF/GLD/SHY attraverso una politica esplicita. I test hanno confermato i budget deterministici già esistenti e accettato input sintetici `cluster_0`/`cluster_1`. Un'etichetta di cluster **non ha un significato economico intrinseco**; questa interfaccia **non** implementa né valida di per sé il clustering.
 
 **Decisione: conservare il backtester condiviso.** `src/longshort_backtester.py` rimane necessario anche per B_v2: Long/Flat è un caso particolare della simulazione autofinanziante esistente. Eliminare adesso B_v1 o il motore compatibile con gli Short introdurrebbe rischio di refactoring senza rafforzare le evidenze scientifiche.
 
@@ -62,3 +62,15 @@
 3. Integrare il classificatore di regimi basato sul clustering di Giovanni tramite l'interfaccia definita; successivamente valutare forecasting, ML e agenti con protocollo walk-forward e disponibilità temporale degli input verificata. Conservare il **test finale dal 2022** fino al congelamento del sistema integrato e dei criteri di valutazione.
 
 **Limiti scientifici aperti:** le date di osservazione macro non certificano l'effettiva disponibilità storica o le vintage; dati rettificati e costi sono semplificati; B_v2 è stata scelta osservando il training; la liquidità rende lo 0%; A2 e B_v2 assumono esposizioni e rischi molto diversi. Questi limiti devono accompagnare qualsiasi affermazione sulle performance.
+
+## 28 ottobre 2026 | Consolidamento e verifiche della pipeline A/B
+
+**Decisione architetturale.** Ridurre la frammentazione del codice senza modificare le regole economiche: `src/multiasset_backtester.py` è stato assorbito in `src/longshort_backtester.py`; `src/multiasset_allocator.py` in `src/portfolio.py`; `src/data_loader.py` in `src/data_transformation.py`; `src/macro_features.py` in `src/macro_availability.py`; `src/regime_signals.py` e `src/regime_contract.py` in `src/regime_allocator.py`. Le interfacce pubbliche utilizzate dalla pipeline sono state riallineate. Non sono stati eliminati i componenti `src/agents/` dei collaboratori.
+
+**Verifiche locali.** Dopo l'ultimo consolidamento, **123 test su 123** superati sul Mac. La pipeline A1/A2 ha riprodotto i risultati di training precedentemente congelati, incluso A2 con NAV **201.948,33 USD** e Sharpe **0,977**. Le esecuzioni B_v1 e B_v2 avevano riprodotto rispettivamente NAV **102.826,95 USD** e **135.371,33 USD** con output congelati verificati prima dell'ultimo intervento di consolidamento A2; la verifica finale resta da ripetere sul commit risultante e dopo il merge.
+
+**Diagnostica validation.** Lo script `holdout_diagnostic_bv2.py` è stato spostato in `tests/holdout_diagnostic_bv2.py` come programma manuale (non incluso nella discovery `test_*.py`). È stata rimossa l'opzione che consentiva la valutazione al 2025: lo script accetta esclusivamente `--through 2021-12-31` e non deve essere usato per consultare il test finale dal 2022. La validation 2017–2021 era già stata ispezionata il 27 ottobre.
+
+**Archivio Treasury e responsabilità dei collaboratori.** I tre file generati `data/signals/signals_statistical_{shy,ief,tlt}.csv` del precedente universo SHY/IEF/TLT sono stati esclusi dal tracciamento e le copie locali eliminate; non fanno parte della pipeline A/B. Il codice degli agenti resta invariato e può rigenerare i segnali statistici in presenza degli input appropriati. Prima di integrare gli agenti occorre concordare un contratto dati e uno split temporale coerenti con il sistema Multi-Asset.
+
+**Prossima decisione operativa.** Aggiornare la documentazione agli import e ai percorsi correnti, poi integrare `refactor/cleanup` in `main` senza forzare la cronologia remota, rieseguire test e pipeline sul risultato del merge e soltanto dopo eliminare il branch temporaneo. La disponibilità point-in-time delle serie macro rimane non certificata.

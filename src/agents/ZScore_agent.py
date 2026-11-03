@@ -137,16 +137,23 @@ class ZScoreAgent(BaseAgent):
         exit_threshold: float = 0.0,
         stop_threshold: Optional[float] = None,
         mode: str = "momentum",
-        price_col: str = "close",
+        price_col: Optional[str] = None,
+        target_asset: Optional[str] = None,
         output_format: str = "numeric",  # 'numeric' (-1, 0, 1) o 'string' ('SELL', 'HOLD', 'BUY')
     ):
-        super().__init__(name="ZScoreAgent", output_format=output_format)
+        super().__init__(
+            name="ZScoreAgent",
+            target_asset=target_asset,
+            price_col=price_col,
+            output_format=output_format,
+        )
         self.window = window
         self.threshold = threshold
         self.exit_threshold = exit_threshold
         self.stop_threshold = float(stop_threshold) if stop_threshold is not None else None
         self.mode = mode
-        self.price_col = price_col
+        self.target_asset = target_asset.upper() if target_asset else None
+        self.price_col = price_col or (f"{self.target_asset}_close" if self.target_asset else "close")
 
         if window is not None and threshold is not None:
             self.params = {
@@ -155,11 +162,13 @@ class ZScoreAgent(BaseAgent):
                 "exit_threshold": float(exit_threshold),
                 "stop_threshold": self.stop_threshold,
                 "mode": str(mode),
-                "price_col": price_col,
+                "price_col": self.price_col,
+                "target_asset": self.target_asset,
             }
 
     def _apply_params(self, params: Dict[str, Any]) -> None:
         """Aggiorna i parametri dell'agente dopo il caricamento da JSON."""
+        super()._apply_params(params)
         self.window = int(params["window"])
         self.threshold = float(params["threshold"])
         self.exit_threshold = float(params.get("exit_threshold", 0.0))
@@ -169,6 +178,8 @@ class ZScoreAgent(BaseAgent):
             else None
         )
         self.mode = str(params.get("mode", "momentum"))
+        if "target_asset" in params:
+            self.target_asset = str(params["target_asset"]).upper()
         if "price_col" in params:
             self.price_col = str(params["price_col"])
         self.params = {
@@ -178,6 +189,7 @@ class ZScoreAgent(BaseAgent):
             "stop_threshold": self.stop_threshold,
             "mode": self.mode,
             "price_col": self.price_col,
+            "target_asset": self.target_asset,
         }
 
     def predict(self, df: pd.DataFrame) -> pd.Series:
@@ -187,13 +199,8 @@ class ZScoreAgent(BaseAgent):
                 "Parametri non impostati. Inizializzali nel costruttore o usa .load_params()."
             )
 
-        if self.price_col not in df.columns:
-            raise KeyError(
-                f"Colonna '{self.price_col}' non trovata nel DataFrame. "
-                f"Colonne disponibili: {list(df.columns)}"
-            )
-
-        close = df[self.price_col].astype(float)
+        price_column = self.resolve_price_col(df, price_col=self.price_col, target_asset=self.target_asset)
+        close = df[price_column].astype(float)
         mean = close.rolling(window=self.window).mean()
         std = close.rolling(window=self.window).std()
 
@@ -223,7 +230,8 @@ class ZScoreAgent(BaseAgent):
         """
         signals = self.predict(df)
 
-        close = df[self.price_col].astype(float)
+        price_column = self.resolve_price_col(df, price_col=self.price_col, target_asset=self.target_asset)
+        close = df[price_column].astype(float)
         mean = close.rolling(window=self.window).mean()
         std = close.rolling(window=self.window).std().replace(0, np.nan)
         z = ((close - mean) / std).abs().fillna(0.0)
@@ -288,15 +296,21 @@ class ZScoreOptimizer:
         dfs_to_concat = [df for df in [warmup_df, train_df, val_df] if df is not None and not df.empty]
         full_df = pd.concat(dfs_to_concat)
 
-        if self.price_col not in full_df.columns:
-            raise KeyError(
-                f"Colonna '{self.price_col}' non presente nei dati di train/validation."
-            )
+        price_col_resolved = self.price_col
+        if price_col_resolved not in full_df.columns:
+            for c in full_df.columns:
+                if str(c).lower().endswith("_close") or str(c).lower() == "close":
+                    price_col_resolved = c
+                    break
+            if price_col_resolved not in full_df.columns:
+                raise KeyError(
+                    f"Colonna '{self.price_col}' non presente nei dati di train/validation. Colonne: {list(full_df.columns)}"
+                )
 
         train_indices = train_df.index
         val_indices = val_df.index if val_df is not None else None
 
-        close = full_df[self.price_col].astype(float)
+        close = full_df[price_col_resolved].astype(float)
         full_returns = close.pct_change().fillna(0.0)
 
         best_score = -np.inf

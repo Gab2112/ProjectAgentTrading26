@@ -18,7 +18,7 @@ from src.longshort_backtester import (
     schedule_next_open_executions,
     simulate_longshort_daily,
 )
-from src.multiasset_backtester import simula_portafoglio
+from src.longshort_backtester import simula_portafoglio
 from src.regime_allocator import (
     ASSETS,
     REGIME_WEIGHTS,

@@ -16,8 +16,8 @@ from src.macro_availability import (
     align_daily_observation_proxy,
     align_verified_daily_series,
 )
-from src.macro_features import build_macro_feature_levels, classify_macro_regimes
-from src.regime_contract import build_regime_budget_panel, validate_regime_series
+from src.macro_availability import build_macro_feature_levels, classify_macro_regimes
+from src.regime_allocator import build_regime_budget_panel, validate_regime_series
 
 
 class TestMacroObservationAlignment(unittest.TestCase):

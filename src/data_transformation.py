@@ -5,10 +5,13 @@ Responsabilità
 1. Leggere i CSV dei quattro ETF con controlli rigorosi su date e prezzi.
 2. Conservare un pannello GIORNALIERO allineato dei prezzi Open/Close rettificati
    per i backtest dei livelli A1 e A2.
-3. Conservare un pannello SETTIMANALE per l'analisi e le future feature del livello B.
+3. Conservare il pannello W-FRI di ricerca e, separatamente, le feature
+   con indice sulle VERE date di decisione (ultima seduta della settimana).
 4. Escludere i dati macroeconomici durante A1/A2, rendendo i benchmark
    indipendenti dalle serie FRED.
 5. Escludere le osservazioni OOS dai file elaborati finché non sono autorizzate.
+6. Esportare feature market-only TRAINING sulle vere date di decisione.
+   Serie macro opzionali richiedono un allineamento esplicito per data.
 
 Input:  data/raw/market/<TICKER>.csv; facoltativamente data/raw/macro/*.csv
 Output: data/processed/market_daily.csv
@@ -16,6 +19,7 @@ Output: data/processed/market_daily.csv
         data/processed/market_daily_quality.csv
         data/processed/master_weekly.csv
         data/processed/data_quality_summary.csv
+        data/processed/decision_features_training.csv
 
 Nota: i prezzi Open e Close devono essere rettificati in maniera coerente,
 come nei download Yahoo con ``auto_adjust=True``. I prezzi di apertura
@@ -26,14 +30,15 @@ Questo modulo NON genera pesi di portafoglio e NON calcola rendimenti:
 queste responsabilità appartengono ai moduli di strategia e backtesting.
 """
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Dict, Tuple
 
 import numpy as np
 import pandas as pd
 
-from src.data_loader import load_dataset
-from src.time_split import restrict_to_allowed_period
+from src.time_split import get_time_windows, restrict_to_allowed_period
+from src.macro_availability import align_daily_macro_panel
 from src.utils import get_release_lag_days, get_tickers
 
 
@@ -209,7 +214,7 @@ def transform_market_data(
 def _macro_series_mapping(config: dict) -> Dict[str, str]:
     """Mantiene la corrispondenza tra nomi logici e identificativi delle serie FRED."""
     mapping: Dict[str, str] = {}
-    for section in ("rates", "inflation"):
+    for section in ("rates", "inflation", "stress"):
         for name, series_id in config.get("data", {}).get(section, {}).items():
             if series_id:
                 mapping[f"{section}__{name}"] = series_id
@@ -293,6 +298,116 @@ def build_data_quality_summary(master: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+
+def build_decision_feature_panel(
+    market_daily: pd.DataFrame,
+    decision_dates: pd.DatetimeIndex,
+    macro_daily: Mapping[str, pd.Series] | None = None,
+) -> pd.DataFrame:
+    """Market features known after each actual weekly decision Close.
+
+    Uses actual trading-session dates, not W-FRI calendar labels. The returned
+    panel includes adjusted Close, weekly realized return since the previous
+    *supplied* decision, and 21/63-session momentum. It never reads market
+    observations beyond the last decision. Any optional daily FRED inputs are
+    date-lagged OBSERVATION PROXIES, not verified historical release vintages.
+
+    This is a feature snapshot, NOT a future-return target or a trade decision.
+    The next executable trading time remains the following session's Open.
+    """
+    if not isinstance(market_daily, pd.DataFrame) or market_daily.empty:
+        raise ValueError("Expected a nonempty daily market DataFrame")
+    if market_daily.columns.has_duplicates:
+        raise ValueError("Duplicate daily market columns")
+    if not isinstance(decision_dates, pd.DatetimeIndex) or decision_dates.empty:
+        raise ValueError("Expected nonempty DatetimeIndex of decision dates")
+
+    for name, idx in (("market_daily", market_daily.index),
+                      ("decision_dates", decision_dates)):
+        if (not isinstance(idx, pd.DatetimeIndex)
+                or idx.tz is not None or idx.hasnans or idx.has_duplicates
+                or not idx.is_monotonic_increasing
+                or not idx.equals(idx.normalize())):
+            raise ValueError(f"Invalid actual-session dates for {name}")
+
+    if not decision_dates.isin(market_daily.index).all():
+        raise ValueError("Decision dates must correspond to trading sessions")
+
+    # A missing decision week would turn 'return_1w' into a multi-week return.
+    # Using a Thu signal when Friday also traded would similarly mislabel
+    # the week's close. Both situations are rejected instead of silently
+    # manufacturing plausible but misdated ML features.
+    weekly_dates = build_weekly_decision_dates(
+        market_daily.loc[:decision_dates.max()]
+    ).index
+    expected = weekly_dates[(weekly_dates >= decision_dates.min())
+                            & (weekly_dates <= decision_dates.max())]
+    if not expected.equals(decision_dates):
+        raise ValueError("Decision dates must contain each actual weekly close")
+
+    close_cols = [c for c in market_daily.columns
+                  if isinstance(c, str) and c.endswith("_close")]
+    if not close_cols:
+        raise ValueError("Missing adjusted ETF Close columns")
+
+    # The explicit cutoff makes future-row changes incapable of affecting
+    # feature values available at earlier decisions.
+    closes = market_daily.loc[:decision_dates.max(), close_cols].astype(float)
+    if not np.isfinite(closes.to_numpy()).all() or (closes <= 0).any().any():
+        raise ValueError("Invalid adjusted Close prices")
+
+    snapshot = closes.loc[decision_dates].copy()
+    snapshot.index.name = "Date"
+    weekly_return = snapshot.pct_change(fill_method=None)
+    weekly_return.columns = [c[:-6] + "_return_1w" for c in close_cols]
+    features = pd.concat([snapshot, weekly_return], axis=1)
+
+    for sessions in (21, 63):
+        momentum = closes.pct_change(periods=sessions, fill_method=None)
+        momentum = momentum.loc[decision_dates]
+        momentum.columns = [c[:-6] + f"_momentum_{sessions}d"
+                            for c in close_cols]
+        features = pd.concat([features, momentum], axis=1)
+
+    if macro_daily is not None:
+        # Observation dates are included for downstream temporal audits.
+        macro = align_daily_macro_panel(decision_dates, macro_daily)
+        features = features.join(macro, validate="one_to_one")
+
+    return features
+
+
+def build_training_decision_features(
+    config: dict,
+    market_daily: pd.DataFrame,
+    decision_dates: pd.DatetimeIndex,
+    macro_daily: Mapping[str, pd.Series] | None = None,
+) -> pd.DataFrame:
+    """Construct one train-only research panel with historical indicator warm-up.
+
+    Explicitly excludes 2017+ validation and 2022+ final holdout from the
+    returned rows. The input history can contain an earlier warm-up period.
+    Macro inputs must be explicitly requested and are NOT PIT-certified.
+    """
+    if (config.get("evaluation", {}).get("evaluate_oos") is not False
+            or config.get("validation", {}).get("development_only") is not True):
+        raise ValueError("Development research features must stay train-only")
+
+    windows = get_time_windows(config)
+    start, end = windows["train_start"], windows["train_end"]
+    if start is None or end is None:
+        raise ValueError("Training boundaries are required")
+    if not isinstance(decision_dates, pd.DatetimeIndex):
+        raise TypeError("Expected a DatetimeIndex of decision dates")
+
+    selected = decision_dates[(decision_dates >= start) & (decision_dates <= end)]
+    if selected.empty:
+        raise ValueError("No training decisions available")
+    return build_decision_feature_panel(
+        market_daily.loc[:end], selected, macro_daily=macro_daily
+    )
+
+
 def run_data_transformation(
     config: dict,
     root_dir: Path,
@@ -327,12 +442,16 @@ def run_data_transformation(
     weekly_master = build_master_dataset(weekly_market, macros)
     weekly_master = restrict_to_allowed_period(weekly_master, config)
     weekly_quality = build_data_quality_summary(weekly_master)
+    decision_features = build_training_decision_features(
+        config, daily, decision_dates.index
+    )
 
     daily.to_csv(out_dir / "market_daily.csv")
     decision_dates.to_csv(out_dir / "weekly_decision_dates.csv", index_label="Date")
     daily_audit.to_csv(out_dir / "market_daily_quality.csv")
     weekly_master.to_csv(out_dir / "master_weekly.csv")
     weekly_quality.to_csv(out_dir / "data_quality_summary.csv")
+    decision_features.to_csv(out_dir / "decision_features_training.csv", index_label="Date")
 
     print("\n[Data Transformation] Multi-Asset data ready")
     print(f"  Daily sessions:   {len(daily):,}")
@@ -340,5 +459,93 @@ def run_data_transformation(
     print(f"  Weekly rows:      {len(weekly_master):,}")
     print(f"  Daily output:     {out_dir / 'market_daily.csv'}")
     print(f"  Weekly output:    {out_dir / 'master_weekly.csv'}")
+    print(f"  Decision features:{out_dir / 'decision_features_training.csv'}")
     print("  OOS disabled:     " + str(not config.get("evaluation", {}).get("evaluate_oos", False)))
     return weekly_master, weekly_quality
+
+
+def load_dataset(
+    path: str | Path,
+    date_column: str | None = "Date",
+    strict: bool = True,
+    **read_options,
+) -> pd.DataFrame:
+    """Load a dataset with the same checks as the former data_loader.py.
+
+    Supports CSV, TSV, TXT, Excel, Parquet, Feather and JSON. Enforces
+    the original strict/permissive date-index rules, without reader classes.
+    """
+    path = Path(path)
+    extension = path.suffix.lower()
+    formats = (
+        ".csv", ".tsv", ".txt", ".xlsx", ".xls",
+        ".parquet", ".feather", ".json",
+    )
+    if extension not in formats:
+        raise ValueError(
+            f"Tipo di file non supportato: '{extension}'. "
+            f"Formati supportati: {', '.join(sorted(formats))}"
+        )
+
+    if not isinstance(strict, bool):
+        raise TypeError("Il parametro 'strict' deve essere booleano.")
+    if date_column is not None and (not isinstance(date_column, str) or not date_column):
+        raise TypeError("'date_column' deve essere una stringa non vuota o None.")
+    if not path.is_file():
+        raise FileNotFoundError(f"File non trovato: {path}")
+
+    try:
+        if extension in {".csv", ".tsv", ".txt"}:
+            if extension == ".tsv":
+                read_options.setdefault("sep", "\t")
+            frame = pd.read_csv(path, **read_options)
+        elif extension in {".xlsx", ".xls"}:
+            frame = pd.read_excel(path, **read_options)
+        elif extension == ".parquet":
+            frame = pd.read_parquet(path, **read_options)
+        elif extension == ".feather":
+            frame = pd.read_feather(path, **read_options)
+        else:
+            frame = pd.read_json(path, **read_options)
+    except Exception as exc:
+        raise RuntimeError(f"Errore durante la lettura del file {path}: {exc}") from exc
+
+    if not isinstance(frame, pd.DataFrame):
+        raise TypeError(f"Il file {path.name} non contiene un DataFrame.")
+    if frame.empty:
+        raise ValueError(f"Il file {path.name} non contiene osservazioni.")
+    if frame.columns.has_duplicates:
+        raise ValueError(f"Colonne duplicate nel file {path.name}.")
+    if date_column is None:
+        return frame
+
+    if date_column not in frame.columns and frame.index.name == date_column:
+        frame = frame.reset_index()
+    if date_column not in frame.columns:
+        raise KeyError(f"Colonna '{date_column}' assente nel file {path.name}.")
+
+    frame = frame.copy()
+    frame[date_column] = pd.to_datetime(frame[date_column], errors="coerce")
+    invalid_dates = frame[date_column].isna()
+    if invalid_dates.any():
+        if strict:
+            raise ValueError(
+                f"Rilevate {int(invalid_dates.sum())} date non valide "
+                f"nel file {path.name}."
+            )
+        frame = frame.loc[~invalid_dates].copy()
+    if frame.empty:
+        raise ValueError(f"Nessuna osservazione con data valida nel file {path.name}.")
+    duplicate_dates = frame.duplicated(subset=[date_column], keep=False)
+    if duplicate_dates.any():
+        if strict:
+            raise ValueError(
+                f"Rilevate {int(duplicate_dates.sum())} righe con date "
+                f"duplicate nel file {path.name}."
+            )
+        frame = frame.drop_duplicates(subset=[date_column], keep="last")
+    result = frame.set_index(date_column).sort_index()
+    if not isinstance(result.index, pd.DatetimeIndex):
+        raise TypeError(f"Impossibile costruire un indice temporale per {path.name}.")
+    return result
+

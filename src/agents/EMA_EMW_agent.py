@@ -39,28 +39,39 @@ class SMAEMAAgent(BaseAgent):
         sma_window: Optional[int] = None,
         ema_window: Optional[int] = None,
         dead_band: float = 0.0,
-        price_col: str = "close",
+        price_col: Optional[str] = None,
+        target_asset: Optional[str] = None,
         output_format: str = "numeric",  # 'numeric' (-1, 0, 1) o 'string' ('SELL', 'HOLD', 'BUY')
     ):
-        super().__init__(name="SMAEMAAgent", output_format=output_format)
+        super().__init__(
+            name="SMAEMAAgent",
+            target_asset=target_asset,
+            price_col=price_col,
+            output_format=output_format,
+        )
         self.sma_window = sma_window
         self.ema_window = ema_window
         self.dead_band = float(dead_band)
-        self.price_col = price_col
+        self.target_asset = target_asset.upper() if target_asset else None
+        self.price_col = price_col or (f"{self.target_asset}_close" if self.target_asset else "close")
 
         if sma_window is not None and ema_window is not None:
             self.params = {
                 "sma_window": int(sma_window),
                 "ema_window": int(ema_window),
                 "dead_band": float(dead_band),
-                "price_col": price_col,
+                "price_col": self.price_col,
+                "target_asset": self.target_asset,
             }
 
     def _apply_params(self, params: Dict[str, Any]) -> None:
         """Aggiorna i parametri interni dell'agente dopo il caricamento da JSON."""
+        super()._apply_params(params)
         self.sma_window = int(params["sma_window"])
         self.ema_window = int(params["ema_window"])
         self.dead_band = float(params.get("dead_band", 0.0))
+        if "target_asset" in params:
+            self.target_asset = str(params["target_asset"]).upper()
         if "price_col" in params:
             self.price_col = str(params["price_col"])
         self.params = {
@@ -68,6 +79,7 @@ class SMAEMAAgent(BaseAgent):
             "ema_window": self.ema_window,
             "dead_band": self.dead_band,
             "price_col": self.price_col,
+            "target_asset": self.target_asset,
         }
 
     def predict(self, df: pd.DataFrame) -> pd.Series:
@@ -77,13 +89,8 @@ class SMAEMAAgent(BaseAgent):
                 "Parametri non impostati. Inizializzali nel costruttore o usa .load_params()."
             )
 
-        if self.price_col not in df.columns:
-            raise KeyError(
-                f"Colonna '{self.price_col}' non trovata nel DataFrame. "
-                f"Colonne disponibili: {list(df.columns)}"
-            )
-
-        close = df[self.price_col].astype(float)
+        price_column = self.resolve_price_col(df, price_col=self.price_col, target_asset=self.target_asset)
+        close = df[price_column].astype(float)
         sma = close.rolling(window=self.sma_window).mean()
         ema = close.ewm(span=self.ema_window, adjust=False).mean()
 
@@ -114,7 +121,8 @@ class SMAEMAAgent(BaseAgent):
         """
         signals = self.predict(df)
 
-        close = df[self.price_col].astype(float)
+        price_column = self.resolve_price_col(df, price_col=self.price_col, target_asset=self.target_asset)
+        close = df[price_column].astype(float)
         sma = close.rolling(window=self.sma_window).mean()
         ema = close.ewm(span=self.ema_window, adjust=False).mean()
 
@@ -176,15 +184,21 @@ class SMAEMAOptimizer:
         dfs_to_concat = [df for df in [warmup_df, train_df, val_df] if df is not None and not df.empty]
         full_df = pd.concat(dfs_to_concat)
 
-        if self.price_col not in full_df.columns:
-            raise KeyError(
-                f"Colonna '{self.price_col}' non presente nei dati di train/validation."
-            )
+        price_col_resolved = self.price_col
+        if price_col_resolved not in full_df.columns:
+            for c in full_df.columns:
+                if str(c).lower().endswith("_close") or str(c).lower() == "close":
+                    price_col_resolved = c
+                    break
+            if price_col_resolved not in full_df.columns:
+                raise KeyError(
+                    f"Colonna '{self.price_col}' non presente nei dati di train/validation. Colonne: {list(full_df.columns)}"
+                )
 
         train_indices = train_df.index
         val_indices = val_df.index if val_df is not None else None
 
-        close = full_df[self.price_col].astype(float)
+        close = full_df[price_col_resolved].astype(float)
         full_returns = close.pct_change().fillna(0.0)
 
         best_score = -np.inf
