@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
+import yaml
 
 # Risoluzione percorsi per esecuzione diretta o modulare
 CURRENT_DIR = Path(__file__).resolve().parent
@@ -32,6 +33,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 if str(CURRENT_DIR) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR))
+
+from src.time_split import get_time_windows
 
 from src.agents.base_agent import (
     BaseAgent,
@@ -727,6 +730,60 @@ class WalkForwardEngine:
         }
 
 
+def _validate_training_provenance(config_path: Path, root: Path) -> None:
+    """Verifica la compatibilità temporale di un modello salvato."""
+
+    with (root / "config.yaml").open("r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    windows = get_time_windows(config)
+
+    if windows["train_start"] is None:
+        raise ValueError("train_start non definito in config.yaml.")
+
+    calendar_path = root / "data/processed/weekly_decision_dates.csv"
+
+    dates = pd.read_csv(
+        calendar_path,
+        usecols=["Date"],
+        parse_dates=["Date"],
+    )["Date"]
+
+    train_dates = dates[
+        (dates >= windows["train_start"])
+        & (dates <= windows["train_end"])
+    ]
+
+    if train_dates.empty:
+        raise ValueError("Calendario di training vuoto.")
+
+    expected = {
+        "start_date": train_dates.min().date().isoformat(),
+        "end_date": train_dates.max().date().isoformat(),
+        "cutoff_year": windows["train_end"].year,
+        "calendar": "weekly_decision_dates.csv",
+    }
+
+    with config_path.open("r", encoding="utf-8") as f:
+        params = json.load(f)
+
+    recorded = params.get("training_provenance")
+
+    if recorded != expected:
+        raise ValueError(
+            f"Provenienza temporale non valida per {config_path.name}.\n"
+            f"Attesa: {expected}\n"
+            f"Registrata: {recorded}"
+        )
+
+    model_path = config_path.with_suffix(".joblib")
+
+    if not model_path.is_file():
+        raise FileNotFoundError(
+            f"Modello serializzato assente: {model_path}"
+        )
+
+
 # =====================================================================
 # SEZIONE 6: AGENTE ORCHESTRATORE (INFERENZA OPERATIVA)
 # =====================================================================
@@ -834,14 +891,19 @@ class OrchestratorAgent(BaseAgent):
         cfg_dir = root / "src" / "agents" / "config"
         sig_dir = root / "data" / "signals"
 
-        def _get_signal(file_name: str, agent_fn) -> pd.DataFrame:
-            f = sig_dir / file_name
-            if f.exists():
-                return pd.read_csv(f, index_col=0, parse_dates=True).reindex(df.index).fillna({"signal": 0, "confidence": 0.0})
+        def _get_signal(agent_fn) -> pd.DataFrame:
+            # Genera i segnali dai modelli senza riutilizzare CSV preesistenti.
             s, c = agent_fn()
-            res = pd.DataFrame({"signal": s, "confidence": c}, index=df.index)
-            res.to_csv(f)
-            return res
+
+            result = pd.DataFrame(
+                {"signal": s, "confidence": c},
+                index=df.index,
+            )
+
+            if result[["signal", "confidence"]].isna().any().any():
+                raise ValueError("Segnali o confidenze non validi.")
+
+            return result
 
         # 1. SMA/EMA
         def _make_sma():
@@ -854,7 +916,7 @@ class OrchestratorAgent(BaseAgent):
                 a.ema_window = 10
             return a.predict_with_confidence(df)
 
-        df_sma = _get_signal(f"signals_sma_ema_{asset.lower()}.csv", _make_sma)
+        df_sma = _get_signal(_make_sma)
 
         # 2. Z-Score
         def _make_zs():
@@ -867,7 +929,7 @@ class OrchestratorAgent(BaseAgent):
                 a.threshold = 1.5
             return a.predict_with_confidence(df)
 
-        df_zs = _get_signal(f"signals_zscore_{asset.lower()}.csv", _make_zs)
+        df_zs = _get_signal(_make_zs)
 
         # 3. Macro Yield Curve
         macro_a = MacroYieldCurveAgent(target_asset=asset)
@@ -883,34 +945,46 @@ class OrchestratorAgent(BaseAgent):
             def _make_rf():
                 rf = RandomForestAgent(target_asset=asset, max_depth=3, n_estimators=100, min_samples_leaf=20)
                 cfg = cfg_dir / f"random_forest_params_{asset.lower()}.json"
-                if cfg.exists():
-                    try:
-                        rf.load_params(cfg)
-                    except Exception:
-                        rf.fit(df, max_year=2021)
-                else:
-                    rf.fit(df, max_year=2021)
-                    rf.save_params(cfg)
+                if not cfg.exists():
+                    raise FileNotFoundError(
+                        f"Configurazione Random Forest assente: {cfg}. "
+                        "Eseguire prima la pipeline di training centralizzata."
+                    )
+
+                try:
+                    _validate_training_provenance(cfg, root)
+                    rf.load_params(cfg)
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"Impossibile caricare il modello Random Forest da {cfg}."
+                    ) from exc
+
                 return rf.predict_with_confidence(df)
 
-            pool["RandomForest_Agent"] = _get_signal(f"signals_random_forest_{asset.lower()}.csv", _make_rf)
+            pool["RandomForest_Agent"] = _get_signal(_make_rf)
 
         # 5. Support Vector Machine (SVM)
         if self.include_svm:
             def _make_svm():
                 svm = SVMAgent(target_asset=asset)
                 cfg = cfg_dir / f"svm_params_{asset.lower()}.json"
-                if cfg.exists():
-                    try:
-                        svm.load_params(cfg)
-                    except Exception:
-                        svm.fit(df, max_year=2021)
-                else:
-                    svm.fit(df, max_year=2021)
-                    svm.save_params(cfg)
+                if not cfg.exists():
+                    raise FileNotFoundError(
+                        f"Configurazione SVM assente: {cfg}. "
+                        "Eseguire prima la pipeline di training centralizzata."
+                    )
+
+                try:
+                    _validate_training_provenance(cfg, root)
+                    svm.load_params(cfg)
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"Impossibile caricare il modello SVM da {cfg}."
+                    ) from exc
+
                 return svm.predict_with_confidence(df)
 
-            pool["SVM_Agent"] = _get_signal(f"signals_svm_{asset.lower()}.csv", _make_svm)
+            pool["SVM_Agent"] = _get_signal(_make_svm)
 
         for name, a in self.registered_agents.items():
             try:
@@ -938,7 +1012,7 @@ class OrchestratorAgent(BaseAgent):
         cfg_dir = get_project_root() / "src" / "agents" / "config"
 
         for a in target_assets:
-            orch = OrchestratorAgent(target_asset=a)
+            orch = OrchestratorAgent(target_asset=a, include_rf=self.include_rf, include_svm=self.include_svm)
             cfg = cfg_dir / f"orchestrator_params_{a.lower()}.json"
             if cfg.exists():
                 try:
@@ -961,7 +1035,7 @@ class OrchestratorOptimizer:
     def __init__(
         self,
         objective_metric: str = "sharpe_mdd",
-        max_train_year: int = 2021,
+        max_train_year: Optional[int] = None,
         annualization_factor: int = 52,
         weight_step: Optional[float] = None,
         threshold_range: Tuple[float, float, float] = (0.15, 0.55, 0.05),
@@ -973,6 +1047,10 @@ class OrchestratorOptimizer:
         random_seed: int = 42,
     ):
         self.objective_metric = objective_metric
+        if max_train_year is None:
+            raise ValueError(
+                "Il cutoff temporale deve essere fornito esplicitamente dalla pipeline."
+            )
         self.max_train_year = int(max_train_year)
         self.annualization_factor = int(annualization_factor)
         self.weight_step = weight_step

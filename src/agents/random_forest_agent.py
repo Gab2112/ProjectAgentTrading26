@@ -216,7 +216,7 @@ class RandomForestAgent(BaseAgent):
     def fit(
         self,
         df: pd.DataFrame,
-        max_year: Optional[int] = 2021,
+        max_year: Optional[int],
     ) -> "RandomForestAgent":
         """
         Addestra il modello Random Forest sui dati In-Sample (fino a max_year).
@@ -579,7 +579,7 @@ class RandomForestWalkForwardTrainer:
         self.selected_params: Optional[Dict[str, Any]] = None
         self.final_agent: Optional[RandomForestAgent] = None
 
-    def run(self, df: pd.DataFrame, max_year: Optional[int] = 2021) -> Dict[str, Any]:
+    def run(self, df: pd.DataFrame, max_year: int) -> Dict[str, Any]:
         """Esegue il ciclo completo di Walk-Forward."""
         if not isinstance(df.index, pd.DatetimeIndex):
             raise TypeError("L'indice del DataFrame deve essere di tipo DatetimeIndex.")

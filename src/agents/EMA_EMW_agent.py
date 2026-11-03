@@ -361,7 +361,7 @@ class WalkForwardTrainer:
         self.all_combinations_history: List[Dict[str, Any]] = []
         self.selected_params: Optional[Dict[str, Any]] = None
 
-    def run(self, df: pd.DataFrame, max_year: Optional[int] = None) -> Dict[str, Any]:
+    def run(self, df: pd.DataFrame, max_year: Optional[int] = None, initial_warmup_df: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
         """
         Esegue il loop rolling sull'intero dataset storico.
 
@@ -399,12 +399,26 @@ class WalkForwardTrainer:
             val_year = years[i + self.train_window_years]
 
             warmup_years = years[:i]
-            warmup_df = data[data["year"].isin(warmup_years)] if len(warmup_years) > 0 else None
+            past_train_df = data[data["year"].isin(warmup_years)]
+
+            history_parts = [
+                x for x in (initial_warmup_df, past_train_df)
+                if x is not None and not x.empty
+            ]
+
+            fold_warmup_df = (
+                pd.concat(history_parts).sort_index()
+                if history_parts else None
+            )
+
             train_df = data[data["year"].isin(train_span)]
             val_df = data[data["year"] == val_year]
 
-            best = self.optimizer.fit(train_df, val_df, warmup_df=warmup_df)
-
+            best = self.optimizer.fit(
+                train_df,
+                val_df,
+                warmup_df=fold_warmup_df,
+            )
             # Raccoglie i risultati di tutte le combinazioni per questa finestra
             for c in self.optimizer.combinations_log:
                 rec = dict(c)

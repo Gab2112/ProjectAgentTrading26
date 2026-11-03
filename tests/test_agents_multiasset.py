@@ -13,6 +13,9 @@ import unittest
 import numpy as np
 import pandas as pd
 
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
+
 from src.agents.base_agent import (
     BaseAgent,
     DEFAULT_ASSETS,
@@ -144,23 +147,55 @@ class TestIndividualAgentsMultiAsset(unittest.TestCase):
             self.assertTrue(set(sig.unique()).issubset({-1, 0, 1}))
             self.assertTrue((conf >= 0.0).all() and (conf <= 1.0).all())
 
+
     def test_orchestrator_signals_pool_includes_rf(self):
-        orch = OrchestratorAgent(target_asset="SPY", include_rf=True)
-        pool = orch._build_signals_pool_from_df(self.df)
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg_dir = root / "src" / "agents" / "config"
+            cfg_dir.mkdir(parents=True)
 
-        self.assertIn("SMA_EMA_Agent", pool)
-        self.assertIn("ZScore_Agent", pool)
-        self.assertIn("Macro_YieldCurve_Agent", pool)
-        self.assertIn("RandomForest_Agent", pool)
+            cfg = cfg_dir / "random_forest_params_spy.json"
+            cfg.write_text("{}", encoding="utf-8")
 
-        for name, sig_df in pool.items():
-            self.assertIn("signal", sig_df.columns)
-            self.assertIn("confidence", sig_df.columns)
-            self.assertEqual(len(sig_df), len(self.df))
+            dummy_signals = pd.Series(0, index=self.df.index, dtype=int)
+            dummy_conf = pd.Series(0.0, index=self.df.index)
+
+            with (
+                patch(
+                    "src.agents.orchestrator_agent.get_project_root",
+                    return_value=root,
+                ),
+                patch(
+                    "src.agents.orchestrator_agent._validate_training_provenance"
+                ) as validator,
+                patch(
+                    "src.agents.orchestrator_agent.RandomForestAgent.load_params"
+                ),
+                patch(
+                    "src.agents.orchestrator_agent.RandomForestAgent.predict_with_confidence",
+                    return_value=(dummy_signals, dummy_conf),
+                ),
+            ):
+                orch = OrchestratorAgent(
+                    target_asset="SPY",
+                    include_rf=True,
+                    include_svm=False,
+                )
+                pool = orch._build_signals_pool_from_df(self.df)
+
+                validator.assert_called_once_with(cfg, root)
+
+            self.assertIn("RandomForest_Agent", pool)
+
+            for sig_df in pool.values():
+                self.assertIn("signal", sig_df.columns)
+                self.assertIn("confidence", sig_df.columns)
+                self.assertEqual(len(sig_df), len(self.df))
+
 
     def test_orchestrator_agent_on_all_four_assets(self):
         for asset in DEFAULT_ASSETS:
-            orch = OrchestratorAgent(target_asset=asset)
+            orch = OrchestratorAgent(target_asset=asset, include_rf=False, include_svm=False)
             sig, conf = orch.predict_with_confidence(self.df)
 
             self.assertEqual(len(sig), len(self.df))
@@ -169,7 +204,7 @@ class TestIndividualAgentsMultiAsset(unittest.TestCase):
             self.assertTrue((conf >= 0.0).all() and (conf <= 1.0).all())
 
     def test_orchestrator_predict_multi_asset(self):
-        orch = OrchestratorAgent()
+        orch = OrchestratorAgent(include_rf=False, include_svm=False)
         multi = orch.predict_multi_asset(self.df)
 
         for asset in DEFAULT_ASSETS:
@@ -208,7 +243,7 @@ class TestIndividualAgentsMultiAsset(unittest.TestCase):
 
     def test_orchestrator_register_agent(self):
         """Verifica la registrazione dinamica di nuovi agenti personalizzati."""
-        orch = OrchestratorAgent(target_asset="SPY", include_rf=False)
+        orch = OrchestratorAgent(include_rf=False, include_svm=False)
 
         class DummyAgent(BaseAgent):
             def predict(self, df):

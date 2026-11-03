@@ -208,7 +208,7 @@ class SVMAgent(BaseAgent):
 
         return X, y, future_returns
 
-    def fit(self, df: pd.DataFrame, max_year: Optional[int] = 2021) -> "SVMAgent":
+    def fit(self, df: pd.DataFrame, max_year: Optional[int]) -> "SVMAgent":
         """
         Addestra il modello SVM con vincolo temporale In-Sample (<= max_year).
         La standardizzazione (scaler) è fittata ESCLUSIVAMENTE sui dati In-Sample.
@@ -518,7 +518,7 @@ class SVMWalkForwardTrainer:
         self.selected_params: Optional[Dict[str, Any]] = None
         self.final_agent: Optional[SVMAgent] = None
 
-    def run(self, df: pd.DataFrame, max_year: Optional[int] = 2021) -> Dict[str, Any]:
+    def run(self, df: pd.DataFrame, max_year: int) -> Dict[str, Any]:
         """Esegue il ciclo completo di Walk-Forward."""
         if not isinstance(df.index, pd.DatetimeIndex):
             raise TypeError("L'indice del DataFrame deve essere di tipo DatetimeIndex.")
@@ -598,11 +598,7 @@ class SVMWalkForwardTrainer:
 
 
 if __name__ == "__main__":
-    from src.agents.base_agent import BaseAgent
-    df_features = BaseAgent.load_complete_dataset(root_dir=PROJECT_ROOT)
-    print("\n[Test SVMAgent] Dataset caricato:", df_features.shape)
-
-    opt = SVMOptimizer(target_asset="SPY", C_candidates=[0.5, 1.0], gamma_candidates=["scale", 0.05])
-    trainer = SVMWalkForwardTrainer(optimizer=opt, train_window_years=5, target_asset="SPY")
-    res = trainer.run(df_features, max_year=2021)
-    print("\nParametri Ottimali SVMAgent selezionati:", res["C"], res["gamma"], res["prob_threshold"])
+    print(
+        "Utilizzare la pipeline di training centralizzata:\n"
+        "python3 src/agents/train.py SPY --train-svm --skip-rf --skip-orch"
+    )
