@@ -17,6 +17,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
 import pandas as pd
+import yaml
+
+from src.utils import get_release_lag_days
 
 
 DEFAULT_ASSETS = ("SPY", "IEF", "GLD", "SHY")
@@ -230,6 +233,9 @@ class BaseAgent(ABC):
         root = get_project_root(root_dir)
         macro_dir = root / "data" / "raw" / "macro"
 
+        with (root / "config.yaml").open("r", encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+
         if not macro_dir.is_dir():
             raise FileNotFoundError(f"Directory dati macro non trovata in: {macro_dir}")
 
@@ -244,11 +250,22 @@ class BaseAgent(ABC):
                 continue
 
         # Costruzione DataFrame giornaliero dei tassi e indicatori base
-        daily_macro = pd.DataFrame()
+        aligned_series = {}
         for name, s in macro_series.items():
-            daily_macro[name] = s
+            s = s.dropna().sort_index().copy()
+            if name == "FEDFUNDS":
+                s.index += pd.Timedelta(
+                    days=get_release_lag_days(config, "FEDFUNDS")
+                )
+            aligned_series[name] = s.rename(name)
 
-        daily_macro = daily_macro.sort_index().ffill(limit=5)
+        daily_macro = pd.concat(aligned_series.values(), axis=1, sort=False).sort_index()
+        daily_macro = daily_macro.ffill(limit=5)
+
+        if "FEDFUNDS" in aligned_series:
+            daily_macro["FEDFUNDS"] = aligned_series["FEDFUNDS"].reindex(
+                daily_macro.index, method="ffill"
+            )
 
         # Calcolo indicatori derivati (curve spread, variazioni, inflazione)
         calc_df = pd.DataFrame(index=daily_macro.index)
@@ -281,13 +298,12 @@ class BaseAgent(ABC):
             calc_df["rates__policy_rate"] = daily_macro["FEDFUNDS"].ffill()
 
         # 4. Inflazione YoY (CPIAUCSL shifted con ritardo prudenziale di 45 giorni per evitare lookahead)
-        if "CPIAUCSL" in daily_macro:
-            cpi_clean = daily_macro["CPIAUCSL"].dropna()
-            cpi_yoy_raw = cpi_clean.pct_change(12)
-            cpi_avail_idx = cpi_yoy_raw.index + pd.Timedelta(days=45)
-            cpi_lagged = pd.Series(cpi_yoy_raw.values, index=cpi_avail_idx).sort_index()
-            # Riallinea sull'indice giornaliero tramite forward fill
-            calc_df["cpi_yoy"] = cpi_lagged.reindex(calc_df.index, method="ffill")
+        if "CPIAUCSL" in macro_series:
+            cpi_monthly = macro_series["CPIAUCSL"].dropna().sort_index()
+            cpi_yoy = cpi_monthly.pct_change(12, fill_method=None)
+            lag = get_release_lag_days(config, "CPIAUCSL")
+            cpi_yoy.index = cpi_yoy.index + pd.Timedelta(days=lag)
+            calc_df["cpi_yoy"] = cpi_yoy.reindex(calc_df.index, method="ffill")
 
         # 5. Volatilità VIX
         if "VIXCLS" in daily_macro:

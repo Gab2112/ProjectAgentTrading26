@@ -201,7 +201,10 @@ class SVMAgent(BaseAgent):
         if not active_features:
             raise ValueError(f"Nessuna feature trovata nel DataFrame tra: {self.feature_cols}")
 
-        X = df[active_features].copy().ffill().bfill()
+        if not df.index.is_monotonic_increasing or not df.index.is_unique:
+            raise ValueError("Le date delle feature devono essere ordinate e univoche.")
+        # Rimosso bfill() perchè potrebbe recuperare valori successivi alla data della previsione
+        X = df[active_features].copy().ffill()
         price_series = df[price_col_resolved].astype(float)
         future_returns = price_series.shift(-1).div(price_series).sub(1.0)
         future_returns = future_returns.replace([np.inf, -np.inf], np.nan)
@@ -288,11 +291,15 @@ class SVMAgent(BaseAgent):
         if missing:
             raise KeyError(f"Feature mancanti nel DataFrame di inferenza: {missing}")
 
-        X = df[self.trained_features].copy().ffill().bfill()
-        X_scaled = self.scaler.transform(X)
+        X = df[self.trained_features].copy().ffill()
+        valid = X.notna().all(axis=1)
 
-        proba = self.model.predict_proba(X_scaled)[:, 1]
-        return pd.Series(proba, index=df.index, dtype=float)
+        proba = pd.Series(0.50, index=df.index, dtype=float)
+        if valid.any():
+            X_scaled = self.scaler.transform(X.loc[valid])
+            proba.loc[valid] = self.model.predict_proba(X_scaled)[:, 1]
+
+        return proba
 
     def predict(self, df: pd.DataFrame) -> pd.Series:
         """
