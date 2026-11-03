@@ -129,12 +129,18 @@ class WeeklySignalAggregator:
         theta_long: float = 0.25,
         theta_short: float = 0.25,
         epsilon: float = 1e-12,
+        objective_metric: str = "sharpe_mdd",
     ):
         raw_w = np.asarray(weights, dtype=np.float64).flatten()
         self.alphas = np.asarray(alphas, dtype=np.float64).flatten()
         self.theta_long = float(theta_long)
         self.theta_short = float(theta_short)
         self.epsilon = float(epsilon)
+        self.objective_metric = str(objective_metric)
+        if self.objective_metric not in {
+            "sharpe_mdd", "sharpe", "calmar", "return", "profit_oriented", "profit"
+        }:
+            raise ValueError(f"Obiettivo fitness non valido: {self.objective_metric}")
 
         w_sum = np.sum(raw_w)
         if w_sum > self.epsilon:
@@ -283,6 +289,9 @@ class PortfolioFitnessEvaluator:
         signals: np.ndarray,
         returns: np.ndarray,
         weights: np.ndarray,
+        initial_position: float = 0.0,
+        previous_position: float = 0.0,
+        initial_signal: int = 0,
     ) -> Dict[str, float]:
         """Calcola il profilo completo delle metriche su una singola traiettoria (T,)."""
         P = np.asarray(positions, dtype=np.float64)
@@ -295,11 +304,12 @@ class PortfolioFitnessEvaluator:
             return {"sharpe_ratio": 0.0, "fitness": self.penalty_fitness}
 
         # Turnover settimanale causale: Delta P_0 = |P_0|, Delta P_t = |P_t - P_{t-1}|
-        delta_P = np.empty(T, dtype=np.float64)
-        delta_P[0] = np.abs(P[0])
-        delta_P[1:] = np.abs(P[1:] - P[:-1])
+        held = np.empty_like(P)
+        held[0] = float(initial_position)
+        held[1:] = P[:-1]
 
-        R_net = P * r - self.transaction_fee * delta_P
+        delta_P = np.abs(np.diff(held, prepend=(previous_position)))
+        R_net = held * r - self.transaction_fee * delta_P
         mean_r = float(np.mean(R_net))
         std_r = float(np.std(R_net, ddof=1)) if T > 1 else 0.0
         sr_ann = float(np.sqrt(self.annualization_factor) * mean_r / (std_r + self.epsilon))
@@ -309,7 +319,7 @@ class PortfolioFitnessEvaluator:
         ann_vol = float(std_r * np.sqrt(self.annualization_factor))
 
         wealth = np.cumprod(1.0 + R_net)
-        running_max = np.maximum.accumulate(wealth)
+        running_max = np.maximum.accumulate(np.concatenate(([1.0], wealth)))[1:]
         dd = wealth / running_max - 1.0
         max_dd = abs(float(np.min(dd)))
 
@@ -318,12 +328,24 @@ class PortfolioFitnessEvaluator:
         profit_factor = float(gains / losses) if losses > 1e-6 else (10.0 if gains > 0 else 1.0)
         win_rate = float(np.mean(R_net > 0)) if T > 0 else 0.0
 
-        active_ratio = float(np.mean(S != 0))
-        trades = int(np.sum(S[1:] != S[:-1]))
+        executed_signals = np.empty_like(S)
+        executed_signals[0] = int(initial_signal)
+        executed_signals[1:] = S[:-1]
+
+        active_ratio = float(np.mean(executed_signals != 0))
+        trades = int(np.sum(executed_signals[1:] != executed_signals[:-1]))
         conc_penalty = float(self.lambda_concentration * np.sum(w ** 2))
 
         violates_activity = (active_ratio < self.min_active_ratio) or (trades < self.min_trades)
-        fitness = self.penalty_fitness if violates_activity else (sr_ann - conc_penalty)
+        objective = compute_objective_score({
+            "sharpe_ratio": sr_ann,
+            "max_drawdown": max_dd,
+            "annualized_return": ann_ret,
+            "cumulative_return": cum_ret,
+            "profit_factor": profit_factor,
+        }, metric_type=self.objective_metric)
+
+        fitness = self.penalty_fitness if violates_activity else objective - conc_penalty
 
         return {
             "fitness": round(fitness, 4),
@@ -357,17 +379,57 @@ class PortfolioFitnessEvaluator:
         if T < 2:
             return np.full(M, self.penalty_fitness, dtype=np.float64)
 
-        delta_P = np.empty_like(P)
-        delta_P[:, 0] = np.abs(P[:, 0])
-        delta_P[:, 1:] = np.abs(P[:, 1:] - P[:, :-1])
+        held = np.zeros_like(P)
+        held[:, 1:] = P[:, :-1]
 
-        R_net = P * r[np.newaxis, :] - self.transaction_fee * delta_P
+        delta_P = np.abs(np.diff(
+            held, axis=1, prepend=np.zeros((M, 1))
+        ))
+        R_net = held * r[np.newaxis, :] - self.transaction_fee * delta_P
         mean_r = np.mean(R_net, axis=1)
         std_r = np.std(R_net, axis=1, ddof=1)
         sr_ann = np.sqrt(self.annualization_factor) * mean_r / (std_r + self.epsilon)
 
-        active_ratio = np.sum(S != 0, axis=1) / T
-        trades = np.sum(S[:, 1:] != S[:, :-1], axis=1)
+        wealth = np.cumprod(1.0 + R_net, axis=1)
+        peaks = np.maximum.accumulate(
+            np.concatenate([np.ones((M, 1)), wealth], axis=1),
+            axis=1,
+        )[:, 1:]
+
+        max_dd = np.max(1.0 - wealth / peaks, axis=1)
+        cum_ret = wealth[:, -1] - 1.0
+        ann_ret = np.where(
+            cum_ret > -1.0,
+            np.maximum(1.0 + cum_ret, self.epsilon)
+            ** (self.annualization_factor / T) - 1.0,
+            -1.0,
+        )
+
+        gains = np.clip(R_net, 0, None).sum(axis=1)
+        losses = np.clip(-R_net, 0, None).sum(axis=1)
+        profit_factor = np.where(
+            losses > 1e-6,
+            gains / np.maximum(losses, self.epsilon),
+            np.where(gains > 0, 10.0, 1.0),
+        )
+
+        base_scores = np.array([
+            compute_objective_score({
+                "sharpe_ratio": float(sr_ann[i]),
+                "max_drawdown": float(max_dd[i]),
+                "annualized_return": float(ann_ret[i]),
+                "cumulative_return": float(cum_ret[i]),
+                "profit_factor": float(profit_factor[i]),
+            }, metric_type=self.objective_metric)
+            for i in range(M)
+        ])
+        executed_signals = np.zeros_like(S)
+        executed_signals[:, 1:] = S[:, :-1]
+
+        active_ratio = np.mean(executed_signals != 0, axis=1)
+        trades = np.sum(
+            executed_signals[:, 1:] != executed_signals[:, :-1], axis=1
+        )
         violates = (active_ratio < self.min_active_ratio) | (trades < self.min_trades)
 
         W_raw = chromosomes[:, :n_agents]
@@ -375,7 +437,7 @@ class PortfolioFitnessEvaluator:
         W = np.where(W_sum > self.epsilon, W_raw / np.maximum(W_sum, self.epsilon), 1.0 / n_agents)
         conc_penalty = self.lambda_concentration * np.sum(W ** 2, axis=1)
 
-        fitness = sr_ann - conc_penalty
+        fitness = base_scores - conc_penalty
         fitness[violates] = self.penalty_fitness
         return np.nan_to_num(fitness, nan=self.penalty_fitness, posinf=self.penalty_fitness, neginf=self.penalty_fitness)
 
@@ -647,22 +709,35 @@ class WalkForwardEngine:
             agg = WeeklySignalAggregator(dec["weights"], dec["alphas"], dec["theta_long"], dec["theta_short"])
             _, S_te, C_te, P_te = agg.aggregate_2d(signals_mat[te_idx], conf_mat[te_idx])
 
-            # Calcolo rendimento netto OOS
-            delta_P = np.empty(len(te_idx), dtype=float)
-            delta_P[0] = np.abs(P_te[0] - prev_pos)
-            if len(te_idx) > 1:
-                delta_P[1:] = np.abs(P_te[1:] - P_te[:-1])
-            prev_pos = float(P_te[-1])
+            _, S_pre, _, P_pre = agg.aggregate_2d(
+                signals_mat[end_train - 1:end_train],
+                conf_mat[end_train - 1:end_train],
+            )
 
-            R_net_te = P_te * ret_np[te_idx] - self.evaluator.transaction_fee * delta_P
-            oos_m = self.evaluator.evaluate_single(P_te, S_te, ret_np[te_idx], dec["weights"])
+            initial_position = float(P_pre[-1])
+            held_te = np.concatenate(([initial_position], P_te[:-1]))
+            delta_P = np.abs(np.diff(held_te, prepend=prev_pos))
+
+            R_net_te = (
+                held_te * ret_np[te_idx]
+                - self.evaluator.transaction_fee * delta_P
+            )
+
+            oos_m = self.evaluator.evaluate_single(
+                P_te, S_te, ret_np[te_idx], dec["weights"],
+                initial_position=initial_position,
+                previous_position=prev_pos,
+                initial_signal=int(S_pre[-1]),
+            )
+            prev_pos = float(held_te[-1])
 
             for i_step, date_val in enumerate(common_idx[te_idx]):
                 oos_records.append({
                     "date": date_val,
                     "signal": int(S_te[i_step]),
                     "confidence": float(C_te[i_step]),
-                    "position": float(P_te[i_step]),
+                    "position": float(held_te[i_step]),
+                    "target_position": float(P_te[i_step]),
                     "net_return": float(R_net_te[i_step]),
                 })
 
@@ -1100,7 +1175,10 @@ class OrchestratorOptimizer:
             print(f"  [Agente {n:<22}] Sharpe: {bm_m['sharpe_ratio']:>5.2f} | CumRet: {bm_m['cumulative_return']*100:>+6.1f}% | MDD: {bm_m['max_drawdown']*100:>4.1f}%")
 
         if method.lower() == "ga":
-            evaluator = PortfolioFitnessEvaluator(annualization_factor=self.annualization_factor)
+            evaluator = PortfolioFitnessEvaluator(
+                annualization_factor=self.annualization_factor,
+                objective_metric=self.objective_metric,
+            )
             ga = GeneticMetaOptimizer(
                 n_agents=k,
                 population_size=self.population_size,
@@ -1157,8 +1235,10 @@ class OrchestratorOptimizer:
 
             best_score, best_combo = -999.0, None
             records = []
-            evaluator = PortfolioFitnessEvaluator(annualization_factor=self.annualization_factor)
-
+            evaluator = PortfolioFitnessEvaluator(
+                annualization_factor=self.annualization_factor,
+                objective_metric=self.objective_metric,
+            )
             for w_vec in w_cands:
                 for th in th_cands:
                     agg = WeeklySignalAggregator(weights=w_vec, alphas=np.ones(k), theta_long=th, theta_short=th)
