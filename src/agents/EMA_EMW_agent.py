@@ -183,6 +183,13 @@ class SMAEMAOptimizer:
         """
         dfs_to_concat = [df for df in [warmup_df, train_df, val_df] if df is not None and not df.empty]
         full_df = pd.concat(dfs_to_concat)
+        if (
+            not isinstance(full_df.index, pd.DatetimeIndex)
+            or full_df.index.hasnans
+            or not full_df.index.is_monotonic_increasing
+            or not full_df.index.is_unique
+        ):
+            raise ValueError("Warm-up, training e validation devono essere ordinati e senza date duplicate.")
 
         price_col_resolved = self.price_col
         if price_col_resolved not in full_df.columns:
@@ -225,6 +232,9 @@ class SMAEMAOptimizer:
                 )
             else:
                 pos = np.where(ema > sma, 1.0, -1.0)
+            # Nessuna posizione finché entrambe le medie non sono disponibili
+            valid_indicators = sma.notna() & ema.notna()
+            pos = np.where(valid_indicators, pos, 0.0)
 
             # SHIFT(1): il segnale calcolato a chiusura t opera sui rendimenti di t+1
             pos_series = pd.Series(pos, index=full_df.index).shift(1)
