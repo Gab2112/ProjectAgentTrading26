@@ -203,8 +203,9 @@ class SVMAgent(BaseAgent):
 
         X = df[active_features].copy().ffill().bfill()
         price_series = df[price_col_resolved].astype(float)
-        future_returns = price_series.pct_change().shift(-1)
-        y = (future_returns > 0.0).astype(int)
+        future_returns = price_series.shift(-1).div(price_series).sub(1.0)
+        future_returns = future_returns.replace([np.inf, -np.inf], np.nan)
+        y = (future_returns > 0.0).astype(float).where(future_returns.notna())
 
         return X, y, future_returns
 
@@ -213,14 +214,25 @@ class SVMAgent(BaseAgent):
         Addestra il modello SVM con vincolo temporale In-Sample (<= max_year).
         La standardizzazione (scaler) è fittata ESCLUSIVAMENTE sui dati In-Sample.
         """
-        X, y, _ = self._extract_xy(df)
+        if (
+            not isinstance(df.index, pd.DatetimeIndex)
+            or df.index.hasnans
+            or not df.index.is_monotonic_increasing
+            or not df.index.is_unique
+        ):
+            raise ValueError("Indice temporale del training non valido.")
 
-        if max_year is not None and hasattr(X.index, "year"):
-            mask = X.index.year <= max_year
-            X_train = X.loc[mask]
-            y_train = y.loc[mask]
-        else:
-            X_train, y_train = X, y
+        train_df = (
+            df.loc[df.index.year <= max_year].copy()
+            if max_year is not None
+            else df.copy()
+        )
+
+        X, y, _ = self._extract_xy(train_df)
+
+        valid_mask = X.notna().all(axis=1) & y.notna()
+        X_train = X.loc[valid_mask]
+        y_train = y.loc[valid_mask].astype(int)
 
         # Esclusione dell'ultimo record privo di forward return (NaN)
         valid_mask = ~y_train.isna() & ~X_train.isna().any(axis=1)
@@ -229,7 +241,8 @@ class SVMAgent(BaseAgent):
 
         if len(X_train) < 30:
             raise ValueError(f"Campione In-Sample insufficiente ({len(X_train)} righe) per il training SVM.")
-
+        if y_train.nunique() != 2:
+            raise ValueError("Il training SVM richiede entrambe le classi del target.")
         self.trained_features = list(X_train.columns)
 
         # Inizializzazione e fit del Trasformatore di Scala In-Sample

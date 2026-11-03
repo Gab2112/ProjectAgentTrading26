@@ -208,8 +208,9 @@ class RandomForestAgent(BaseAgent):
 
         # Calcolo rendimenti futuri a t+1 (shift(-1) sul rendimento o prezzo)
         price_series = df[price_col_resolved].astype(float)
-        future_returns = price_series.pct_change().shift(-1)
-        y = (future_returns > 0.0).astype(int)
+        future_returns = price_series.shift(-1).div(price_series).sub(1.0)
+        future_returns = future_returns.replace([np.inf, -np.inf], np.nan)
+        y = (future_returns > 0.0).astype(float).where(future_returns.notna())
 
         return X, y, future_returns
 
@@ -222,23 +223,31 @@ class RandomForestAgent(BaseAgent):
         Addestra il modello Random Forest sui dati In-Sample (fino a max_year).
         Rispetta rigorosamente l'OOS lock del progetto (es. dati >= 2022 mai visti in fase di fit).
         """
-        X, y, _ = self._extract_xy(df)
+        if (
+            not isinstance(df.index, pd.DatetimeIndex)
+            or df.index.hasnans
+            or not df.index.is_monotonic_increasing
+            or not df.index.is_unique
+        ):
+            raise ValueError("Indice temporale del training non valido.")
 
-        # Filtro In-Sample temporale rigoroso
-        if max_year is not None and isinstance(df.index, pd.DatetimeIndex):
-            is_mask = df.index.year <= max_year
-        else:
-            is_mask = pd.Series(True, index=df.index)
+        train_df = (
+            df.loc[df.index.year <= max_year].copy()
+            if max_year is not None
+            else df.copy()
+        )
 
-        # Rimuove NaN dovuti al warm-up iniziale o all'ultimo target shift(-1)
-        valid_mask = is_mask & X.notna().all(axis=1) & y.notna()
+        X, y, _ = self._extract_xy(train_df)
 
+        valid_mask = X.notna().all(axis=1) & y.notna()
         X_train = X.loc[valid_mask]
-        y_train = y.loc[valid_mask]
+        y_train = y.loc[valid_mask].astype(int)
 
         if len(X_train) < 50:
             raise ValueError(f"Campione di training insufficiente: {len(X_train)} righe valide.")
 
+        if y_train.nunique() != 2:
+            raise ValueError("Il training RF richiede entrambe le classi del target.")
         self.model = RandomForestClassifier(
             n_estimators=self.n_estimators,
             max_depth=self.max_depth,
