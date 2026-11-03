@@ -116,19 +116,42 @@ class TestPortfolioFitnessEvaluator(unittest.TestCase):
         )
 
     def test_turnover_and_net_return_calculation(self):
-        """Verifica il calcolo esatto del turnover e la detrazione della fee."""
+        """Verifica turnover e rendimenti netti con esecuzione causale."""
         P = np.array([0.5, 0.5, -0.5, 0.0])
         S = np.array([1, 1, -1, 0])
         r = np.array([0.02, -0.01, 0.03, 0.01])
         w = np.array([0.5, 0.5])
 
-        # Delta P:
-        # t=0: |0.5 - 0| = 0.5 -> fee = 0.0010 * 0.5 = 0.0005 -> R_net[0] = 0.5*0.02 - 0.0005 = 0.0095
-        # t=1: |0.5 - 0.5| = 0.0 -> fee = 0.0 -> R_net[1] = 0.5*-0.01 = -0.0050
-        # t=2: |-0.5 - 0.5| = 1.0 -> fee = 0.0010 -> R_net[2] = -0.5*0.03 - 0.0010 = -0.0160
-        # t=3: |0 - (-0.5)| = 0.5 -> fee = 0.0005 -> R_net[3] = 0.0 - 0.0005 = -0.0005
+        # Il segnale P_t diventa operativo dalla settimana successiva.
+        # Posizioni detenute: [0.0, 0.5, 0.5, -0.5]
+        # Turnover:           [0.0, 0.5, 0.0, 1.0]
+        # Rendimenti netti:   [0.0, -0.0055, 0.015, -0.006]
+
         metrics = self.evaluator.evaluate_single(P, S, r, w)
-        self.assertAlmostEqual(metrics["avg_turnover"], (0.5 + 0.0 + 1.0 + 0.5) / 4.0, places=4)
+
+        expected_turnover = (0.0 + 0.5 + 0.0 + 1.0) / 4.0
+        expected_net_returns = np.array([
+            0.0,
+            0.5 * (-0.01) - 0.001 * 0.5,
+            0.5 * 0.03,
+            -0.5 * 0.01 - 0.001 * 1.0,
+        ])
+
+        expected_cumulative_return = np.prod(
+            1.0 + expected_net_returns
+        ) - 1.0
+
+        self.assertAlmostEqual(
+            metrics["avg_turnover"],
+            expected_turnover,
+            places=4,
+        )
+
+        self.assertAlmostEqual(
+            metrics["cumulative_return"],
+            expected_cumulative_return,
+            delta=0.00005,
+        )
 
     def test_activity_constraint_penalty(self):
         """Verifica che un'attività inferiore al minimo (15%) o pochi trade riceva -10.0 di fitness."""

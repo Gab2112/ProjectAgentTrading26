@@ -274,6 +274,7 @@ class PortfolioFitnessEvaluator:
         lambda_concentration: float = 0.05,
         penalty_fitness: float = -10.0,
         epsilon: float = 1e-12,
+        objective_metric: str = "sharpe_mdd",
     ):
         self.transaction_fee = float(transaction_fee)
         self.annualization_factor = int(annualization_factor)
@@ -282,6 +283,13 @@ class PortfolioFitnessEvaluator:
         self.lambda_concentration = float(lambda_concentration)
         self.penalty_fitness = float(penalty_fitness)
         self.epsilon = float(epsilon)
+        self.objective_metric = str(objective_metric)
+        if self.objective_metric not in {
+            "sharpe_mdd", "sharpe", "calmar", "return", "profit_oriented", "profit"
+        }:
+            raise ValueError(
+                f"Funzione obiettivo non riconosciuta: {self.objective_metric}"
+            )
 
     def evaluate_single(
         self,
@@ -662,7 +670,12 @@ class WalkForwardEngine:
         returns: Union[pd.Series, np.ndarray],
     ) -> Dict[str, Any]:
         """Esegue il ciclo Walk-Forward rolling su tutti i fold temporali."""
-        aligned, common_idx = align_signals(signals_dict, fill_method="zeros")
+        aligned, common_idx = align_signals(signals_dict, fill_method="inner")
+
+        if common_idx.empty:
+            raise ValueError(
+                "Nessuna data comune disponibile tra i segnali degli agenti."
+            )
         agent_names = list(aligned.keys())
         self.n_agents = len(agent_names)
         T = len(common_idx)
@@ -1150,16 +1163,29 @@ class OrchestratorOptimizer:
         method: str = "ga",
     ) -> Tuple[OrchestratorAgent, pd.DataFrame]:
         """Ottimizzazione In-Sample (<= max_train_year) con Algoritmo Genetico o Grid Search."""
-        aligned, common_idx = align_signals(signals_dict, fill_method="zeros")
+        aligned, common_idx = align_signals(signals_dict, fill_method="inner")
+        if common_idx.empty:
+            raise ValueError(
+                "Nessuna data comune disponibile tra i segnali degli agenti."
+            )
         names = list(aligned.keys())
         k = len(names)
 
         ret_s = returns_or_prices[[c for c in returns_or_prices.columns if "return" in c.lower() or "close" in c.lower()][0]] if isinstance(returns_or_prices, pd.DataFrame) else returns_or_prices
-        ret_s = ret_s.reindex(common_idx).fillna(0.0)
+        ret_s = ret_s.reindex(common_idx)
+
+        if ret_s.isna().any() or not np.isfinite(
+            ret_s.to_numpy(dtype=float)
+        ).all():
+            raise ValueError(
+                "Rendimenti mancanti o non validi nelle date di ottimizzazione."
+            )
 
         is_mask = (common_idx.year <= self.max_train_year) if hasattr(common_idx, "year") else np.ones(len(common_idx), dtype=bool)
         if not np.any(is_mask):
-            is_mask = np.ones(len(common_idx), dtype=bool)
+            raise ValueError(
+                "Nessuna osservazione nel periodo di training autorizzato."
+            )
 
         is_idx = common_idx[is_mask]
         s_mat = np.column_stack([aligned[n]["signal"].loc[is_idx].to_numpy(dtype=float) for n in names])
