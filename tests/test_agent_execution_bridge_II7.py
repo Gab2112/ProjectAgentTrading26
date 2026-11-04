@@ -9,7 +9,7 @@ from src.agents.agent_execution_bridge import (
     signals_to_target_weights,
     run_agent_training_execution_diagnostic,
 )
-from src.regime_allocator import ASSETS
+from src.utils import ASSETS
 
 
 class TestAgentExecutionBridgeII7(unittest.TestCase):

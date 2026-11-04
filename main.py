@@ -25,40 +25,21 @@ from __future__ import annotations
 
 import argparse
 from copy import deepcopy
-import json
 from pathlib import Path
 import random
 
 import numpy as np
 import pandas as pd
-import yaml
 
-from src.data_transformation import run_data_transformation
-from src.portfolio import run_portfolio
 from src.backtester import run_backtest
+from src.data_transformation import run_data_transformation
 from src.evaluator import run_evaluation
+from src.portfolio import run_portfolio
+from src.regime_strategy import B_VERSIONS, run_level_b
 from src.time_split import get_time_windows, is_oos_enabled
-from src.utils import get_tickers
+from src.utils import ASSETS, CONFIG_PATH, ROOT_DIR, get_tickers, load_config
 
-ROOT_DIR = Path(__file__).resolve().parent
-CONFIG_PATH = ROOT_DIR / "config.yaml"
 LIVELLI_IMPLEMENTATI = ("A1", "A2", "B")
-UNIVERSO_A = frozenset({"SPY", "IEF", "GLD", "SHY"})
-B_VERSIONS = ("v1", "v2")
-
-
-def load_config(path: Path) -> dict:
-    """Load YAML without silently filling missing parameters."""
-    path = Path(path)
-    if not path.is_file():
-        raise FileNotFoundError(f"File di configurazione non trovato: {path}")
-
-    with path.open("r", encoding="utf-8") as file:
-        config = yaml.safe_load(file)
-
-    if not isinstance(config, dict):
-        raise ValueError("Il file di configurazione deve contenere un dizionario YAML.")
-    return config
 
 
 def validate_config(config: dict) -> None:
@@ -79,7 +60,7 @@ def validate_config(config: dict) -> None:
         )
 
     tickers = get_tickers(config)
-    if len(tickers) != 4 or set(tickers) != UNIVERSO_A:
+    if len(tickers) != 4 or set(tickers) != set(ASSETS):
         raise ValueError("I livelli Multi-Asset richiedono SPY, IEF, GLD e SHY.")
 
     frequenze = config["frequency"]
@@ -166,225 +147,6 @@ def print_project_summary(config: dict, levels: list[str]) -> None:
     print("=======================================================\n")
 
 
-def _write_frozen_outputs(files: dict[Path, str]) -> None:
-    """Create absent artifacts, never overwrite a frozen existing artifact.
-
-    Check ALL conflicts before creating ANY missing files, so an unexpected
-    difference cannot leave a half-updated version directory behind.
-    """
-    conflicts = []
-    for path, content in files.items():
-        if path.exists():
-            if not path.is_file() or path.read_text(encoding="utf-8") != content:
-                conflicts.append(str(path))
-
-    if conflicts:
-        raise RuntimeError(
-            "Frozen Level B artifacts differ; no files were overwritten:\n"
-            + "\n".join(conflicts)
-        )
-
-    for path, content in files.items():
-        if not path.exists():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
-
-
-def _run_level_b(
-    config: dict,
-    root_dir: Path,
-    b_version: str = "v1",
-) -> pd.DataFrame:
-    """Reproduce a frozen Level B candidate on training only.
-
-    Both versions reuse the same execution engine and risk calculations.
-    Frozen B_v1 and B_v2 outputs are separately stored and compared against
-    generated contents before any missing files can be created.
-    """
-    from src.data_transformation import load_dataset
-    from src.regime_allocator import ASSETS
-    from src.regime_strategy import (
-        build_level_b_training,
-        build_level_b_v2_training,
-    )
-    from src.longshort_backtester import simulate_longshort_daily
-    from src.evaluator import calculate_metrics
-
-    if b_version not in B_VERSIONS:
-        raise ValueError(f"Unsupported Level B version: {b_version!r}")
-    if (
-        config["evaluation"]["evaluate_oos"] is not False
-        or config["validation"]["development_only"] is not True
-    ):
-        raise ValueError("Level B must remain training-only")
-    if config["features"].get("macro_point_in_time_verified") is not False:
-        raise ValueError("Level B macro PIT status must remain unverified")
-
-    b_config = config["strategies"]["B"]
-    if float(b_config["cash_interest_rate"]) != 0.0:
-        raise ValueError("Nonzero cash interest is not implemented")
-
-    windows = get_time_windows(config)
-    start, end = windows["train_start"], windows["train_end"]
-
-    build = (
-        build_level_b_training if b_version == "v1"
-        else build_level_b_v2_training
-    )
-    strategy = build(config, root_dir)
-    weights = strategy["target_weights"]
-
-    if weights.empty or weights.index.min() < start or weights.index.max() > end:
-        raise ValueError("Level B target weights exceed training boundaries")
-    if b_version == "v2" and (weights.to_numpy(dtype=float) < -1e-10).any():
-        raise ValueError("B_v2 must not contain Short positions")
-
-    market = load_dataset(
-        root_dir / config["paths"]["processed_data"] / "market_daily.csv",
-        strict=True,
-    ).loc[start:end]
-
-    if not weights.index.isin(market.index).all():
-        raise ValueError("Decision dates are absent from training market data")
-
-    opens = market[[f"{a}_open" for a in ASSETS]].copy()
-    closes = market[[f"{a}_close" for a in ASSETS]].copy()
-    opens.columns = list(ASSETS)
-    closes.columns = list(ASSETS)
-
-    execution = config["execution"]
-    capital = float(execution["initial_capital"])
-
-    result = simulate_longshort_daily(
-        open_prices=opens,
-        close_prices=closes,
-        target_weights=weights,
-        initial_capital=capital,
-        commission_bps=execution["commission_bps"],
-        slippage_bps=execution["slippage_bps"],
-        annual_borrow_rate=float(b_config["annual_borrow_rate"]),
-        additional_margin_rate=float(b_config["additional_margin_rate"]),
-    )
-
-    if (
-        result.index.min() < start
-        or result.index.max() > end
-        or not np.isfinite(result["nav"]).all()
-        or (result["nav"] <= 0).any()
-        or (result["margin_shortfall"] > 1e-8).any()
-    ):
-        raise RuntimeError("Level B accounting or temporal checks failed")
-
-    np.testing.assert_allclose(
-        (1.0 + result["daily_return"]).prod(),
-        result["nav"].iloc[-1] / capital,
-        rtol=1e-8,
-    )
-
-    ann = int(config["evaluation"]["annualization_factor"])
-    rf_annual = float(config["evaluation"]["risk_free_rate"])
-    rf_daily = (1.0 + rf_annual) ** (1.0 / ann) - 1.0
-    metrics = calculate_metrics(result["daily_return"], rf_daily, ann)
-
-    name = "regime_longshort" if b_version == "v1" else "regime_longflat_v2"
-    signals_dir = root_dir / config["paths"]["signals"] / "B" / name
-    results_dir = root_dir / config["paths"]["results"] / "B" / name
-
-    if b_version == "v1":
-        # Preserve EXACT B5.4 record layout for frozen artifact comparisons.
-        record = {
-            "period": "train",
-            "level": "B",
-            "portfolio": "regime_longshort",
-            "start_date": result.index.min().date().isoformat(),
-            "end_date": result.index.max().date().isoformat(),
-            **metrics,
-            "initial_capital": capital,
-            "final_nav": float(result["nav"].iloc[-1]),
-            "total_turnover": float(result["turnover"].sum()),
-            "total_transaction_costs": float(result["transaction_cost"].sum()),
-            "total_borrow_fees": float(result["borrow_fee"].sum()),
-            "executed_rebalances": int(result["executed"].sum()),
-        }
-        assumptions = {
-            "strategy_version": "B_v1_baseline",
-            "period": "training_only",
-            "macro_point_in_time_verified": False,
-            "annual_borrow_rate": float(b_config["annual_borrow_rate"]),
-            "additional_margin_rate": float(b_config["additional_margin_rate"]),
-            "cash_interest_rate": 0.0,
-            "commission_bps": float(execution["commission_bps"]),
-            "slippage_bps": float(execution["slippage_bps"]),
-            "validation_used": False,
-            "oos_used": False,
-        }
-        files = {
-            signals_dir / "target_weights.csv": weights.to_csv(index_label="Date"),
-            signals_dir / "signals.csv": strategy["signals"].to_csv(index_label="Date"),
-            signals_dir / "regimes.csv": strategy["regimes"].rename("regime").to_csv(index_label="Date"),
-            signals_dir / "risk_diagnostics.csv": strategy["risk"].to_csv(index_label="Date"),
-            results_dir / "target_weights.csv": weights.to_csv(index_label="Date"),
-            results_dir / "backtest_daily.csv": result.to_csv(index_label="Date"),
-            results_dir / "evaluation_metrics.csv": pd.DataFrame([record]).to_csv(index=False),
-            results_dir / "assumptions.json": json.dumps(assumptions, indent=2) + "\n",
-        }
-    else:
-        # Preserve EXACT B6.7 schema and JSON sorting, not the v1 schema.
-        record = {
-            "portfolio": "regime_longflat_v2",
-            "period": "train",
-            **metrics,
-            "initial_capital": capital,
-            "final_nav": float(result["nav"].iloc[-1]),
-            "transaction_costs": float(result["transaction_cost"].sum()),
-            "borrow_fees": float(result["borrow_fee"].sum()),
-            "executed_rebalances": int(result["executed"].sum()),
-        }
-        assumptions = {
-            "version": "B_v2_candidate",
-            "status": "selected_on_training_not_validated",
-            "period": "training_only",
-            "macro_point_in_time_verified": False,
-            "momentum_windows_days": [21, 63],
-            "regime_lookback_weeks": 52,
-            "regime_based_budgets": True,
-            "macro_directional_filter": False,
-            "short_positions": False,
-            "volatility_window_days": 126,
-            "target_volatility_annual": 0.08,
-            "commission_bps": float(execution["commission_bps"]),
-            "slippage_bps": float(execution["slippage_bps"]),
-            "cash_interest_rate": 0.0,
-            "validation_used": False,
-            "oos_used": False,
-        }
-        files = {
-            signals_dir / "signals.csv": strategy["signals"].to_csv(index_label="Date"),
-            signals_dir / "regimes.csv": strategy["regimes"].rename("regime").to_csv(index_label="Date"),
-            signals_dir / "budgets.csv": strategy["budgets"].to_csv(index_label="Date"),
-            signals_dir / "risk_diagnostics.csv": strategy["risk"].to_csv(index_label="Date"),
-            signals_dir / "target_weights.csv": weights.to_csv(index_label="Date"),
-            results_dir / "backtest_daily.csv": result.to_csv(index_label="Date"),
-            results_dir / "evaluation_metrics.csv": pd.DataFrame([record]).to_csv(index=False),
-            results_dir / "assumptions.json": json.dumps(assumptions, indent=2, sort_keys=True) + "\n",
-        }
-
-    _write_frozen_outputs(files)
-
-    print(f"\n[Level B / {b_version}] Training-only backtest reproduced")
-    print(f"  Decisions:       {len(weights)}")
-    print(f"  Executions:      {record['executed_rebalances']}")
-    print(f"  Final NAV:       {record['final_nav']:,.2f}")
-    print(f"  CAGR:            {metrics['cagr'] * 100:.2f}%")
-    print(f"  Sharpe:          {metrics['sharpe_ratio']:.4f}")
-    print(f"  Max drawdown:    {metrics['max_drawdown'] * 100:.2f}%")
-    print("  Frozen outputs:  verified, never overwritten")
-    print("  Macro PIT:       NOT VERIFIED")
-    print("  Validation/OOS:  NOT USED")
-
-    return pd.DataFrame([record])
-
-
 def run_pipeline(
     level: str | None = None,
     config_path: Path | None = None,
@@ -433,7 +195,7 @@ def run_pipeline(
         print(f"\n======== LIVELLO {corrente} | SOLO TRAINING ========")
 
         if corrente == "B":
-            metriche_per_livello[corrente] = _run_level_b(
+            metriche_per_livello[corrente] = run_level_b(
                 config, ROOT_DIR, b_version=chosen_b_version
             )
             continue

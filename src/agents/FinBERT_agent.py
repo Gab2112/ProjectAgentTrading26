@@ -28,7 +28,6 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
-import numpy as np
 import pandas as pd
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
@@ -41,10 +40,8 @@ if str(PROJECT_ROOT) not in sys.path:
 if str(CURRENT_DIR) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR))
 
-try:
-    from src.agents.base_agent import BaseAgent
-except ImportError:
-    from .base_agent import BaseAgent
+from src.agents.base_agent import BaseAgent
+from src.data_loader import load_agent_market_data
 
 
 # =====================================================================
@@ -503,7 +500,7 @@ class FinBERTAgent(BaseAgent):
         asset = (target_asset or self.target_asset or "SPY").upper()
         if calendar_index is None:
             try:
-                calendar_index = self.load_market_data().index
+                calendar_index = load_agent_market_data().index
             except Exception:
                 pass
 

@@ -1,11 +1,28 @@
 """Funzioni di supporto condivise della pipeline Multi-Asset.
 
-Questo modulo centralizza la lettura dell'universo investibile e la gestione
-provvisoria dei ritardi di pubblicazione delle serie macroeconomiche.
-
-Non legge file e non modifica dati o configurazioni. Le funzioni pubbliche
-mantengono le stesse firme usate dagli altri moduli della pipeline.
+Questo modulo centralizza:
+- l'universo investibile (``ASSETS``, unica definizione degli ETF, e ``get_tickers``);
+- la lettura di ``config.yaml`` (``load_config``) e la radice del progetto;
+- i ritardi provvisori di pubblicazione delle serie macroeconomiche;
+- la scrittura protetta dei file congelati (mai sovrascritti).
 """
+
+from pathlib import Path
+import re
+from typing import Optional, Union
+
+import yaml
+
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+CONFIG_PATH = ROOT_DIR / "config.yaml"
+
+# Universo dei livelli A/B/C, nell'ordine usato da pesi, colonne e ordini.
+# E' l'UNICA definizione nel codice: tutti i moduli la importano da qui.
+ASSETS = ("SPY", "IEF", "GLD", "SHY")
+
+# Caratteri ammessi nei ticker: il ticker diventa anche il nome di un file CSV.
+_VALID_TICKER = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 # Ritardi indicativi, espressi in giorni di calendario, per alcune serie FRED.
@@ -48,6 +65,8 @@ def get_tickers(config: dict) -> list[str]:
         ticker = asset.get("ticker")
         if not isinstance(ticker, str) or not ticker or ticker != ticker.strip():
             raise ValueError(f"Ticker mancante o non valido per '{category}'.")
+        if not _VALID_TICKER.fullmatch(ticker):
+            raise ValueError(f"Ticker non valido: {ticker!r}")
         if ticker != ticker.upper():
             raise ValueError(f"Il ticker '{ticker}' deve essere scritto in maiuscolo.")
         if ticker in tickers:
@@ -98,3 +117,58 @@ def get_release_lag_days(config: dict, series_id: str) -> int:
         )
 
     return lag
+
+
+def load_config(path: Path = CONFIG_PATH) -> dict:
+    """Load YAML without silently filling missing parameters."""
+    path = Path(path)
+    if not path.is_file():
+        raise FileNotFoundError(f"File di configurazione non trovato: {path}")
+
+    with path.open("r", encoding="utf-8") as file:
+        config = yaml.safe_load(file)
+
+    if not isinstance(config, dict):
+        raise ValueError("Il file di configurazione deve contenere un dizionario YAML.")
+    return config
+
+
+def write_frozen_outputs(files: dict[Path, str]) -> None:
+    """Create absent artifacts, never overwrite a frozen existing artifact.
+
+    Check ALL conflicts before creating ANY missing files, so an unexpected
+    difference cannot leave a half-updated version directory behind.
+    """
+    conflicts = []
+    for path, content in files.items():
+        if path.exists():
+            if not path.is_file() or path.read_text(encoding="utf-8") != content:
+                conflicts.append(str(path))
+
+    if conflicts:
+        raise RuntimeError(
+            "Frozen Level B artifacts differ; no files were overwritten:\n"
+            + "\n".join(conflicts)
+        )
+
+    for path, content in files.items():
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+
+
+def get_project_root(start_path: Optional[Union[str, Path]] = None) -> Path:
+    """
+    Risolve in modo robusto la directory radice del repository ProjectAgentTrading.
+    """
+    if start_path is not None:
+        current = Path(start_path).resolve()
+    else:
+        current = Path(__file__).resolve().parent
+
+    for candidate in [current] + list(current.parents):
+        if (candidate / "config.yaml").is_file() and (candidate / "src").is_dir():
+            return candidate
+
+    # Fallback standard: la radice del repository che contiene src/
+    return ROOT_DIR

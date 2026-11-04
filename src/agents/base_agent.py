@@ -5,7 +5,7 @@ Classe base astratta per tutti gli agenti di trading del framework ProjectAgentT
 Definisce l'interfaccia standard e condivisa per:
 - Inferenza e generazione segnali: predict() e generate_signals()
 - Convenzione dei segnali: 1 (BUY/LONG), -1 (SELL/SHORT), 0 (HOLD/FLAT)
-- Caricamento, validazione e allineamento dati multi-asset (SPY, IEF, GLD, SHY) e macro
+- Accesso ai dati tramite src/data_loader.py (load_data)
 - Risoluzione automatica delle colonne di prezzo per asset specifici
 - Serializzazione e caricamento parametri: load_params(), save_params()
 - Formattazione output uniforme (numeric [-1, 0, 1] o string ['SELL', 'HOLD', 'BUY'])
@@ -14,34 +14,12 @@ Definisce l'interfaccia standard e condivisa per:
 from abc import ABC, abstractmethod
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
-import yaml
 
-from src.utils import get_release_lag_days
-
-
-DEFAULT_ASSETS = ("SPY", "IEF", "GLD", "SHY")
-DEFAULT_TRAIN_START = "2005-05-20"  # Inizio comune multi-asset (avvio quotazione GLD)
-DEFAULT_TRAIN_END = "2016-12-31"
-
-
-def get_project_root(start_path: Optional[Union[str, Path]] = None) -> Path:
-    """
-    Risolve in modo robusto la directory radice del repository ProjectAgentTrading.
-    """
-    if start_path is not None:
-        current = Path(start_path).resolve()
-    else:
-        current = Path(__file__).resolve().parent
-
-    for candidate in [current] + list(current.parents):
-        if (candidate / "config.yaml").is_file() and (candidate / "src").is_dir():
-            return candidate
-
-    # Fallback standard: due livelli sopra src/agents
-    return Path(__file__).resolve().parents[2]
+from src.data_loader import load_agent_dataset, prepare_asset_data
+from src.utils import ASSETS
 
 
 class BaseAgent(ABC):
@@ -52,7 +30,7 @@ class BaseAgent(ABC):
         predict(df: pd.DataFrame) -> pd.Series
     """
 
-    DEFAULT_ASSETS = DEFAULT_ASSETS
+    DEFAULT_ASSETS = ASSETS
 
     def __init__(
         self,
@@ -145,264 +123,9 @@ class BaseAgent(ABC):
         )
 
     # =====================================================================
-    # METODI DI CARICAMENTO E PREPARAZIONE DATI (MULTI-ASSET READY)
+    # CARICAMENTO DATI (delegato a src/data_loader.py)
     # =====================================================================
-    @classmethod
-    def load_market_data(
-        cls,
-        frequency: str = "weekly",
-        source: Optional[Union[str, Path]] = None,
-        assets: Optional[Sequence[str]] = None,
-        start_date: Optional[Union[str, pd.Timestamp]] = None,
-        end_date: Optional[Union[str, pd.Timestamp]] = None,
-        root_dir: Optional[Union[str, Path]] = None,
-    ) -> pd.DataFrame:
-        """
-        Carica i dati di mercato storici per gli asset del paniere (default: SPY, IEF, GLD, SHY).
 
-        Parametri:
-            frequency: 'weekly' (default) o 'daily'.
-            source: Percorso opzionale a un file CSV specifico o alias ('master_weekly', 'market_daily').
-            assets: Lista di ticker da selezionare (es. ['SPY', 'GLD']). Se None, carica tutti gli asset disponibili.
-            start_date: Data minima (inclusa), es. '2005-05-20'.
-            end_date: Data massima (inclusa).
-            root_dir: Directory radice del progetto (risolta automaticamente se non fornita).
-
-        Ritorna:
-            pd.DataFrame: DataFrame indicizzato per Data con i prezzi storici.
-        """
-        root = get_project_root(root_dir)
-        processed_dir = root / "data" / "processed"
-
-        # Risoluzione del percorso sorgente
-        if source is not None and Path(source).is_file():
-            csv_path = Path(source)
-        elif frequency == "daily" or str(source).lower() == "market_daily":
-            csv_path = processed_dir / "market_daily.csv"
-        else:
-            csv_path = processed_dir / "master_weekly.csv"
-            if not csv_path.exists():
-                fallback = processed_dir / "decision_features_training.csv"
-                if fallback.exists():
-                    csv_path = fallback
-
-        if not csv_path.exists():
-            raise FileNotFoundError(
-                f"File di dati di mercato non trovato in: {csv_path}. "
-                f"Esegui la data transformation o verifica la directory data/processed."
-            )
-
-        df = pd.read_csv(csv_path, index_col=0, parse_dates=True)
-        if not isinstance(df.index, pd.DatetimeIndex):
-            df.index = pd.to_datetime(df.index)
-        df = df.sort_index()
-
-        # Filtraggio temporale
-        if start_date is not None:
-            df = df[df.index >= pd.Timestamp(start_date)]
-        if end_date is not None:
-            df = df[df.index <= pd.Timestamp(end_date)]
-
-        # Filtraggio per asset specifici
-        if assets is not None:
-            req_assets = [a.upper() for a in assets]
-            matched_cols = []
-            for col in df.columns:
-                col_upper = col.upper()
-                if any(col_upper.startswith(f"{a}_") or col_upper == a for a in req_assets):
-                    matched_cols.append(col)
-                elif not any(col_upper.startswith(f"{x}_") for x in DEFAULT_ASSETS):
-                    matched_cols.append(col)  # preserva feature non associate ad asset specifici
-            if matched_cols:
-                df = df[matched_cols]
-
-        return df
-
-    @classmethod
-    def load_macro_data(
-        cls,
-        decision_dates: Optional[pd.DatetimeIndex] = None,
-        start_date: Optional[Union[str, pd.Timestamp]] = None,
-        end_date: Optional[Union[str, pd.Timestamp]] = None,
-        root_dir: Optional[Union[str, Path]] = None,
-    ) -> pd.DataFrame:
-        """
-        Carica e sintetizza le serie storiche macroeconomiche FRED (tassi, curve spreads, inflazione, VIX).
-        Allinea causalmente le osservazioni sulle date fornite (evitando lookahead bias).
-        """
-        root = get_project_root(root_dir)
-        macro_dir = root / "data" / "raw" / "macro"
-
-        with (root / "config.yaml").open("r", encoding="utf-8") as f:
-            config = yaml.safe_load(f)
-
-        if not macro_dir.is_dir():
-            raise FileNotFoundError(f"Directory dati macro non trovata in: {macro_dir}")
-
-        macro_series: Dict[str, pd.Series] = {}
-        for csv_file in macro_dir.glob("*.csv"):
-            try:
-                s_df = pd.read_csv(csv_file, index_col=0, parse_dates=True)
-                val_col = s_df.columns[0]
-                num_series = pd.to_numeric(s_df[val_col], errors="coerce")
-                macro_series[csv_file.stem] = num_series
-            except Exception:
-                continue
-
-        # Costruzione DataFrame giornaliero dei tassi e indicatori base
-        aligned_series = {}
-        for name, s in macro_series.items():
-            s = s.dropna().sort_index().copy()
-            if name == "FEDFUNDS":
-                s.index += pd.Timedelta(
-                    days=get_release_lag_days(config, "FEDFUNDS")
-                )
-            aligned_series[name] = s.rename(name)
-
-        daily_macro = pd.concat(aligned_series.values(), axis=1, sort=False).sort_index()
-        daily_macro = daily_macro.ffill(limit=5)
-
-        if "FEDFUNDS" in aligned_series:
-            daily_macro["FEDFUNDS"] = aligned_series["FEDFUNDS"].reindex(
-                daily_macro.index, method="ffill"
-            )
-
-        # Calcolo indicatori derivati (curve spread, variazioni, inflazione)
-        calc_df = pd.DataFrame(index=daily_macro.index)
-
-        # 1. Pendenze di curva
-        if "DGS10" in daily_macro and "DGS2" in daily_macro:
-            calc_df["curve_10y_2y"] = daily_macro["DGS10"] - daily_macro["DGS2"]
-            calc_df["curve_10y_2y_change_1w"] = calc_df["curve_10y_2y"].diff(5)
-
-        if "DGS10" in daily_macro and "DGS3MO" in daily_macro:
-            calc_df["curve_10y_3m"] = daily_macro["DGS10"] - daily_macro["DGS3MO"]
-            calc_df["curve_10y_3m_change_1w"] = calc_df["curve_10y_3m"].diff(5)
-
-        if "DGS30" in daily_macro and "DGS10" in daily_macro:
-            calc_df["curve_30y_10y"] = daily_macro["DGS30"] - daily_macro["DGS10"]
-            calc_df["curve_30y_10y_change_1w"] = calc_df["curve_30y_10y"].diff(5)
-
-        # 2. Variazioni tassi 1w (~5 sedute lavorative)
-        if "DGS10" in daily_macro:
-            calc_df["treasury_10y_change_1w"] = daily_macro["DGS10"].diff(5)
-            calc_df["treasury_10y"] = daily_macro["DGS10"]
-        if "DGS2" in daily_macro:
-            calc_df["treasury_2y_change_1w"] = daily_macro["DGS2"].diff(5)
-            calc_df["treasury_2y"] = daily_macro["DGS2"]
-        if "DGS3MO" in daily_macro:
-            calc_df["treasury_3m_change_1w"] = daily_macro["DGS3MO"].diff(5)
-
-        # 3. Policy rate Fed
-        if "FEDFUNDS" in daily_macro:
-            calc_df["rates__policy_rate"] = daily_macro["FEDFUNDS"].ffill()
-
-        # 4. Inflazione YoY (CPIAUCSL shifted con ritardo prudenziale di 45 giorni per evitare lookahead)
-        if "CPIAUCSL" in macro_series:
-            cpi_monthly = macro_series["CPIAUCSL"].dropna().sort_index()
-            cpi_yoy = cpi_monthly.pct_change(12, fill_method=None)
-            lag = get_release_lag_days(config, "CPIAUCSL")
-            cpi_yoy.index = cpi_yoy.index + pd.Timedelta(days=lag)
-            calc_df["cpi_yoy"] = cpi_yoy.reindex(calc_df.index, method="ffill")
-
-        # 5. Volatilità VIX
-        if "VIXCLS" in daily_macro:
-            calc_df["vix_level"] = daily_macro["VIXCLS"]
-            calc_df["vix_change_4w"] = daily_macro["VIXCLS"].diff(20)
-
-        # 6. Breakeven inflation
-        if "T10YIE" in daily_macro:
-            calc_df["breakeven_10y"] = daily_macro["T10YIE"]
-        if "T5YIE" in daily_macro:
-            calc_df["breakeven_5y_change_1w"] = daily_macro["T5YIE"].diff(5)
-
-        # Allineamento con decision_dates (se fornite) o restituzione giornaliera
-        if decision_dates is not None:
-            # Allineamento causale merge_asof backwards
-            dec_df = pd.DataFrame({"Date": decision_dates}).sort_values("Date")
-            calc_clean = calc_df.dropna(how="all").reset_index().rename(columns={"index": "Date"})
-            aligned = pd.merge_asof(dec_df, calc_clean, on="Date", direction="backward").set_index("Date")
-            result = aligned
-        else:
-            result = calc_df
-
-        if start_date is not None:
-            result = result[result.index >= pd.Timestamp(start_date)]
-        if end_date is not None:
-            result = result[result.index <= pd.Timestamp(end_date)]
-
-        return result
-
-    @classmethod
-    def load_complete_dataset(
-        cls,
-        assets: Optional[Sequence[str]] = None,
-        frequency: str = "weekly",
-        include_macro: bool = True,
-        start_date: Optional[Union[str, pd.Timestamp]] = None,
-        end_date: Optional[Union[str, pd.Timestamp]] = None,
-        root_dir: Optional[Union[str, Path]] = None,
-        save_features_weekly_csv: bool = False,
-    ) -> pd.DataFrame:
-        """
-        Carica il dataset completo congiunto di mercato (SPY, IEF, GLD, SHY) e feature macro allineate.
-        Se save_features_weekly_csv=True o se data/processed/features_weekly.csv non esiste,
-        può salvare una copia per compatibilità retroattiva con i moduli preesistenti.
-        """
-        market_df = cls.load_market_data(
-            frequency=frequency,
-            assets=assets,
-            start_date=start_date,
-            end_date=end_date,
-            root_dir=root_dir,
-        )
-
-        if include_macro:
-            try:
-                macro_df = cls.load_macro_data(
-                    decision_dates=market_df.index,
-                    root_dir=root_dir,
-                )
-                complete_df = market_df.join(macro_df, how="left")
-            except Exception as e:
-                print(f"[BaseAgent.load_complete_dataset] Avviso: caricamento macro fallito ({e}), uso solo dati di mercato.")
-                complete_df = market_df
-        else:
-            complete_df = market_df
-
-        if save_features_weekly_csv:
-            root = get_project_root(root_dir)
-            target_path = root / "data" / "processed" / "features_weekly.csv"
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            complete_df.to_csv(target_path)
-            print(f"[BaseAgent] Esportato dataset compatibile in: {target_path}")
-
-        return complete_df
-
-    @staticmethod
-    def prepare_asset_data(
-        df: pd.DataFrame,
-        asset: str,
-        price_col: str = "close",
-    ) -> pd.DataFrame:
-        """
-        Estrae dal DataFrame multi-asset una vista standardizzata per un singolo asset (es. 'SPY'):
-        - Crea colonne canoniche: 'open', 'high', 'low', 'close', 'volume'
-        - Mantiene le colonne originarie con prefisso ('SPY_close', ecc.)
-        - Mantiene tutte le colonne di feature globali o macro (es. 'curve_10y_2y', 'vix_level')
-        """
-        asset_u = asset.upper()
-        out_df = df.copy()
-
-        # Mappatura campi standard
-        for standard_name in ["open", "high", "low", "close", "volume"]:
-            source_col = f"{asset_u}_{standard_name}"
-            if source_col in out_df.columns:
-                out_df[standard_name] = out_df[source_col]
-            elif f"{asset.lower()}_{standard_name}" in out_df.columns:
-                out_df[standard_name] = out_df[f"{asset.lower()}_{standard_name}"]
-
-        return out_df
 
     def load_data(
         self,
@@ -418,7 +141,7 @@ class BaseAgent(ABC):
         Se target_asset è configurato nell'agente, adatta automaticamente le colonne.
         """
         target = (asset or self.target_asset or "").upper()
-        df = self.load_complete_dataset(
+        df = load_agent_dataset(
             frequency=frequency,
             include_macro=include_macro,
             start_date=start_date,
@@ -427,7 +150,7 @@ class BaseAgent(ABC):
         )
 
         if target:
-            return self.prepare_asset_data(df, asset=target, price_col=self.price_col)
+            return prepare_asset_data(df, asset=target, price_col=self.price_col)
         return df
 
     # =====================================================================

@@ -38,9 +38,9 @@ import pandas as pd
 import yaml
 
 from src.backtester import run_backtest
-from src.data_transformation import load_dataset
+from src.data_loader import load_dataset
 from src.evaluator import calculate_metrics, run_evaluation
-from src.longshort_backtester import simula_portafoglio
+from src.execution_engine import simula_portafoglio
 from src.portfolio import (
     _get_a2_parameters,
     build_a1_weights,

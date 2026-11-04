@@ -1,10 +1,17 @@
-"""Shared A/B portfolio backtesting engine; one execution/accounting model."""
+"""Motore di esecuzione condiviso da A1, A2 e B (ex ``longshort_backtester.py``).
+
+Un solo modello di esecuzione e contabilita':
+- ordini eseguiti all'apertura della seduta successiva alla decisione;
+- costi (commissioni + slippage) sul nozionale scambiato;
+- posizioni Short con collaterale e costo di prestito;
+- valore del portafoglio (NAV) aggiornato a ogni chiusura.
+"""
 
 import numpy as np
 import pandas as pd
 from scipy.optimize import brentq
 
-from src.regime_allocator import ASSETS
+from src.utils import ASSETS
 
 
 def schedule_next_open_executions(

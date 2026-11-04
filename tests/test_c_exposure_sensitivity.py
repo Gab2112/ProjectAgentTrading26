@@ -6,7 +6,7 @@ from unittest import TestCase
 import numpy as np
 import pandas as pd
 
-from src.regime_allocator import ASSETS
+from src.utils import ASSETS
 from src.run_c_exposure_sensitivity import make_scenario_weights
 
 
@@ -31,7 +31,7 @@ class TestExposureSensitivity(TestCase):
         )
 
     def test_baseline_uses_existing_signed_cap_without_amplification(self):
-        from src.regime_allocator import apply_volatility_cap_panel
+        from src.portfolio import apply_volatility_cap_panel
         target, _, limited = self.scenario(1.0, 0.08)
         expected, _ = apply_volatility_cap_panel(self.raw, self.returns, window=126, target_volatility=0.08)
         np.testing.assert_allclose(target.to_numpy(), expected.to_numpy())
@@ -103,7 +103,7 @@ class TestExposureRunnerWiring(TestCase):
         ], index=self.decisions, columns=ASSETS)
         self.raw2 = self.raw1.copy()
         self.raw2.iloc[-1, 2] = -0.30
-        from src.regime_allocator import apply_volatility_cap_panel
+        from src.portfolio import apply_volatility_cap_panel
         self.target1, _ = apply_volatility_cap_panel(self.raw1, self.returns)
         self.target2, _ = apply_volatility_cap_panel(self.raw2, self.returns)
         self.cfg = {

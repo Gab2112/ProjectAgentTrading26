@@ -8,12 +8,9 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 
-from src.level_c_allocator import build_level_c_target_weights
-from src.level_c_v2_strategy import (
-    build_level_c_v2_target_weights,
-    build_level_c_v2_training,
-)
-from src.regime_allocator import ASSETS
+from src.level_c_allocator import build_level_c_target_weights, build_level_c_v2_target_weights
+from src.level_c_strategy import build_level_c_v2_training
+from src.utils import ASSETS
 
 
 class TestLevelCV2(TestCase):
@@ -183,12 +180,12 @@ class TestLevelCV2(TestCase):
             "evaluation": {"evaluate_oos": False},
             "paths": {"processed_data": "data/processed"},
         }
-        with patch("src.level_c_v2_strategy.build_level_c_training", return_value=v1), \
-             patch("src.level_c_v2_strategy.get_time_windows", return_value={
+        with patch("src.level_c_strategy.build_level_c_training", return_value=v1), \
+             patch("src.level_c_strategy.get_time_windows", return_value={
                  "train_start": self.start, "train_end": self.end,
              }), \
-             patch("src.level_c_v2_strategy.load_dataset", return_value=closes), \
-             patch("src.level_c_v2_strategy.build_trend_signal_panel", return_value=self.trend):
+             patch("src.level_c_strategy.load_dataset", return_value=closes), \
+             patch("src.level_c_strategy.build_trend_signal_panel", return_value=self.trend):
             out = build_level_c_v2_training(cfg, ".")
         self.assertTrue(out["target_weights"].index.equals(self.decisions))
         pd.testing.assert_frame_equal(out["b_v2_target_weights_same_dates"], self.budgets)

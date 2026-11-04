@@ -15,7 +15,7 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 
-from src.agents.base_agent import compute_objective_score
+from src.evaluator import compute_objective_score
 from src.agents.orchestrator_agent import (
     GeneticMetaOptimizer,
     OrchestratorOptimizer,

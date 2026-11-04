@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from src.agents.base_agent import BaseAgent
+from src.data_loader import load_agent_macro_data
 from src.agents.SVM_agent import SVMAgent
 
 
@@ -64,7 +64,7 @@ class TestFeatureLookahead(unittest.TestCase):
                 "2005-02-04", "2005-02-07", "2005-02-14", "2005-02-15",
                 "2005-02-18", "2005-04-01",
             ])
-            return BaseAgent.load_macro_data(root_dir=root, decision_dates=decisions)
+            return load_agent_macro_data(root_dir=root, decision_dates=decisions)
 
     def test_fedfunds_released_only_after_configured_lag(self):
         panel = self._load_macro_fixture()

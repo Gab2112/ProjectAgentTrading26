@@ -57,7 +57,7 @@ python3 main.py --level B --b-version v1    # Historical B baseline
 The previously performed B_v2 validation diagnostic is reproducible, provided ETF and macro data cover 2021:
 
 ```bash
-python3 tests/holdout_diagnostic_bv2.py --through 2021-12-31
+python3 scripts/holdout_diagnostic_bv2.py --through 2021-12-31
 ```
 
 This manual diagnostic is excluded from `test_*.py` discovery and accepts **only** `2021-12-31`; it does not open the 2022+ final test. Its validation results have already been inspected, so it should be rerun only for explicit reproducibility checks. It requires the original frozen B artifacts and adequate historical data coverage.
@@ -82,11 +82,15 @@ B_v2's drawdown is lower than A2's on training, but **its return and Sharpe are 
 
 ## 5. Architecture and next steps
 
-- **Data and timing:** `src/data_acquisition.py`, `src/data_transformation.py` (including the data-loader API), `src/time_split.py`, and `src/macro_availability.py` (macro features and deterministic regime classification).
-- **A1/A2:** `src/portfolio.py` (including the CVXPY A2 optimizer), `src/backtester.py`, and `src/evaluator.py`.
-- **B:** `src/regime_allocator.py` (regime-label validation, explicit cluster-to-budget contract, signal construction and volatility caps), `src/regime_strategy.py` (B_v1/B_v2 composition), and `src/longshort_backtester.py` (the shared daily self-financing simulation, including Long/Flat as a special case).
-- **Legacy agents:** `src/agents/` retains the earlier SHY/IEF/TLT Treasury research components. They are not yet integrated into the current SPY/IEF/GLD/SHY A/B pipeline. Previously generated `signals_statistical_{shy,ief,tlt}.csv` files are not part of the tracked A/B source; the agent code can generate statistical signals when suitable source features are available.
-- **Diagnostics:** `tests/holdout_diagnostic_bv2.py` is a manual validation-only script, not an automated unit test. `tests/test_*.py` contains the regression/invariant tests.
+- **Shared:** `src/utils.py` (the single `ASSETS` universe, `get_tickers`, `load_config`, release lags, frozen-file writer) and `src/time_split.py` (train/validation/OOS boundaries and the weekly decision calendar).
+- **Data:** `src/data_acquisition.py` (downloads), `src/data_loader.py` (every file read: `load_dataset`, daily ETF prices, Treasury yields, agent datasets), `src/data_transformation.py` (builds `data/processed/`), `src/macro_availability.py` (date alignment of macro observations).
+- **Features:** `src/features.py` is the single source of model inputs (decision-date market features, Level B macro levels, clustering variables, agent macro features).
+- **A1/A2:** `src/portfolio.py` (A1 weights, CVXPY A2 optimizer and the signed volatility cap used by B), `src/backtester.py`, `src/evaluator.py` (all performance metrics, agents included).
+- **Execution:** `src/execution_engine.py` (formerly `longshort_backtester.py`): the shared next-open, self-financing daily simulation for A and B.
+- **B:** `src/regime_allocator.py` (regime classification, budgets, momentum signals, macro filter, cluster-label contract), `src/regime_strategy.py` (B_v1/B_v2 construction and `run_level_b`), `src/regime_clustering.py` (GMM regimes, `python3 -m src.regime_clustering`).
+- **Agents:** `src/agents/` contains only model logic: `BaseAgent`, SMA/EMA, Z-Score, macro, Random Forest, SVM (`SVM_agent.py`), FinBERT, the genetic-algorithm orchestrator, `train.py` (out-of-fold RF/SVM signals) and `agent_execution_bridge.py` (agent signals → shared execution engine). Data, features and metrics are imported from the modules above; `src/plots.py` draws agent-signal diagnostics.
+- **C:** `src/level_c_allocator.py` (C_v1 Long/Flat and C_v2 Long/Short/Flat weight rules) and `src/level_c_strategy.py` (C_v1/C_v2 construction). Training-only comparisons on the same engine: `src/run_training_comparison.py` (B/C), `src/run_abc_training_comparison.py` (A/B/C), `src/run_c_exposure_sensitivity.py`.
+- **Diagnostics:** `scripts/holdout_diagnostic_bv2.py` is a manual validation-only script, not an automated unit test. `tests/test_*.py` contains the regression/invariant tests.
 - Generated outputs under `data/processed/`, `data/signals/` and `data/results/` are Git-ignored. The frozen B output directories are `data/results/B/regime_longshort/` and `data/results/B/regime_longflat_v2/`.
 - Details and research decisions: [`docs/research_design.md`](docs/research_design.md) and [`docs/decision_log.md`](docs/decision_log.md); earlier Treasury-only research: [`docs/treasury_research_review.md`](docs/treasury_research_review.md).
 

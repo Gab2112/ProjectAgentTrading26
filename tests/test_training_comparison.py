@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 import src.run_training_comparison as module
-from src.regime_allocator import ASSETS
+from src.utils import ASSETS
 
 
 class TestMatchedTrainingComparison(TestCase):

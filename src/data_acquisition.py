@@ -26,6 +26,8 @@ from typing import Dict
 import numpy as np
 import pandas as pd
 
+from src.utils import get_tickers
+
 
 # Sono ammessi esclusivamente identificativi utilizzabili come nomi di file.
 _VALID_ID = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -61,26 +63,6 @@ def _resolve_end_date(config: dict) -> str:
     if last_day < start_day:
         raise ValueError("data.end_date precede data.start_date")
     return last_day.strftime("%Y-%m-%d")
-
-
-def _get_tickers(config: dict) -> list[str]:
-    """Ricava i ticker dall'universo configurato e rifiuta i duplicati."""
-    assets = config["universe"]["traded_assets"]
-    if not isinstance(assets, dict) or not assets:
-        raise ValueError("L'universo investibile deve contenere almeno un ETF")
-
-    tickers = []
-    for asset in assets.values():
-        if not isinstance(asset, dict) or not isinstance(asset.get("ticker"), str):
-            raise ValueError("Ogni asset deve specificare un ticker testuale")
-        ticker = asset["ticker"].strip().upper()
-        if not _VALID_ID.fullmatch(ticker):
-            raise ValueError(f"Ticker non valido: {ticker!r}")
-        tickers.append(ticker)
-
-    if len(tickers) != len(set(tickers)):
-        raise ValueError("L'universo contiene ticker duplicati")
-    return tickers
 
 
 def _normalize_dates(df: pd.DataFrame, source: str) -> pd.DataFrame:
@@ -213,7 +195,7 @@ def download_market_data(config: dict, root_dir: Path) -> Dict[str, pd.DataFrame
     overwrite = _overwrite_enabled(config)
     print(f"\n[Acquisizione] ETF giornalieri: {start.date()} - {end.date()}")
 
-    for ticker in _get_tickers(config):
+    for ticker in get_tickers(config):
         path = market_dir / f"{ticker}.csv"
 
         if path.exists() and not overwrite:

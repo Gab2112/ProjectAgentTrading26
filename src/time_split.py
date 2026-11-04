@@ -4,6 +4,9 @@ Le date e le autorizzazioni si leggono esclusivamente da ``config.yaml``.
 Le funzioni esistenti mantengono le loro interfacce per consentire una
 migrazione graduale degli altri moduli.
 
+Contiene anche il calendario delle decisioni (``build_weekly_decision_dates``):
+ultima seduta reale di ogni settimana.
+
 Regole fondamentali:
 - il training inizia da ``train_start`` quando questa data e' definita;
 - la validation inizia da ``validation_start`` quando e' definita;
@@ -212,3 +215,18 @@ def split_time_periods(
             raise ValueError(f"Periodo temporale senza osservazioni: {name}")
 
     return periods
+
+
+def build_weekly_decision_dates(market_daily: pd.DataFrame) -> pd.DataFrame:
+    """Individua l'ULTIMA seduta effettiva di ciascuna settimana.
+
+    Una settimana con festività può terminare di giovedi'. I segnali
+    vengono calcolati dopo la chiusura di quella seduta e possono essere
+    eseguiti all'apertura della prima seduta successiva disponibile.
+    """
+    session_dates = pd.Series(market_daily.index, index=market_daily.index)
+    dates = session_dates.resample("W-FRI").last().dropna()
+    decisions = pd.DataFrame({"decision_date": pd.to_datetime(dates.values)})
+    decisions.index = pd.DatetimeIndex(decisions["decision_date"], name="Date")
+    # A differenza delle etichette W-FRI, l'indice indica sempre una seduta reale.
+    return decisions

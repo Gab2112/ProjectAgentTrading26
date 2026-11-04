@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from src.level_c_strategy import build_level_c_training
-from src.regime_allocator import ASSETS
+from src.utils import ASSETS
 
 
 class TestLevelCStrategyAdapter(TestCase):

@@ -29,11 +29,12 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+from typing import Dict
 
 import numpy as np
 import pandas as pd
 
-from src.data_transformation import load_dataset
+from src.data_loader import load_dataset
 from src.time_split import get_time_windows, is_oos_enabled
 
 
@@ -473,3 +474,112 @@ def run_evaluation(
     print("  Validation e OOS non valutati.")
 
     return metrics_df, curves_df
+
+
+# =====================================================================
+# FUNZIONI DI UTILITÀ PER METRICHE DI PERFORMANCE E STABILITÀ
+# =====================================================================
+def calculate_performance_metrics(
+    returns: pd.Series,
+    annualization_factor: int = 52,
+    risk_free_rate: float = 0.0,
+) -> Dict[str, float]:
+    """
+    Calcola le metriche complete di performance e rischio/stabilità per una serie di rendimenti periodici.
+
+    Parametri:
+        returns: Serie di rendimenti periodici (settimanali).
+        annualization_factor: Fattore di annualizzazione (default 52 per frequenza settimanale).
+        risk_free_rate: Tasso privo di rischio annualizzato (default 0.0).
+
+    Ritorna:
+        Dizionario con metriche: cumulative_return, annualized_return, annualized_volatility,
+        sharpe_ratio, max_drawdown, profit_factor, calmar_ratio.
+    """
+    clean_ret = returns.fillna(0.0)
+    n = len(clean_ret)
+    if n == 0:
+        return {
+            "cumulative_return": 0.0,
+            "annualized_return": 0.0,
+            "annualized_volatility": 0.0,
+            "sharpe_ratio": 0.0,
+            "max_drawdown": 0.0,
+            "profit_factor": 0.0,
+            "calmar_ratio": 0.0,
+        }
+
+    cum_ret = float((1.0 + clean_ret).prod() - 1.0)
+    if cum_ret <= -1.0:
+        ann_ret = -1.0
+    else:
+        ann_ret = float((1.0 + cum_ret) ** (annualization_factor / n) - 1.0)
+
+    vol = float(clean_ret.std(ddof=1) * np.sqrt(annualization_factor)) if n > 1 else 0.0
+
+    excess_ret = ann_ret - risk_free_rate
+    if vol > 1e-6:
+        sharpe = float(excess_ret / vol)
+    else:
+        sharpe = 0.0 if excess_ret >= 0 else -99.0
+
+    # Maximum Drawdown
+    wealth = (1.0 + clean_ret).cumprod()
+    running_max = wealth.cummax()
+    drawdown = wealth / running_max - 1.0
+    mdd = abs(float(drawdown.min()))
+
+    # Profit Factor
+    gains = float(clean_ret[clean_ret > 0].sum())
+    losses = float(abs(clean_ret[clean_ret < 0].sum()))
+    profit_factor = float(gains / losses) if losses > 1e-6 else (10.0 if gains > 0 else 1.0)
+
+    # Calmar Ratio
+    calmar = float(ann_ret / max(mdd, 0.01))
+
+    return {
+        "cumulative_return": cum_ret,
+        "annualized_return": ann_ret,
+        "annualized_volatility": vol,
+        "sharpe_ratio": sharpe,
+        "max_drawdown": mdd,
+        "profit_factor": profit_factor,
+        "calmar_ratio": calmar,
+    }
+
+
+def compute_objective_score(
+    metrics: Dict[str, float],
+    metric_type: str = "sharpe_mdd",
+) -> float:
+    """
+    Calcola lo score di ottimizzazione bilanciando rendimento e stabilità/rischio.
+
+    Opzioni supportate:
+    - 'sharpe_mdd' (default): Sharpe ratio penalizzato per il Maximum Drawdown.
+        Premia strategie con curve di equity regolari e perdite massime contenute.
+        Score = Sharpe * (1 - MDD) se Sharpe >= 0, altrimenti Sharpe * (1 + MDD).
+    - 'sharpe': Sharpe ratio annualizzato puro.
+    - 'calmar': Calmar ratio (rendimento annualizzato / max drawdown).
+    - 'return': Rendimento cumulato puro (non include penalità sul rischio).
+    """
+    sharpe = metrics["sharpe_ratio"]
+    mdd = metrics["max_drawdown"]
+    ann_ret = metrics["annualized_return"]
+
+    if metric_type == "sharpe_mdd":
+        if sharpe >= 0:
+            return float(sharpe * (1.0 - min(mdd, 0.99)))
+        else:
+            return float(sharpe * (1.0 + min(mdd, 1.0)))
+    elif metric_type == "sharpe":
+        return float(sharpe)
+    elif metric_type == "calmar":
+        return float(ann_ret / max(mdd, 0.02))
+    elif metric_type == "return":
+        return float(metrics["cumulative_return"])
+    elif metric_type in ("profit_oriented", "profit"):
+        pf = metrics.get("profit_factor", 1.0)
+        return float(pf * (1.0 - min(mdd, 0.99)))
+    else:
+        raise ValueError(f"Metrica obiettivo '{metric_type}' non riconosciuta.")

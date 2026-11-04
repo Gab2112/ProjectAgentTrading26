@@ -15,11 +15,11 @@ from collections.abc import Mapping
 import numpy as np
 import pandas as pd
 
-from src.regime_allocator import ASSETS
-from src.longshort_backtester import (
+from src.execution_engine import (
     schedule_next_open_executions,
     simulate_longshort_daily,
 )
+from src.utils import ASSETS
 
 
 def _validate_dates(index: pd.Index, name: str) -> None:

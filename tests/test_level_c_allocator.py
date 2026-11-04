@@ -15,7 +15,8 @@ import numpy as np
 import pandas as pd
 
 from src.level_c_allocator import build_level_c_target_weights
-from src.regime_allocator import ASSETS, apply_volatility_cap_panel
+from src.portfolio import apply_volatility_cap_panel
+from src.utils import ASSETS
 
 
 class TestLevelCAllocator(TestCase):

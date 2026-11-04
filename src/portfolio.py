@@ -5,7 +5,8 @@ SHY/IEF/TLT e su ``duration_score``.
 
 Livelli supportati:
 - A1: portafogli statici e a ribilanciamento settimanale definiti nel YAML;
-- A2: controllo della volatilita' mediante ottimizzazione CVXPY.
+- A2: controllo della volatilita' mediante ottimizzazione CVXPY;
+- B: limite di volatilita' per pesi con segno (``apply_volatility_cap_panel``).
 
 Responsabilita':
 1. leggere il pannello giornaliero prodotto da ``data_transformation.py``;
@@ -26,12 +27,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.data_transformation import load_dataset
+from src.data_loader import load_dataset
 from src.time_split import get_time_windows, restrict_to_allowed_period
-from src.utils import get_tickers
+from src.utils import ASSETS, get_tickers
 
 
-LEVEL_A_ASSETS = frozenset({"SPY", "IEF", "GLD", "SHY"})
 REQUIRED_PRICE_FIELDS = ("open", "close")
 
 
@@ -39,7 +39,7 @@ def _validate_universe(config: dict) -> list[str]:
     """Controlla che A1/A2 utilizzino i quattro ETF e i vincoli concordati."""
     tickers = get_tickers(config)
 
-    if len(tickers) != 4 or set(tickers) != LEVEL_A_ASSETS:
+    if len(tickers) != 4 or set(tickers) != set(ASSETS):
         raise ValueError(
             "I livelli A1/A2 richiedono esattamente SPY, IEF, GLD e SHY "
             "nell'universo investibile."
@@ -306,7 +306,7 @@ def _get_a2_parameters(config: dict) -> tuple[int, float]:
         or not isinstance(reference_weights, dict)
         or any(
             not np.isclose(float(reference_weights.get(ticker, 0)), 0.25)
-            for ticker in LEVEL_A_ASSETS
+            for ticker in ASSETS
         )
     ):
         raise ValueError(
@@ -333,7 +333,6 @@ def _get_a2_parameters(config: dict) -> tuple[int, float]:
 
 
 # A2 validators and constants restored from the original allocator.
-ASSET = ("SPY", "IEF", "GLD", "SHY")
 SEDUTE_ANNUALI = 252
 TOLLERANZA_PESI = 1e-7
 TOLLERANZA_VOLATILITA = 1e-7
@@ -385,12 +384,12 @@ def _valida_rendimenti(
     if rendimenti.columns.has_duplicates:
         raise ValueError("Sono presenti ticker duplicati.")
 
-    if not set(ASSET).issubset(rendimenti.columns):
+    if not set(ASSETS).issubset(rendimenti.columns):
         raise ValueError("Mancano uno o più ETF richiesti: SPY, IEF, GLD, SHY.")
 
     # La selezione avviene dopo il controllo delle date: nessuna risistemazione
     # automatica dell'ordine o riempimento di valori mancanti.
-    dati = rendimenti.loc[:, list(ASSET)].tail(finestra).copy()
+    dati = rendimenti.loc[:, list(ASSETS)].tail(finestra).copy()
 
     try:
         valori = dati.to_numpy(dtype=float)
@@ -414,7 +413,7 @@ def _verifica_soluzione(pesi: np.ndarray) -> np.ndarray:
         raise RuntimeError("Pesi restituiti dal risolutore non numerici.") from exc
 
     if (
-        len(valori) != len(ASSET)
+        len(valori) != len(ASSETS)
         or not np.isfinite(valori).all()
         or abs(valori.sum() - 1.0) > TOLLERANZA_PESI
         or np.any(valori < -TOLLERANZA_PESI)
@@ -449,8 +448,7 @@ def calcola_pesi_a2(
         import cvxpy as cp
     except ImportError as exc:
         raise ImportError("A2 requires cvxpy and clarabel") from exc
-    ASSET = ("SPY", "IEF", "GLD", "SHY")
-
+    
     dati = _valida_rendimenti(rendimenti, finestra, volatilita_massima)
     limite = float(volatilita_massima)
 
@@ -461,7 +459,7 @@ def calcola_pesi_a2(
     if not np.isfinite(cov).all():
         raise ValueError("La matrice di covarianza non contiene valori finiti.")
 
-    riferimento = np.full(len(ASSET), 1.0 / len(ASSET))
+    riferimento = np.full(len(ASSETS), 1.0 / len(ASSETS))
 
     def volatilita(pesi: np.ndarray) -> float:
         """Calcola la volatilità annualizzata della combinazione di pesi."""
@@ -472,7 +470,7 @@ def calcola_pesi_a2(
 
     if vol_ew <= limite:
         return (
-            pd.Series(riferimento, index=ASSET),
+            pd.Series(riferimento, index=ASSETS),
             {
                 "stato": "equal_weight",
                 "volatilita_ew": vol_ew,
@@ -490,7 +488,7 @@ def calcola_pesi_a2(
     autovalori = np.maximum(autovalori, 0.0)
     fattore = np.diag(np.sqrt(autovalori)) @ autovettori.T
 
-    w = cp.Variable(len(ASSET))
+    w = cp.Variable(len(ASSETS))
     vincoli_base = [cp.sum(w) == 1, w >= 0]
 
     # La riscalatura in punti percentuali riduce i problemi numerici.
@@ -540,7 +538,7 @@ def calcola_pesi_a2(
         raise RuntimeError("La soluzione viola il limite di volatilità.")
 
     return (
-        pd.Series(pesi, index=ASSET),
+        pd.Series(pesi, index=ASSETS),
         {
             "stato": stato,
             "volatilita_ew": vol_ew,
@@ -611,6 +609,135 @@ def build_a2_weights(
     weights_frame.index.name = "Date"
     diagnostics_frame = pd.DataFrame(diagnostics_rows).set_index("Date")
     return weights_frame, diagnostics_frame
+
+
+# Limite di volatilita' per pesi con segno (livello B): solo riduzione
+# proporzionale, senza ottimizzazione e senza cambiare la direzione dei segnali.
+
+def apply_signed_volatility_cap(
+    weights: pd.Series,
+    daily_returns: pd.DataFrame,
+    decision_date: pd.Timestamp,
+    window: int = 126,
+    target_volatility: float = 0.08,
+) -> tuple[pd.Series, dict]:
+    """Cap estimated annualized volatility without changing signal directions."""
+
+    if list(weights.index) != list(ASSETS):
+        raise ValueError("Invalid weight universe")
+
+    if list(daily_returns.columns) != list(ASSETS):
+        raise ValueError("Invalid return universe")
+
+    if (
+        not isinstance(daily_returns.index, pd.DatetimeIndex)
+        or daily_returns.index.has_duplicates
+        or not daily_returns.index.is_monotonic_increasing
+        or daily_returns.index.tz is not None
+    ):
+        raise ValueError("Invalid return dates")
+
+    decision_date = pd.Timestamp(decision_date)
+
+    if (
+        decision_date.tz is not None
+        or decision_date not in daily_returns.index
+    ):
+        raise ValueError("Invalid decision date")
+
+    if window < 2 or not np.isfinite(target_volatility) or target_volatility <= 0:
+        raise ValueError("Invalid risk parameters")
+
+    w = weights.to_numpy(dtype=float)
+
+    if (
+        not np.isfinite(w).all()
+        or np.abs(w).sum() > 1.0 + 1e-10
+    ):
+        raise ValueError("Invalid signed weights")
+
+    # Only historical observations available at the decision close.
+    history = daily_returns.loc[:decision_date].tail(window)
+
+    if len(history) != window:
+        raise ValueError("Insufficient return history")
+
+    history = history.astype(float)
+
+    if not np.isfinite(history.to_numpy()).all():
+        raise ValueError("Invalid historical returns")
+
+    covariance = history.cov().to_numpy(dtype=float) * 252
+
+    variance = float(w @ covariance @ w)
+    volatility_before = float(np.sqrt(max(variance, 0.0)))
+
+    factor = (
+        min(1.0, target_volatility / volatility_before)
+        if volatility_before > 0
+        else 1.0
+    )
+
+    adjusted = pd.Series(
+        w * factor,
+        index=ASSETS,
+        dtype=float,
+    )
+
+    diagnostics = {
+        "vol_before": volatility_before,
+        "vol_after": volatility_before * factor,
+        "scaling_factor": factor,
+    }
+
+    return adjusted, diagnostics
+
+
+def apply_volatility_cap_panel(
+    raw_weights: pd.DataFrame,
+    daily_returns: pd.DataFrame,
+    *,
+    window: int = 126,
+    target_volatility: float = 0.08,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Apply the existing point-in-time risk cap to every decision.
+
+    This is an orchestration helper: the numerical algorithm and the three
+    legacy risk-diagnostic columns stay unchanged for frozen B_v1/B_v2 CSVs.
+    """
+    if not isinstance(raw_weights, pd.DataFrame) or raw_weights.empty:
+        raise ValueError("Expected nonempty target-weight panel")
+    if list(raw_weights.columns) != list(ASSETS):
+        raise ValueError("Invalid target-weight asset order")
+    if not isinstance(raw_weights.index, pd.DatetimeIndex):
+        raise ValueError("Target weights require dated decisions")
+    if (
+        raw_weights.index.hasnans
+        or raw_weights.index.has_duplicates
+        or not raw_weights.index.is_monotonic_increasing
+        or raw_weights.index.tz is not None
+    ):
+        raise ValueError("Invalid target-weight decision dates")
+
+    adjusted_rows: list[np.ndarray] = []
+    risk_rows: list[dict] = []
+    for date in raw_weights.index:
+        adjusted, diagnostics = apply_signed_volatility_cap(
+            weights=raw_weights.loc[date],
+            daily_returns=daily_returns,
+            decision_date=date,
+            window=window,
+            target_volatility=target_volatility,
+        )
+        adjusted_rows.append(adjusted.to_numpy(dtype=float))
+        risk_rows.append(diagnostics)
+
+    final_weights = pd.DataFrame(
+        adjusted_rows, index=raw_weights.index, columns=ASSETS,
+    )
+    # Keep the frozen CSV column order: vol_before, vol_after, scaling_factor.
+    risk = pd.DataFrame(risk_rows, index=raw_weights.index)
+    return final_weights, risk
 
 
 def build_portfolio_summary(weights: pd.DataFrame) -> pd.DataFrame:

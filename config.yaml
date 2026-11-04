@@ -185,8 +185,28 @@ strategies:
     regime_thresholds: null
     allocation_rules: null
 
+    # Il modulo src/regime_clustering.py produce i regimi, ma NON sono
+    # ancora usati da alcuna allocazione: clustering_enabled resta false.
     clustering_enabled: false
-    clustering_method: null
+    clustering_method: gaussian_mixture
+
+    # Configurazione congelata (vedi decision log): non modificare dopo
+    # aver osservato risultati di strategia.
+    clustering:
+      n_clusters: 3
+      covariance_type: diag      # varianza per variabile, senza correlazioni
+      unknown_quantile: 0.02     # meno verosimile del 2% del training -> non riconosciuta
+      order_by: treasury_2y_change_13w
+      change_weeks: 13
+      volatility_weeks: 13
+      zscore_weeks: 156          # 3 anni
+      zscore_min_weeks: 104
+      features:
+        - treasury_2y_change_13w
+        - curve_10y_2y_change_13w
+        - rate_volatility_13w
+        - treasury_2y_zscore_3y
+        - curve_10y_2y_zscore_3y
 
   # ----------------------------------------------------------
   # LEVEL C - ML AND AI AGENTS

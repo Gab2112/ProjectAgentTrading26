@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 import src.run_abc_training_comparison as module
-from src.regime_allocator import ASSETS
+from src.utils import ASSETS
 
 
 class TestABCMatchedTrainingComparison(TestCase):
@@ -94,7 +94,7 @@ class TestABCMatchedTrainingComparison(TestCase):
                            initial_capital, commission_bps, slippage_bps,
                            annual_borrow_rate, additional_margin_rate):
         """Local wrapper test double. Production uses the tested shared engine."""
-        from src.longshort_backtester import schedule_next_open_executions
+        from src.execution_engine import schedule_next_open_executions
         scheduled = schedule_next_open_executions(target_weights, open_prices.index)
         shares = np.zeros(len(ASSETS), dtype=float)
         cash = float(initial_capital)

@@ -60,11 +60,9 @@ if str(PROJECT_ROOT) not in sys.path:
 if str(CURRENT_DIR) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR))
 
-from src.agents.base_agent import (
-    BaseAgent,
-    calculate_performance_metrics,
-    compute_objective_score,
-)
+from src.agents.base_agent import BaseAgent
+from src.data_loader import load_agent_macro_data
+from src.evaluator import calculate_performance_metrics, compute_objective_score
 
 # Feature macro e di mercato standard utilizzate per l'inferenza
 DEFAULT_SVM_FEATURE_COLS = [
@@ -186,7 +184,7 @@ class SVMAgent(BaseAgent):
         missing_macro = [c for c in self.feature_cols if c not in df.columns]
         if missing_macro:
             try:
-                macro_df = self.load_macro_data(decision_dates=df.index)
+                macro_df = load_agent_macro_data(decision_dates=df.index)
                 for c in macro_df.columns:
                     if c not in df.columns:
                         df[c] = macro_df[c]

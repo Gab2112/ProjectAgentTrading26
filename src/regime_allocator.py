@@ -1,12 +1,23 @@
-"""Experimental regime-based allocation for Level B."""
+"""Logica di regime del livello B (sperimentale).
+
+Contiene:
+- classificazione dei regimi macro (``classify_macro_regimes``);
+- budget e pesi per regime (``REGIME_WEIGHTS``, ``build_regime_weight_panel``);
+- segnali di trend e filtro macro (``build_trend_signal_panel``,
+  ``apply_macro_regime_filter``);
+- validazione delle etichette di regime esterne (es. clustering).
+
+Il limite di volatilita' sta in ``src/portfolio.py``; le feature macro in
+``src/features.py``.
+"""
 
 from collections.abc import Mapping
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
+from src.utils import ASSETS
 
-ASSETS = ("SPY", "IEF", "GLD", "SHY")
 
 REGIME_WEIGHTS = {
     "low_low":  (0.25, 0.30, 0.20, 0.25),
@@ -106,130 +117,6 @@ def build_signed_weight_panel(
     unused_budget = 1.0 - gross_exposure
 
     return signed_weights, unused_budget
-
-def apply_signed_volatility_cap(
-    weights: pd.Series,
-    daily_returns: pd.DataFrame,
-    decision_date: pd.Timestamp,
-    window: int = 126,
-    target_volatility: float = 0.08,
-) -> tuple[pd.Series, dict]:
-    """Cap estimated annualized volatility without changing signal directions."""
-
-    if list(weights.index) != list(ASSETS):
-        raise ValueError("Invalid weight universe")
-
-    if list(daily_returns.columns) != list(ASSETS):
-        raise ValueError("Invalid return universe")
-
-    if (
-        not isinstance(daily_returns.index, pd.DatetimeIndex)
-        or daily_returns.index.has_duplicates
-        or not daily_returns.index.is_monotonic_increasing
-        or daily_returns.index.tz is not None
-    ):
-        raise ValueError("Invalid return dates")
-
-    decision_date = pd.Timestamp(decision_date)
-
-    if (
-        decision_date.tz is not None
-        or decision_date not in daily_returns.index
-    ):
-        raise ValueError("Invalid decision date")
-
-    if window < 2 or not np.isfinite(target_volatility) or target_volatility <= 0:
-        raise ValueError("Invalid risk parameters")
-
-    w = weights.to_numpy(dtype=float)
-
-    if (
-        not np.isfinite(w).all()
-        or np.abs(w).sum() > 1.0 + 1e-10
-    ):
-        raise ValueError("Invalid signed weights")
-
-    # Only historical observations available at the decision close.
-    history = daily_returns.loc[:decision_date].tail(window)
-
-    if len(history) != window:
-        raise ValueError("Insufficient return history")
-
-    history = history.astype(float)
-
-    if not np.isfinite(history.to_numpy()).all():
-        raise ValueError("Invalid historical returns")
-
-    covariance = history.cov().to_numpy(dtype=float) * 252
-
-    variance = float(w @ covariance @ w)
-    volatility_before = float(np.sqrt(max(variance, 0.0)))
-
-    factor = (
-        min(1.0, target_volatility / volatility_before)
-        if volatility_before > 0
-        else 1.0
-    )
-
-    adjusted = pd.Series(
-        w * factor,
-        index=ASSETS,
-        dtype=float,
-    )
-
-    diagnostics = {
-        "vol_before": volatility_before,
-        "vol_after": volatility_before * factor,
-        "scaling_factor": factor,
-    }
-
-    return adjusted, diagnostics
-
-def apply_volatility_cap_panel(
-    raw_weights: pd.DataFrame,
-    daily_returns: pd.DataFrame,
-    *,
-    window: int = 126,
-    target_volatility: float = 0.08,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Apply the existing point-in-time risk cap to every decision.
-
-    This is an orchestration helper: the numerical algorithm and the three
-    legacy risk-diagnostic columns stay unchanged for frozen B_v1/B_v2 CSVs.
-    """
-    if not isinstance(raw_weights, pd.DataFrame) or raw_weights.empty:
-        raise ValueError("Expected nonempty target-weight panel")
-    if list(raw_weights.columns) != list(ASSETS):
-        raise ValueError("Invalid target-weight asset order")
-    if not isinstance(raw_weights.index, pd.DatetimeIndex):
-        raise ValueError("Target weights require dated decisions")
-    if (
-        raw_weights.index.hasnans
-        or raw_weights.index.has_duplicates
-        or not raw_weights.index.is_monotonic_increasing
-        or raw_weights.index.tz is not None
-    ):
-        raise ValueError("Invalid target-weight decision dates")
-
-    adjusted_rows: list[np.ndarray] = []
-    risk_rows: list[dict] = []
-    for date in raw_weights.index:
-        adjusted, diagnostics = apply_signed_volatility_cap(
-            weights=raw_weights.loc[date],
-            daily_returns=daily_returns,
-            decision_date=date,
-            window=window,
-            target_volatility=target_volatility,
-        )
-        adjusted_rows.append(adjusted.to_numpy(dtype=float))
-        risk_rows.append(diagnostics)
-
-    final_weights = pd.DataFrame(
-        adjusted_rows, index=raw_weights.index, columns=ASSETS,
-    )
-    # Keep the frozen CSV column order: vol_before, vol_after, scaling_factor.
-    risk = pd.DataFrame(risk_rows, index=raw_weights.index)
-    return final_weights, risk
 
 
 def remaining_allocation_weight(
@@ -498,3 +385,68 @@ def apply_macro_regime_filter(
     ] = 0
 
     return validate_signal_panel(filtered)
+
+
+def classify_macro_regimes(
+    features: pd.DataFrame,
+    min_history: int = 52,
+    window_weeks: int | None = None,
+) -> pd.DataFrame:
+    """Experimental classifier. Not PIT-certified."""
+
+    required = {"vix_level", "breakeven_10y"}
+    if not required.issubset(features.columns):
+        raise ValueError("Missing macro features")
+
+    if min_history < 1:
+        raise ValueError("Invalid minimum history")
+
+    if window_weeks is not None and window_weeks < min_history:
+        raise ValueError("Rolling window shorter than minimum history")
+
+    result = pd.DataFrame(index=features.index)
+
+    def past_median(column):
+        past = features[column].shift(1)
+
+        if window_weeks is None:
+            return past.expanding(
+                min_periods=min_history
+            ).median()
+
+        return past.rolling(
+            window=window_weeks,
+            min_periods=min_history
+        ).median()
+
+    result["vix_threshold"] = past_median("vix_level")
+
+    result["breakeven_threshold"] = past_median(
+        "breakeven_10y"
+    )
+    valid = result.notna().all(axis=1)
+
+    result["stress_state"] = pd.Series(
+        pd.NA, index=features.index, dtype="string"
+    )
+    result["inflation_comp_state"] = pd.Series(
+        pd.NA, index=features.index, dtype="string"
+    )
+
+    result.loc[valid, "stress_state"] = (
+        features.loc[valid, "vix_level"]
+        .gt(result.loc[valid, "vix_threshold"])
+        .map({True: "high", False: "low"})
+    )
+
+    result.loc[valid, "inflation_comp_state"] = (
+        features.loc[valid, "breakeven_10y"]
+        .gt(result.loc[valid, "breakeven_threshold"])
+        .map({True: "high", False: "low"})
+    )
+
+    result["regime"] = result["stress_state"].str.cat(
+        result["inflation_comp_state"], sep="_"
+    )
+
+    return result
