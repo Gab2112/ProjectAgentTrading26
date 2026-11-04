@@ -1,7 +1,7 @@
 """Esecuzione e registrazione dei backtest del progetto Multi-Asset.
 
 Il modulo coordina le strategie A1 e A2 utilizzando un UNICO motore di
-simulazione, ``simula_portafoglio`` in ``longshort_backtester.py``.
+simulazione, ``simula_portafoglio`` in ``execution_engine.py``.
 Non implementa un secondo algoritmo di valorizzazione del portafoglio.
 
 Responsabilita':
@@ -30,13 +30,13 @@ import re
 import numpy as np
 import pandas as pd
 
-from src.data_transformation import load_dataset
+from src.data_loader import load_dataset
+from src.execution_engine import simula_portafoglio
 from src.time_split import get_time_windows, is_oos_enabled
-from src.utils import get_tickers
+from src.utils import ASSETS, get_tickers
 
 
 SUPPORTED_LEVELS = frozenset({"A1", "A2"})
-LEVEL_A_ASSETS = frozenset({"SPY", "IEF", "GLD", "SHY"})
 SAFE_NAME = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
@@ -137,7 +137,7 @@ def load_market_prices(
     chiamata al motore di simulazione.
     """
     tickers = get_tickers(config)
-    if len(tickers) != 4 or set(tickers) != LEVEL_A_ASSETS:
+    if len(tickers) != 4 or set(tickers) != set(ASSETS):
         raise ValueError("Il backtest A1/A2 richiede SPY, IEF, GLD e SHY.")
 
     # Impedisci lo sblocco accidentale del test finale in questa fase.
@@ -308,8 +308,6 @@ def run_backtest(
     Restituisce due dizionari: risultati giornalieri e riepiloghi operativi.
     Non calcola indici di performance finanziaria: li produrra' l'evaluator.
     """
-    from src.longshort_backtester import simula_portafoglio
-
     root_dir = Path(root_dir)
     selected = _select_level(config, level)
     names = _strategy_names(config, selected)

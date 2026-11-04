@@ -17,12 +17,12 @@ Questo agente analizza:
 3. Dinamica dell'Inflazione (CPI YoY o Breakeven): accelerazione inflazionistica penalizza la duration.
 """
 
-from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 
-from .base_agent import BaseAgent
+from src.agents.base_agent import BaseAgent
+from src.data_loader import load_agent_macro_data
 
 
 class MacroYieldCurveAgent(BaseAgent):
@@ -95,7 +95,7 @@ class MacroYieldCurveAgent(BaseAgent):
         # Verifica ed eventuale arricchimento con colonne macro tramite BaseAgent
         if self.slope_col not in df.columns or self.rate_change_col not in df.columns:
             try:
-                macro_df = self.load_macro_data(decision_dates=df.index)
+                macro_df = load_agent_macro_data(decision_dates=df.index)
                 for c in macro_df.columns:
                     if c not in df.columns:
                         df[c] = macro_df[c]

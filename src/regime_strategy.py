@@ -1,5 +1,9 @@
 """Level B: independently built B_v1/B_v2 strategies with shared causal inputs.
 
+``build_level_b_training`` / ``build_level_b_v2_training`` build the weights;
+``run_level_b`` runs the training-only backtest, computes the metrics and
+verifies the frozen output files (called by ``main.py``).
+
 The historical rule set and risk-cap mathematics are unchanged. Default
 execution is training-only, with macro observations aligned by date but NOT
 certified point-in-time. External clustering labels are optional ONLY for
@@ -7,24 +11,32 @@ B_v2, with an explicit budget policy supplied by the caller.
 """
 
 from collections.abc import Mapping
+import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
-from src.data_transformation import load_dataset
-from src.time_split import get_time_windows
-from src.macro_availability import build_macro_feature_levels, classify_macro_regimes
+from src.data_loader import load_dataset
+from src.evaluator import calculate_metrics
+from src.execution_engine import simulate_longshort_daily
+from src.features import build_macro_feature_levels
+from src.portfolio import apply_volatility_cap_panel
 from src.regime_allocator import (
-    build_trend_signal_panel,
     apply_macro_regime_filter,
     build_regime_budget_panel,
-    validate_regime_series,
-    ASSETS,
     build_regime_weight_panel,
     build_signed_weight_panel,
-    apply_volatility_cap_panel,
+    build_trend_signal_panel,
+    classify_macro_regimes,
     remaining_allocation_weight,
+    validate_regime_series,
 )
+from src.time_split import get_time_windows
+from src.utils import ASSETS, write_frozen_outputs
+
+
+B_VERSIONS = ("v1", "v2")
 
 
 def _load_common_training_inputs(
@@ -194,3 +206,189 @@ def build_level_b_v2_training(
         budget_policy=budget_policy,
     )
     return _build_portfolio(common, long_flat=True)
+
+
+def run_level_b(
+    config: dict,
+    root_dir: Path,
+    b_version: str = "v1",
+) -> pd.DataFrame:
+    """Reproduce a frozen Level B candidate on training only.
+
+    Both versions reuse the same execution engine and risk calculations.
+    Frozen B_v1 and B_v2 outputs are separately stored and compared against
+    generated contents before any missing files can be created.
+    """
+    if b_version not in B_VERSIONS:
+        raise ValueError(f"Unsupported Level B version: {b_version!r}")
+    if (
+        config["evaluation"]["evaluate_oos"] is not False
+        or config["validation"]["development_only"] is not True
+    ):
+        raise ValueError("Level B must remain training-only")
+    if config["features"].get("macro_point_in_time_verified") is not False:
+        raise ValueError("Level B macro PIT status must remain unverified")
+
+    b_config = config["strategies"]["B"]
+    if float(b_config["cash_interest_rate"]) != 0.0:
+        raise ValueError("Nonzero cash interest is not implemented")
+
+    windows = get_time_windows(config)
+    start, end = windows["train_start"], windows["train_end"]
+
+    build = (
+        build_level_b_training if b_version == "v1"
+        else build_level_b_v2_training
+    )
+    strategy = build(config, root_dir)
+    weights = strategy["target_weights"]
+
+    if weights.empty or weights.index.min() < start or weights.index.max() > end:
+        raise ValueError("Level B target weights exceed training boundaries")
+    if b_version == "v2" and (weights.to_numpy(dtype=float) < -1e-10).any():
+        raise ValueError("B_v2 must not contain Short positions")
+
+    market = load_dataset(
+        root_dir / config["paths"]["processed_data"] / "market_daily.csv",
+        strict=True,
+    ).loc[start:end]
+
+    if not weights.index.isin(market.index).all():
+        raise ValueError("Decision dates are absent from training market data")
+
+    opens = market[[f"{a}_open" for a in ASSETS]].copy()
+    closes = market[[f"{a}_close" for a in ASSETS]].copy()
+    opens.columns = list(ASSETS)
+    closes.columns = list(ASSETS)
+
+    execution = config["execution"]
+    capital = float(execution["initial_capital"])
+
+    result = simulate_longshort_daily(
+        open_prices=opens,
+        close_prices=closes,
+        target_weights=weights,
+        initial_capital=capital,
+        commission_bps=execution["commission_bps"],
+        slippage_bps=execution["slippage_bps"],
+        annual_borrow_rate=float(b_config["annual_borrow_rate"]),
+        additional_margin_rate=float(b_config["additional_margin_rate"]),
+    )
+
+    if (
+        result.index.min() < start
+        or result.index.max() > end
+        or not np.isfinite(result["nav"]).all()
+        or (result["nav"] <= 0).any()
+        or (result["margin_shortfall"] > 1e-8).any()
+    ):
+        raise RuntimeError("Level B accounting or temporal checks failed")
+
+    np.testing.assert_allclose(
+        (1.0 + result["daily_return"]).prod(),
+        result["nav"].iloc[-1] / capital,
+        rtol=1e-8,
+    )
+
+    ann = int(config["evaluation"]["annualization_factor"])
+    rf_annual = float(config["evaluation"]["risk_free_rate"])
+    rf_daily = (1.0 + rf_annual) ** (1.0 / ann) - 1.0
+    metrics = calculate_metrics(result["daily_return"], rf_daily, ann)
+
+    name = "regime_longshort" if b_version == "v1" else "regime_longflat_v2"
+    signals_dir = root_dir / config["paths"]["signals"] / "B" / name
+    results_dir = root_dir / config["paths"]["results"] / "B" / name
+
+    if b_version == "v1":
+        # Preserve EXACT B5.4 record layout for frozen artifact comparisons.
+        record = {
+            "period": "train",
+            "level": "B",
+            "portfolio": "regime_longshort",
+            "start_date": result.index.min().date().isoformat(),
+            "end_date": result.index.max().date().isoformat(),
+            **metrics,
+            "initial_capital": capital,
+            "final_nav": float(result["nav"].iloc[-1]),
+            "total_turnover": float(result["turnover"].sum()),
+            "total_transaction_costs": float(result["transaction_cost"].sum()),
+            "total_borrow_fees": float(result["borrow_fee"].sum()),
+            "executed_rebalances": int(result["executed"].sum()),
+        }
+        assumptions = {
+            "strategy_version": "B_v1_baseline",
+            "period": "training_only",
+            "macro_point_in_time_verified": False,
+            "annual_borrow_rate": float(b_config["annual_borrow_rate"]),
+            "additional_margin_rate": float(b_config["additional_margin_rate"]),
+            "cash_interest_rate": 0.0,
+            "commission_bps": float(execution["commission_bps"]),
+            "slippage_bps": float(execution["slippage_bps"]),
+            "validation_used": False,
+            "oos_used": False,
+        }
+        files = {
+            signals_dir / "target_weights.csv": weights.to_csv(index_label="Date"),
+            signals_dir / "signals.csv": strategy["signals"].to_csv(index_label="Date"),
+            signals_dir / "regimes.csv": strategy["regimes"].rename("regime").to_csv(index_label="Date"),
+            signals_dir / "risk_diagnostics.csv": strategy["risk"].to_csv(index_label="Date"),
+            results_dir / "target_weights.csv": weights.to_csv(index_label="Date"),
+            results_dir / "backtest_daily.csv": result.to_csv(index_label="Date"),
+            results_dir / "evaluation_metrics.csv": pd.DataFrame([record]).to_csv(index=False),
+            results_dir / "assumptions.json": json.dumps(assumptions, indent=2) + "\n",
+        }
+    else:
+        # Preserve EXACT B6.7 schema and JSON sorting, not the v1 schema.
+        record = {
+            "portfolio": "regime_longflat_v2",
+            "period": "train",
+            **metrics,
+            "initial_capital": capital,
+            "final_nav": float(result["nav"].iloc[-1]),
+            "transaction_costs": float(result["transaction_cost"].sum()),
+            "borrow_fees": float(result["borrow_fee"].sum()),
+            "executed_rebalances": int(result["executed"].sum()),
+        }
+        assumptions = {
+            "version": "B_v2_candidate",
+            "status": "selected_on_training_not_validated",
+            "period": "training_only",
+            "macro_point_in_time_verified": False,
+            "momentum_windows_days": [21, 63],
+            "regime_lookback_weeks": 52,
+            "regime_based_budgets": True,
+            "macro_directional_filter": False,
+            "short_positions": False,
+            "volatility_window_days": 126,
+            "target_volatility_annual": 0.08,
+            "commission_bps": float(execution["commission_bps"]),
+            "slippage_bps": float(execution["slippage_bps"]),
+            "cash_interest_rate": 0.0,
+            "validation_used": False,
+            "oos_used": False,
+        }
+        files = {
+            signals_dir / "signals.csv": strategy["signals"].to_csv(index_label="Date"),
+            signals_dir / "regimes.csv": strategy["regimes"].rename("regime").to_csv(index_label="Date"),
+            signals_dir / "budgets.csv": strategy["budgets"].to_csv(index_label="Date"),
+            signals_dir / "risk_diagnostics.csv": strategy["risk"].to_csv(index_label="Date"),
+            signals_dir / "target_weights.csv": weights.to_csv(index_label="Date"),
+            results_dir / "backtest_daily.csv": result.to_csv(index_label="Date"),
+            results_dir / "evaluation_metrics.csv": pd.DataFrame([record]).to_csv(index=False),
+            results_dir / "assumptions.json": json.dumps(assumptions, indent=2, sort_keys=True) + "\n",
+        }
+
+    write_frozen_outputs(files)
+
+    print(f"\n[Level B / {b_version}] Training-only backtest reproduced")
+    print(f"  Decisions:       {len(weights)}")
+    print(f"  Executions:      {record['executed_rebalances']}")
+    print(f"  Final NAV:       {record['final_nav']:,.2f}")
+    print(f"  CAGR:            {metrics['cagr'] * 100:.2f}%")
+    print(f"  Sharpe:          {metrics['sharpe_ratio']:.4f}")
+    print(f"  Max drawdown:    {metrics['max_drawdown'] * 100:.2f}%")
+    print("  Frozen outputs:  verified, never overwritten")
+    print("  Macro PIT:       NOT VERIFIED")
+    print("  Validation/OOS:  NOT USED")
+
+    return pd.DataFrame([record])

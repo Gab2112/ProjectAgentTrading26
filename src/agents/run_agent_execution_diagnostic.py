@@ -17,7 +17,7 @@ import pandas as pd
 import yaml
 
 from src.agents.agent_execution_bridge import run_agent_training_execution_diagnostic
-from src.regime_allocator import ASSETS
+from src.utils import ASSETS
 
 
 ROOT = Path(__file__).resolve().parents[2]

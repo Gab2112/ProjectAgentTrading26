@@ -1,4 +1,7 @@
-"""Regression checks for historical feature availability (audit II.3)."""
+"""Regression checks for historical feature availability (audit II.3).
+
+The SVM no-backfill checks live in tests/test_svm_agent.py.
+"""
 
 import tempfile
 import unittest
@@ -8,37 +11,10 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from src.agents.base_agent import BaseAgent
-from src.agents.SVM_agent import SVMAgent
+from src.data_loader import load_agent_macro_data
 
 
 class TestFeatureLookahead(unittest.TestCase):
-    def test_svm_missing_early_feature_is_not_backfilled(self):
-        dates = pd.date_range("2015-01-02", periods=8, freq="W-FRI")
-        df = pd.DataFrame({
-            "SPY_close": [100, 101, 99, 102, 100, 104, 101, 105],
-            "factor": [np.nan, np.nan, 2.0, np.nan, 4.0, 5.0, 6.0, 7.0],
-        }, index=dates)
-        agent = SVMAgent(target_asset="SPY", feature_cols=["factor"])
-        X, _, _ = agent._extract_xy(df.copy())
-        self.assertTrue(X.loc[dates[:2], "factor"].isna().all())
-        self.assertEqual(float(X.loc[dates[3], "factor"]), 2.0)
-
-    def test_svm_predict_missing_early_feature_is_neutral(self):
-        dates = pd.date_range("2014-01-03", periods=120, freq="W-FRI")
-        t = np.arange(len(dates), dtype=float)
-        df = pd.DataFrame({
-            "SPY_close": 100 + 5 * np.sin(t / 3) + t * 0.1,
-            "factor": np.sin(t / 7),
-        }, index=dates)
-        agent = SVMAgent(target_asset="SPY", feature_cols=["factor"])
-        agent.fit(df, max_year=None)
-        query = df.iloc[:5].copy()
-        query.iloc[0, query.columns.get_loc("factor")] = np.nan
-        proba = agent.predict_proba(query)
-        self.assertEqual(float(proba.iloc[0]), 0.50)
-        self.assertTrue(proba.iloc[1:].between(0.0, 1.0).all())
-
     def _load_macro_fixture(self, change_future_cpi=False):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -64,7 +40,7 @@ class TestFeatureLookahead(unittest.TestCase):
                 "2005-02-04", "2005-02-07", "2005-02-14", "2005-02-15",
                 "2005-02-18", "2005-04-01",
             ])
-            return BaseAgent.load_macro_data(root_dir=root, decision_dates=decisions)
+            return load_agent_macro_data(root_dir=root, decision_dates=decisions)
 
     def test_fedfunds_released_only_after_configured_lag(self):
         panel = self._load_macro_fixture()

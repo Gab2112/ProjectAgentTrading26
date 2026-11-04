@@ -1,7 +1,7 @@
 """
 test_agents_multiasset.py
 
-Suite di unit test per la verifica del caricamento dati su BaseAgent
+Suite di unit test per la verifica del caricamento dati degli agenti (src/data_loader.py)
 e del corretto funzionamento dei singoli agenti sul paniere a 4 asset (SPY, IEF, GLD, SHY).
 
 Esecuzione:
@@ -16,13 +16,14 @@ import pandas as pd
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from src.agents.base_agent import (
-    BaseAgent,
-    DEFAULT_ASSETS,
-    DEFAULT_TRAIN_START,
-    calculate_performance_metrics,
-    compute_objective_score,
+from src.agents.base_agent import BaseAgent
+from src.data_loader import (
+    load_agent_dataset,
+    load_agent_macro_data,
+    load_agent_market_data,
+    prepare_asset_data,
 )
+from src.utils import ASSETS
 from src.agents.EMA_EMW_agent import SMAEMAAgent
 from src.agents.ZScore_agent import ZScoreAgent
 from src.agents.macro_yield_curve_agent import MacroYieldCurveAgent
@@ -30,22 +31,22 @@ from src.agents.random_forest_agent import RandomForestAgent
 from src.agents.orchestrator_agent import OrchestratorAgent, OrchestratorOptimizer
 
 
-class TestBaseAgentDataLoading(unittest.TestCase):
+class TestAgentDataLoading(unittest.TestCase):
     """Test per le funzionalità di caricamento e normalizzazione dati in BaseAgent."""
 
     def test_load_market_data_default(self):
-        df = BaseAgent.load_market_data(frequency="weekly")
+        df = load_agent_market_data(frequency="weekly")
         self.assertIsInstance(df, pd.DataFrame)
         self.assertIsInstance(df.index, pd.DatetimeIndex)
         self.assertTrue(df.index.is_monotonic_increasing)
 
         # Verifica presenza di tutti i 4 asset
-        for asset in DEFAULT_ASSETS:
+        for asset in ASSETS:
             self.assertIn(f"{asset}_close", df.columns)
             self.assertIn(f"{asset}_open", df.columns)
 
     def test_load_market_data_filtered_assets_and_dates(self):
-        df = BaseAgent.load_market_data(
+        df = load_agent_market_data(
             assets=["SPY", "GLD"],
             start_date="2006-01-01",
             end_date="2010-12-31",
@@ -61,22 +62,22 @@ class TestBaseAgentDataLoading(unittest.TestCase):
         self.assertNotIn("IEF_close", df.columns)
 
     def test_load_macro_data(self):
-        macro_df = BaseAgent.load_macro_data()
+        macro_df = load_agent_macro_data()
         self.assertIsInstance(macro_df, pd.DataFrame)
         expected_macro = ["curve_10y_2y", "treasury_10y_change_1w", "vix_level"]
         for col in expected_macro:
             self.assertIn(col, macro_df.columns)
 
     def test_load_complete_dataset(self):
-        complete = BaseAgent.load_complete_dataset(include_macro=True)
+        complete = load_agent_dataset(include_macro=True)
         # Contiene sia prezzi che macro
-        for asset in DEFAULT_ASSETS:
+        for asset in ASSETS:
             self.assertIn(f"{asset}_close", complete.columns)
         self.assertIn("curve_10y_2y", complete.columns)
 
     def test_prepare_asset_data(self):
-        complete = BaseAgent.load_complete_dataset()
-        spy_view = BaseAgent.prepare_asset_data(complete, asset="SPY")
+        complete = load_agent_dataset()
+        spy_view = prepare_asset_data(complete, asset="SPY")
         self.assertIn("close", spy_view.columns)
         self.assertIn("open", spy_view.columns)
         np.testing.assert_allclose(spy_view["close"].values, complete["SPY_close"].values)
@@ -100,10 +101,10 @@ class TestIndividualAgentsMultiAsset(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.df = BaseAgent.load_complete_dataset()
+        cls.df = load_agent_dataset()
 
     def test_sma_ema_agent_on_all_four_assets(self):
-        for asset in DEFAULT_ASSETS:
+        for asset in ASSETS:
             agent = SMAEMAAgent(sma_window=20, ema_window=10, target_asset=asset)
             signals, conf = agent.predict_with_confidence(self.df)
 
@@ -118,7 +119,7 @@ class TestIndividualAgentsMultiAsset(unittest.TestCase):
             pd.testing.assert_series_equal(signals, inst_signals)
 
     def test_zscore_agent_on_all_four_assets(self):
-        for asset in DEFAULT_ASSETS:
+        for asset in ASSETS:
             agent = ZScoreAgent(window=20, threshold=1.5, target_asset=asset)
             signals, conf = agent.predict_with_confidence(self.df)
 
@@ -131,7 +132,7 @@ class TestIndividualAgentsMultiAsset(unittest.TestCase):
         agent = MacroYieldCurveAgent()
         multi_sig = agent.predict_multi_asset(self.df)
 
-        expected_cols = [f"{asset}_signal" for asset in DEFAULT_ASSETS]
+        expected_cols = [f"{asset}_signal" for asset in ASSETS]
         for col in expected_cols:
             self.assertIn(col, multi_sig.columns)
             self.assertTrue(set(multi_sig[col].unique()).issubset({-1, 0, 1}))
@@ -194,7 +195,7 @@ class TestIndividualAgentsMultiAsset(unittest.TestCase):
 
 
     def test_orchestrator_agent_on_all_four_assets(self):
-        for asset in DEFAULT_ASSETS:
+        for asset in ASSETS:
             orch = OrchestratorAgent(target_asset=asset, include_rf=False, include_svm=False)
             sig, conf = orch.predict_with_confidence(self.df)
 
@@ -207,7 +208,7 @@ class TestIndividualAgentsMultiAsset(unittest.TestCase):
         orch = OrchestratorAgent(include_rf=False, include_svm=False)
         multi = orch.predict_multi_asset(self.df)
 
-        for asset in DEFAULT_ASSETS:
+        for asset in ASSETS:
             self.assertIn(f"{asset}_signal", multi.columns)
             self.assertIn(f"{asset}_confidence", multi.columns)
             self.assertTrue(set(multi[f"{asset}_signal"].unique()).issubset({-1, 0, 1}))

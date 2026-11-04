@@ -2,7 +2,10 @@
 Modulo agenti per ProjectAgentTrading26.
 
 Esporta:
-- BaseAgent: classe astratta comune con interfaccia standard predict(), data loading multi-asset e convenzione segnali {-1, 0, 1}
+- BaseAgent: classe astratta comune con interfaccia standard predict() e convenzione segnali {-1, 0, 1}
+
+Dati, feature e metriche NON stanno qui: vedi src/data_loader.py, src/features.py
+e src/evaluator.py (calculate_performance_metrics, compute_objective_score).
 - SMAEMAAgent (e alias EMA_EMW_Agent): Agente Trend-Following basato su crossover SMA / EMA
 - SMAEMAOptimizer, WalkForwardTrainer: Moduli di ottimizzazione per SMA/EMA
 - ZScoreAgent: Agente Mean-Reversion con logica di uscita a isteresi
@@ -10,14 +13,14 @@ Esporta:
 - MacroYieldCurveAgent: Agente macroeconomico basato su pendenza di curva (10Y-2Y), regimi e inflazione
 - FinBERTAgent: Agente sentiment basato su transformer FinBERT (lazy loaded)
 - download_news_dataset: Funzione per acquisire e strutturare il database delle notizie finanziarie
-- SVMAgent: Agente quantitativo di Machine Learning basato su Support Vector Machine a margine massimo
-- SVMOptimizer, SVMWalkForwardTrainer: Moduli di ottimizzazione e Walk-Forward per SVM
+- SVMAgent: Agente Support Vector Machine (walk-forward annuale con purge, decision_function standardizzata)
+- SVMOptimizer, SVMWalkForwardTrainer: scelta degli iperparametri con CV temporale e segnali out-of-fold
 - OrchestratorAgent: Agente Orchestratore quantitativo per la sintesi e combinazione ottima di segnali
 - OrchestratorOptimizer: Modulo di ottimizzazione dei pesi e delle soglie decisionali per l'Orchestratore
 - WalkForwardOrchestrator: Modulo per la validazione walk-forward rolling dell'Orchestratore
 """
 
-from .base_agent import BaseAgent, DEFAULT_ASSETS, calculate_performance_metrics, compute_objective_score
+from .base_agent import BaseAgent
 from .EMA_EMW_agent import EMA_EMW_Agent, SMAEMAAgent, SMAEMAOptimizer, WalkForwardTrainer
 from .ZScore_agent import ZScoreAgent, ZScoreOptimizer, ZScoreWalkForwardTrainer
 from .macro_yield_curve_agent import MacroYieldCurveAgent
@@ -44,9 +47,6 @@ def __getattr__(name: str):
 
 __all__ = [
     "BaseAgent",
-    "DEFAULT_ASSETS",
-    "calculate_performance_metrics",
-    "compute_objective_score",
     "SMAEMAAgent",
     "EMA_EMW_Agent",
     "SMAEMAOptimizer",

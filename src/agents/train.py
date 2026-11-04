@@ -55,14 +55,8 @@ if str(CURRENT_DIR) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR))
 
 from src.time_split import get_time_windows
-from src.data_transformation import build_decision_feature_panel
+from src.features import build_decision_feature_panel
 
-from src.agents.base_agent import (
-    BaseAgent,
-    DEFAULT_ASSETS,
-    calculate_performance_metrics,
-    compute_objective_score,
-)
 from src.agents.EMA_EMW_agent import SMAEMAAgent, SMAEMAOptimizer, WalkForwardTrainer as SMAEMATrainer
 from src.agents.ZScore_agent import ZScoreAgent, ZScoreOptimizer, ZScoreWalkForwardTrainer
 from src.agents.macro_yield_curve_agent import MacroYieldCurveAgent
@@ -71,15 +65,14 @@ from src.agents.random_forest_agent import (
     RandomForestOptimizer,
     RandomForestWalkForwardTrainer,
 )
-from src.agents.SVM_agent import (
-    SVMAgent,
-    SVMOptimizer,
-    SVMWalkForwardTrainer,
-)
+from src.agents.SVM_agent import SVMWalkForwardTrainer
 from src.agents.orchestrator_agent import (
     OrchestratorAgent,
     OrchestratorOptimizer,
 )
+from src.data_loader import load_agent_macro_data
+from src.evaluator import calculate_performance_metrics, compute_objective_score
+from src.utils import ASSETS
 
 
 # =====================================================================
@@ -351,19 +344,9 @@ def train_single_asset(
     svm_csv = signals_dir / f"signals_svm_{asset_lower}.csv"
     if train_svm:
         print(f"\n[{asset_upper}] >>> Walk-Forward: SVM Agent (Support Vector Classifier)...")
-        svm_opt = SVMOptimizer(
-            target_asset=asset_upper,
-            price_col=price_col,
-            C_candidates=[0.5, 1.0, 3.0],
-            gamma_candidates=["scale", 0.05],
-            threshold_candidates=[0.51, 0.52, 0.53],
-            objective_metric=objective_metric,
-        )
-        svm_trainer = SVMWalkForwardTrainer(
-            optimizer=svm_opt,
-            train_window_years=5,
-            target_asset=asset_upper,
-        )
+        # Impostazioni in config.yaml (strategies.C.svm_agent): walk-forward
+        # annuale con purge, iperparametri scelti con CV temporale interna.
+        svm_trainer = SVMWalkForwardTrainer(target_asset=asset_upper, root_dir=PROJECT_ROOT)
         svm_res = svm_trainer.run(df, max_year=max_train_year)
         svm_trainer.save_final_agent_config(svm_config_file)
         save_training_provenance(svm_config_file, df, max_train_year)
@@ -550,7 +533,7 @@ def run_all_assets(
 
     max_train_year = train_end.year
     if assets is None:
-        assets = list(DEFAULT_ASSETS)
+        assets = list(ASSETS)
 
     config_dir = CURRENT_DIR / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
@@ -581,7 +564,7 @@ def run_all_assets(
     df = build_decision_feature_panel(market_daily, decision_dates)
 
     # Integrazione delle feature macroeconomiche
-    macro_df = BaseAgent.load_macro_data(
+    macro_df = load_agent_macro_data(
         decision_dates=df.index,
         root_dir=PROJECT_ROOT,
     )
@@ -639,7 +622,7 @@ def run_all_assets(
             else "N/A"
         )
         svm_s = (
-            f"C={r['svm']['C']}, g={r['svm']['gamma']}, th={r['svm']['prob_threshold']:.2f}"
+            f"{r['svm']['kernel']} C={r['svm']['C']}, g={r['svm']['gamma']}"
             if r.get("svm")
             else "N/A"
         )
@@ -689,7 +672,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.target.upper() == "ALL":
-        target_assets = list(DEFAULT_ASSETS)
+        target_assets = list(ASSETS)
     elif args.target.upper() == "LEGACY_TREASURY":
         target_assets = ["SHY", "IEF", "TLT"]
     else:

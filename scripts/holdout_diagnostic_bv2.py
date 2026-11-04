@@ -1,7 +1,7 @@
 """Manual, one-off validation diagnostic for frozen B_v2 (2017-2021 only).
 
 Run from the repository root:
-    python3 tests/holdout_diagnostic_bv2.py --through 2021-12-31
+    python3 scripts/holdout_diagnostic_bv2.py --through 2021-12-31
 
 This is not a unittest and is excluded from test_*.py discovery.
 It does not alter main.py, config.yaml or frozen B_v1/B_v2 artifacts.
@@ -17,7 +17,7 @@ import json
 from pathlib import Path
 import sys
 
-# The script lives under tests/; ensure imports and data paths use repo root.
+# The script lives under scripts/; ensure imports and data paths use repo root.
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -26,11 +26,11 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from src.data_transformation import load_dataset
-from src.regime_allocator import ASSETS
-from src.regime_strategy import build_level_b_v2_training
-from src.longshort_backtester import simulate_longshort_daily
+from src.data_loader import load_dataset
 from src.evaluator import calculate_metrics
+from src.execution_engine import simulate_longshort_daily
+from src.regime_strategy import build_level_b_v2_training
+from src.utils import ASSETS
 
 TRAIN_END = pd.Timestamp("2016-12-31")
 VALIDATION_END = pd.Timestamp("2021-12-31")

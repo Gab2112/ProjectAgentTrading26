@@ -131,10 +131,10 @@ def load_all_signals_for_asset(
     macro_name = AGENT_DISPLAY_NAMES["signals_macro"]
     if macro_name not in signals_dict:
         try:
-            from src.agents.base_agent import BaseAgent
             from src.agents.macro_yield_curve_agent import MacroYieldCurveAgent
+            from src.data_loader import load_agent_dataset
 
-            df_market = BaseAgent.load_complete_dataset(root_dir=PROJECT_ROOT)
+            df_market = load_agent_dataset(root_dir=PROJECT_ROOT)
             macro_agent = MacroYieldCurveAgent(target_asset=asset_upper)
             macro_pred = macro_agent.predict_multi_asset(df_market, assets=[asset_upper])
             

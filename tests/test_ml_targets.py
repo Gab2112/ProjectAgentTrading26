@@ -1,5 +1,8 @@
 """Regression tests for future weekly return labels and cutoff isolation (II.2).
 
+Random Forest only: the SVM agent has its own equivalent checks in
+tests/test_svm_agent.py (target, cutoff, unknown labels, invalid dates).
+
 Run from repository root:
     python3 -m unittest discover -s tests -p "test_ml_targets.py" -v
 """
@@ -10,16 +13,14 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.svm import SVC
 
 from src.agents.random_forest_agent import RandomForestAgent
-from src.agents.SVM_agent import SVMAgent
 
 
 class TestMLFutureReturnTargets(unittest.TestCase):
     @staticmethod
     def _agent_classes():
-        return (RandomForestAgent, SVMAgent)
+        return (RandomForestAgent,)
 
     @staticmethod
     def _panel(n=160):
@@ -110,19 +111,6 @@ class TestMLFutureReturnTargets(unittest.TestCase):
         self.assertEqual(len(seen_rf), 1)
         self.assertEqual(seen_rf[0][1], expected_count)
         self.assertNotIn(cutoff.index[-1], seen_rf[0][0])
-
-        original_svm_fit = SVC.fit
-        seen_svm = []
-
-        def capture_svm(model, X, y, *args, **kwargs):
-            seen_svm.append(len(y))
-            return original_svm_fit(model, X, y, *args, **kwargs)
-
-        with patch.object(SVC, "fit", capture_svm):
-            svm = self._new_agent(SVMAgent).fit(df, max_year=2016)
-
-        self.assertEqual(seen_svm, [expected_count])
-        self.assertEqual(svm.support_vector_stats["n_samples_train"], expected_count)
 
     def test_single_class_is_rejected_before_model_training(self):
         dates = pd.date_range("2015-01-02", periods=85, freq="W-FRI")

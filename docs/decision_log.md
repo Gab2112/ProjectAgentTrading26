@@ -1,6 +1,8 @@
 
 # Registro delle decisioni di ricerca (Decision Log)
 
+> **Addendum 4 novembre 2026:** il completamento delle versioni C_v1 e C_v2, i confronti A/B/C sul 2010–2016 e la sensibilità all'esposizione sono riportati in [Level C: consenso momentum–agenti AI](level_c_research.md). Le decisioni A/B qui sotto sono mantenute come cronologia della ricerca, non come stato corrente dell'intera pipeline.
+
 **Progetto:** ProjectAgentTrading26 | *Regime-Aware Multi-Asset Allocation*\
 **Aggiornato al:** 28 ottobre 2026\
 **Scopo:** registrare le decisioni metodologiche e architetturali rilevanti, **non** ogni modifica al codice o ogni risultato intermedio. Metodologia completa e tabelle delle performance sono riportate in [`research_design.md`](research_design.md).
@@ -74,3 +76,32 @@
 **Archivio Treasury e responsabilità dei collaboratori.** I tre file generati `data/signals/signals_statistical_{shy,ief,tlt}.csv` del precedente universo SHY/IEF/TLT sono stati esclusi dal tracciamento e le copie locali eliminate; non fanno parte della pipeline A/B. Il codice degli agenti resta invariato e può rigenerare i segnali statistici in presenza degli input appropriati. Prima di integrare gli agenti occorre concordare un contratto dati e uno split temporale coerenti con il sistema Multi-Asset.
 
 **Prossima decisione operativa.** Aggiornare la documentazione agli import e ai percorsi correnti, poi integrare `refactor/cleanup` in `main` senza forzare la cronologia remota, rieseguire test e pipeline sul risultato del merge e soltanto dopo eliminare il branch temporaneo. La disponibilità point-in-time delle serie macro rimane non certificata.
+
+## 4 novembre 2026 | Ridivisione delle funzioni nei moduli
+
+**Decisione architetturale.** Ogni responsabilità ha ora un solo modulo, senza modificare regole economiche, parametri o risultati. La ridivisione è stata applicata sopra il branch `modulo-C` (algoritmo genetico, `SVM_agent.py`, correzioni metodologiche degli agenti, livello C e confronti), mantenendone intatto il comportamento.
+
+- `src/data_loader.py` è stato ripristinato come unico punto di lettura dei file: `load_dataset`, prezzi giornalieri ETF, rendimenti Treasury del clustering e i loader degli agenti (prima metodi di `BaseAgent`, ora `load_agent_market_data`, `load_agent_macro_data`, `load_agent_dataset`, `prepare_asset_data`).
+- `src/features.py` (nuovo) raccoglie le feature: `build_decision_feature_panel`, `build_training_decision_features`, `build_macro_feature_levels`, `build_cluster_features`, `build_asset_features` e `build_agent_macro_features` (estratta dal loader macro degli agenti).
+- `src/utils.py` contiene l'unica definizione dell'universo `ASSETS` (prima ripetuta in cinque moduli), `load_config`, `get_project_root` e `write_frozen_outputs`; `data_acquisition.py` usa `get_tickers` invece di una copia.
+- `build_weekly_decision_dates` è passato in `src/time_split.py`; `classify_macro_regimes` in `src/regime_allocator.py`; il limite di volatilità per pesi con segno in `src/portfolio.py`.
+- `calculate_performance_metrics` e `compute_objective_score` sono passati da `base_agent.py` a `src/evaluator.py` (le definizioni di Sharpe restano diverse e andranno unificate).
+- `_run_level_b` è passato da `main.py` a `src/regime_strategy.py` come `run_level_b`.
+- `src/longshort_backtester.py` è stato rinominato `src/execution_engine.py`; `tests/holdout_diagnostic_bv2.py` è stato spostato in `scripts/`.
+- Reintegrato `src/regime_clustering.py` (con test e sezione `strategies.B.clustering` del config), che era rimasto fuori da `main`.
+- Livello C: `build_level_c_v2_target_weights` è passato in `src/level_c_allocator.py` e `build_level_c_v2_training` in `src/level_c_strategy.py` (stessa divisione regole/costruzione del livello B); `src/level_c_v2_strategy.py` è stato eliminato. I loader macro degli agenti mantengono i ritardi di pubblicazione da `config.yaml` introdotti il 3 novembre (FEDFUNDS e CPI), ora in `load_agent_macro_data` e `build_agent_macro_features`.
+
+**Verifiche.** 255 test superati; output di A1, A2, B_v1, B_v2, segnali e parametri dei quattro ETF prodotti da `src/agents/train.py`, confronti A/B/C, analisi di sensibilità di C e diagnostica di esecuzione degli agenti identici file per file alla versione di `modulo-C`.
+
+**Limiti noti (da evidenziare, senza nuovi esperimenti).** Sul training 2010-2016 l'orchestratore su SPY è Long in circa il 99% delle settimane, con Sharpe vicino al buy & hold; i risultati dell'orchestratore e del livello C sul training sono in-sample, anche se i segnali RF/SVM sono out-of-fold. Durante la revisione del 3 novembre alcuni numeri 2017-2021 sono stati calcolati solo per diagnosticare errori di codice, non per scegliere parametri: la validation va comunque considerata osservata.
+
+## 4 novembre 2026 | Sostituzione dell'agente SVM
+
+**Decisione.** `src/agents/SVM_agent.py` è stato sostituito con la versione walk-forward progettata il 28 ottobre (Giovanni), mantenendo i nomi `SVMAgent`, `SVMOptimizer` e `SVMWalkForwardTrainer` usati da `train.py` e dall'orchestratore. Motivo: la versione precedente era Long nel 96-99% delle settimane su SPY e SHY (soglie di probabilità 0,51-0,53 attorno a 0,5), usava solo variabili macro uguali per tutti gli ETF e la calibrazione di Platt (`probability=True`), che stima la probabilità con fold interni non temporali.
+
+**Come funziona.** Obiettivo: prezzo più alto tra 4 settimane. Variabili retrospettive per ETF (`src/features.build_asset_features`: rendimento a 1 settimana, momentum a 4/13/26/52 settimane, volatilità a 13 settimane, distanza dal massimo a 52 settimane, momentum a 13 settimane degli altri ETF) più tre variazioni dei tassi dal modulo dei regimi. Per ogni anno dal 2010 al 2016 il modello è allenato solo sulle settimane la cui etichetta è nota prima dell'inizio dell'anno (purge di 4 settimane); gli iperparametri (lineare o RBF, C, gamma) sono scelti con `TimeSeriesSplit` (gap 4) e balanced accuracy. Il punteggio è la `decision_function` divisa per la sua deviazione standard sul training, con banda neutra 0,25. Le previsioni annuali sono i segnali out-of-fold per l'orchestratore; il modello finale è allenato su tutto il training (fino al 2016) e salvato in `src/agents/config/svm_params_<etf>.json/.joblib`. Impostazioni in `config.yaml` (`strategies.C.svm_agent`), fissate il 28 ottobre e non modificate dopo aver visto i risultati.
+
+**Risultati sul training (OOF 2010-2016, rendimento della settimana successiva, senza costi).** Quota Long: SPY 93% (prima 96%), IEF 61% (88%), GLD 52% (93%), SHY 81% (99%). Sharpe del segnale: SPY 0,75 (0,79), IEF −0,29 (0,52), GLD 0,03 (−0,06), SHY 1,02 (0,93). Nel confronto A/B/C sul training: C_v1 Sharpe 0,585 (prima 0,630), C_v2 0,615 (0,669). La nuova SVM non è più quasi sempre Long, ma non migliora le prestazioni: il potere previsivo resta debole (balanced accuracy della CV interna tra 0,50 e 0,59). Il risultato va presentato come limite, senza ulteriori ottimizzazioni.
+
+**Verifiche.** 266 test superati (test della SVM riscritti per la nuova interfaccia: etichetta futura, cutoff applicato prima delle etichette, purge, nessun riempimento all'indietro, segnali out-of-fold solo dagli anni di test, salvataggio e ricaricamento del modello). Tutti gli altri segnali (SMA/EMA, Z-Score, macro, Random Forest) e gli output di A e B sono identici a prima; cambiano solo SVM, orchestratore e livello C.
+

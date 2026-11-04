@@ -11,13 +11,9 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 
-from src.data_transformation import (
-    _macro_series_mapping,
-    build_decision_feature_panel,
-    build_training_decision_features,
-    build_weekly_decision_dates,
-    run_data_transformation,
-)
+from src.data_transformation import _macro_series_mapping, run_data_transformation
+from src.features import build_decision_feature_panel, build_training_decision_features
+from src.time_split import build_weekly_decision_dates
 from src.macro_availability import align_daily_macro_panel
 
 
@@ -146,7 +142,7 @@ class TestDecisionFeatures(unittest.TestCase):
         }
         train_start = pd.Timestamp("2020-04-01")
         train_end = pd.Timestamp("2020-07-31")
-        with patch("src.data_transformation.get_time_windows", return_value={
+        with patch("src.features.get_time_windows", return_value={
             "train_start": train_start, "train_end": train_end,
         }):
             panel = build_training_decision_features(
@@ -192,7 +188,7 @@ class TestDecisionFeatures(unittest.TestCase):
                 },
                 "data": {"start_date": "2020-01-02"},
             }
-            with patch("src.data_transformation.get_time_windows", return_value={
+            with patch("src.features.get_time_windows", return_value={
                 "train_start": pd.Timestamp("2020-04-01"),
                 "train_end": pd.Timestamp("2020-07-31"),
             }):

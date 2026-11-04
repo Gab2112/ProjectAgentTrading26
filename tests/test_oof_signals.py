@@ -22,7 +22,7 @@ from src.agents.random_forest_agent import (
     RandomForestOptimizer,
     RandomForestWalkForwardTrainer,
 )
-from src.agents.SVM_agent import SVMOptimizer, SVMWalkForwardTrainer
+from src.agents.SVM_agent import SVMWalkForwardTrainer
 
 
 class TestOOFSignals(unittest.TestCase):
@@ -52,17 +52,13 @@ class TestOOFSignals(unittest.TestCase):
 
     @staticmethod
     def svm_trainer():
-        opt = SVMOptimizer(
-            target_asset='SPY',
-            price_col='SPY_close',
-            feature_cols=['known_factor'],
-            C_candidates=[1.0],
-            gamma_candidates=['scale'],
-            threshold_candidates=[0.52],
-        )
-        return SVMWalkForwardTrainer(
-            optimizer=opt, train_window_years=5, target_asset='SPY'
-        )
+        settings = {
+            'horizon_weeks': 1, 'first_test_year': 2014, 'min_train_weeks': 52,
+            'cv_splits': 2, 'C_values': [1.0], 'gamma_values': ['scale'],
+            'class_weight': 'none', 'neutral_band': 0.25, 'long_only': False,
+            'use_macro_features': False,
+        }
+        return SVMWalkForwardTrainer(target_asset='SPY', settings=settings)
 
     def _check_real_folds(self, trainer):
         df = self.panel()
@@ -83,7 +79,20 @@ class TestOOFSignals(unittest.TestCase):
         self._check_real_folds(self.rf_trainer())
 
     def test_svm_only_predicts_outside_each_fold_training(self):
-        self._check_real_folds(self.svm_trainer())
+        df = self.panel()
+        for other in ('IEF', 'GLD', 'SHY'):
+            df[f'{other}_close'] = df['SPY_close'] * 0.5 + 10.0
+        trainer = self.svm_trainer()
+        with contextlib.redirect_stdout(io.StringIO()):
+            trainer.run(df, max_year=2015)
+        expected = df.index[df.index.year >= 2014]
+        pd.testing.assert_index_equal(trainer.oof_signals.index, expected)
+        self.assertEqual(list(trainer.oof_signals.columns), ['signal', 'confidence'])
+        self.assertFalse(trainer.oof_signals.isna().any().any())
+        self.assertTrue(trainer.oof_signals['signal'].isin([-1, 0, 1]).all())
+        self.assertTrue(trainer.oof_signals['confidence'].between(0, 1).all())
+        self.assertEqual([h['year'] for h in trainer.history], [2014, 2015])
+        self.assertIsNotNone(trainer.final_agent)
 
     def _run_pipeline_with_mocked_other_agents(self, rf_index, svm_index):
         """Run the real train_single_asset wiring without expensive outer searches.

@@ -36,18 +36,14 @@ if str(CURRENT_DIR) not in sys.path:
 
 from src.time_split import get_time_windows
 
-from src.agents.base_agent import (
-    BaseAgent,
-    DEFAULT_ASSETS,
-    get_project_root,
-    calculate_performance_metrics,
-    compute_objective_score,
-)
-from src.agents.macro_yield_curve_agent import MacroYieldCurveAgent
+from src.agents.base_agent import BaseAgent
 from src.agents.EMA_EMW_agent import SMAEMAAgent
-from src.agents.ZScore_agent import ZScoreAgent
+from src.agents.macro_yield_curve_agent import MacroYieldCurveAgent
 from src.agents.random_forest_agent import RandomForestAgent
 from src.agents.SVM_agent import SVMAgent
+from src.agents.ZScore_agent import ZScoreAgent
+from src.evaluator import calculate_performance_metrics, compute_objective_score
+from src.utils import ASSETS, get_project_root
 
 
 # =====================================================================
@@ -1095,7 +1091,7 @@ class OrchestratorAgent(BaseAgent):
 
     def predict_multi_asset(self, df: pd.DataFrame, assets: Optional[Any] = None) -> pd.DataFrame:
         """Genera segnali e confidenze per gli asset specificati."""
-        target_assets = [str(a).upper() for a in assets] if assets is not None else list(DEFAULT_ASSETS)
+        target_assets = [str(a).upper() for a in assets] if assets is not None else list(ASSETS)
         out_df = pd.DataFrame(index=df.index)
         cfg_dir = get_project_root() / "src" / "agents" / "config"
 
