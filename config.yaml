@@ -220,6 +220,20 @@ strategies:
     forecasting_model: null
     sentiment_enabled: false
 
+    # Agente SVM (src/agents/SVM_agent.py): segnali walk-forward annuali
+    # out-of-fold per ogni ETF, usati dall'orchestratore (src/agents/train.py).
+    svm_agent:
+      horizon_weeks: 4           # previsione: il prezzo sarà più alto tra 4 settimane?
+      first_test_year: 2010      # primo anno con previsioni out-of-fold (almeno 3 anni di storia)
+      min_train_weeks: 156
+      cv_splits: 4               # TimeSeriesSplit interno, gap = horizon_weeks
+      C_values: [0.1, 1.0, 10.0]
+      gamma_values: [scale, 0.01, 0.1]
+      class_weight: none         # 'balanced' forzava troppi segnali -1 (vedi decision log)
+      neutral_band: 0.25         # |punteggio scalato| <= 0.25 -> segnale 0
+      long_only: false           # true: i segnali -1 diventano 0
+      use_macro_features: true   # variazioni 2Y e curva, volatilità tassi
+
 # ------------------------------------------------------------
 # TEMPORAL VALIDATION
 # ------------------------------------------------------------

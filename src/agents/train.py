@@ -65,11 +65,7 @@ from src.agents.random_forest_agent import (
     RandomForestOptimizer,
     RandomForestWalkForwardTrainer,
 )
-from src.agents.SVM_agent import (
-    SVMAgent,
-    SVMOptimizer,
-    SVMWalkForwardTrainer,
-)
+from src.agents.SVM_agent import SVMWalkForwardTrainer
 from src.agents.orchestrator_agent import (
     OrchestratorAgent,
     OrchestratorOptimizer,
@@ -348,19 +344,9 @@ def train_single_asset(
     svm_csv = signals_dir / f"signals_svm_{asset_lower}.csv"
     if train_svm:
         print(f"\n[{asset_upper}] >>> Walk-Forward: SVM Agent (Support Vector Classifier)...")
-        svm_opt = SVMOptimizer(
-            target_asset=asset_upper,
-            price_col=price_col,
-            C_candidates=[0.5, 1.0, 3.0],
-            gamma_candidates=["scale", 0.05],
-            threshold_candidates=[0.51, 0.52, 0.53],
-            objective_metric=objective_metric,
-        )
-        svm_trainer = SVMWalkForwardTrainer(
-            optimizer=svm_opt,
-            train_window_years=5,
-            target_asset=asset_upper,
-        )
+        # Impostazioni in config.yaml (strategies.C.svm_agent): walk-forward
+        # annuale con purge, iperparametri scelti con CV temporale interna.
+        svm_trainer = SVMWalkForwardTrainer(target_asset=asset_upper, root_dir=PROJECT_ROOT)
         svm_res = svm_trainer.run(df, max_year=max_train_year)
         svm_trainer.save_final_agent_config(svm_config_file)
         save_training_provenance(svm_config_file, df, max_train_year)
@@ -636,7 +622,7 @@ def run_all_assets(
             else "N/A"
         )
         svm_s = (
-            f"C={r['svm']['C']}, g={r['svm']['gamma']}, th={r['svm']['prob_threshold']:.2f}"
+            f"{r['svm']['kernel']} C={r['svm']['C']}, g={r['svm']['gamma']}"
             if r.get("svm")
             else "N/A"
         )

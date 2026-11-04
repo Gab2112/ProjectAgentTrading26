@@ -13,8 +13,8 @@ e src/evaluator.py (calculate_performance_metrics, compute_objective_score).
 - MacroYieldCurveAgent: Agente macroeconomico basato su pendenza di curva (10Y-2Y), regimi e inflazione
 - FinBERTAgent: Agente sentiment basato su transformer FinBERT (lazy loaded)
 - download_news_dataset: Funzione per acquisire e strutturare il database delle notizie finanziarie
-- SVMAgent: Agente quantitativo di Machine Learning basato su Support Vector Machine a margine massimo
-- SVMOptimizer, SVMWalkForwardTrainer: Moduli di ottimizzazione e Walk-Forward per SVM
+- SVMAgent: Agente Support Vector Machine (walk-forward annuale con purge, decision_function standardizzata)
+- SVMOptimizer, SVMWalkForwardTrainer: scelta degli iperparametri con CV temporale e segnali out-of-fold
 - OrchestratorAgent: Agente Orchestratore quantitativo per la sintesi e combinazione ottima di segnali
 - OrchestratorOptimizer: Modulo di ottimizzazione dei pesi e delle soglie decisionali per l'Orchestratore
 - WalkForwardOrchestrator: Modulo per la validazione walk-forward rolling dell'Orchestratore
