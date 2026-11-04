@@ -65,7 +65,7 @@ from src.agents.random_forest_agent import (
     RandomForestOptimizer,
     RandomForestWalkForwardTrainer,
 )
-from src.agents.SVM_agent import SVMWalkForwardTrainer
+from src.agents.SVM_agent import SVMOptimizer, SVMWalkForwardTrainer
 from src.agents.orchestrator_agent import (
     OrchestratorAgent,
     OrchestratorOptimizer,
@@ -73,77 +73,6 @@ from src.agents.orchestrator_agent import (
 from src.data_loader import load_agent_macro_data
 from src.evaluator import calculate_performance_metrics, compute_objective_score
 from src.utils import ASSETS
-
-
-# =====================================================================
-# COMBINATORE STATISTICO: ENSEMBLE DI SEGNALI E CONFIDENZA
-# =====================================================================
-def combine_statistical_signals(
-    signals_sma: pd.Series,
-    conf_sma: pd.Series,
-    signals_zs: pd.Series,
-    conf_zs: pd.Series,
-) -> pd.DataFrame:
-    """
-    Combina i segnali e le confidenze dei due agenti statistici (SMA/EMA e Z-Score)
-    in un unico DataFrame con esattamente 2 colonne: 'signal' e 'confidence'.
-
-    Regole dell'Ensemble Statistico:
-    1. Accordo pieno (stesso segno attivo):
-       - Segnale confermato da entrambi gli agenti.
-       - Confidenza combinata con boost di sinergia (+15%), max 1.0.
-    2. Segnale singolo attivo (uno attivo, l'altro flat a 0):
-       - Segnale dell'agente attivo mantenuto.
-       - Confidenza scalata all'85% (assenza di seconda conferma).
-    3. Disaccordo diretto (+1 vs -1):
-       - Se la differenza di confidenza e >= 0.20, prevale l'agente piu convinto
-         con confidenza netta pari al delta (|c1 - c2|).
-       - Se la differenza e < 0.20, situazione di stallo: segnale 0 (FLAT), confidenza 0.0.
-    4. Entrambi flat (0, 0):
-       - Segnale 0 (FLAT), confidenza 0.0.
-    """
-    n = len(signals_sma)
-    out_sig = np.zeros(n, dtype=int)
-    out_conf = np.zeros(n, dtype=float)
-
-    s1 = signals_sma.to_numpy()
-    c1 = conf_sma.to_numpy()
-    s2 = signals_zs.to_numpy()
-    c2 = conf_zs.to_numpy()
-
-    for i in range(n):
-        sig1, conf1 = s1[i], c1[i]
-        sig2, conf2 = s2[i], c2[i]
-
-        if sig1 == sig2 and sig1 != 0:
-            out_sig[i] = sig1
-            out_conf[i] = min(1.0, round(float((conf1 + conf2) / 2.0 * 1.15), 4))
-        elif sig1 != 0 and sig2 == 0:
-            out_sig[i] = sig1
-            out_conf[i] = round(float(conf1 * 0.85), 4)
-        elif sig1 == 0 and sig2 != 0:
-            out_sig[i] = sig2
-            out_conf[i] = round(float(conf2 * 0.85), 4)
-        elif sig1 != 0 and sig2 != 0 and sig1 != sig2:
-            diff = abs(conf1 - conf2)
-            if diff >= 0.20:
-                out_sig[i] = sig1 if conf1 > conf2 else sig2
-                out_conf[i] = round(float(diff), 4)
-            else:
-                out_sig[i] = 0
-                out_conf[i] = 0.0
-        else:
-            out_sig[i] = 0
-            out_conf[i] = 0.0
-
-    df_out = pd.DataFrame(
-        {
-            "signal": out_sig,
-            "confidence": out_conf,
-        },
-        index=signals_sma.index,
-    )
-    return df_out
 
 
 def save_training_provenance(
@@ -215,7 +144,7 @@ def train_single_asset(
 
     # Filtro colonne: mantiene solo l'asset target corrente e le feature macro/globali.
     # Esclude le colonne con prefisso degli altri 3 asset per eliminare zavorra e rumore.
-    other_assets = [a for a in DEFAULT_ASSETS if a != asset_upper]
+    other_assets = [a for a in ASSETS if a != asset_upper]
     excluded_prefixes = tuple(f"{a}_" for a in other_assets)
     filtered_cols = [c for c in df.columns if not c.startswith(excluded_prefixes)]
     excluded_count = len(df.columns) - len(filtered_cols)
@@ -226,6 +155,8 @@ def train_single_asset(
     print(f"[{asset_upper}] Colonne dataset filtrate: {len(filtered_cols)} (escluse {excluded_count} colonne degli altri asset)")
 
     print("\n" + "#" * 84)
+    print(df.head())
+    print(df.info())
     print(f"### AVVIO TRAINING & OTTIMIZZAZIONE COMPLETA: {asset_upper} ({price_col})")
     print("#" * 84)
 
@@ -358,7 +289,16 @@ def train_single_asset(
         print(f"\n[{asset_upper}] >>> Walk-Forward: SVM Agent (Support Vector Classifier)...")
         # Impostazioni in config.yaml (strategies.C.svm_agent): walk-forward
         # annuale con purge, iperparametri scelti con CV temporale interna.
-        svm_trainer = SVMWalkForwardTrainer(target_asset=asset_upper, root_dir=PROJECT_ROOT)
+        svm_opt = SVMOptimizer(
+            target_asset=asset_upper,
+            price_col=price_col,
+            objective_metric=objective_metric,
+        )
+        svm_trainer = SVMWalkForwardTrainer(
+            optimizer=svm_opt,
+            train_window_years=5,
+            target_asset=asset_upper,
+        )
         svm_res = svm_trainer.run(df, max_year=max_train_year)
         svm_trainer.save_final_agent_config(svm_config_file)
         save_training_provenance(svm_config_file, df, max_train_year)
@@ -598,6 +538,7 @@ def run_all_assets(
     all_results = {}
 
     for asset in assets:
+
         res = train_single_asset(
             asset=asset,
             df=train_df,
@@ -633,11 +574,15 @@ def run_all_assets(
             if r.get("random_forest")
             else "N/A"
         )
-        svm_s = (
-            f"{r['svm']['kernel']} C={r['svm']['C']}, g={r['svm']['gamma']}"
-            if r.get("svm")
-            else "N/A"
-        )
+        svm_res = r.get("svm")
+        if svm_res:
+            kernel = svm_res.get("kernel", "N/A")
+            c_val = svm_res.get("C", "N/A")
+            gamma = svm_res.get("gamma", "N/A")
+            svm_s = f"{kernel} C={c_val}, g={gamma}"
+        else:
+            svm_s = "N/A"
+
         if r.get("orchestrator"):
             orch_s = f"Th={r['orchestrator']['threshold']:.2f}, Sh={r['orchestrator']['sharpe_ratio']:.2f}"
         else:

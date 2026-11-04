@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 os.environ.setdefault("MPLCONFIGDIR", tempfile.gettempdir())
 
 import matplotlib
-# Configura backend headless se non e presente un display grafico interattivo
+# Configura backend headless se non è presente un display grafico interattivo
 if not os.environ.get("DISPLAY") and sys.platform != "win32":
     matplotlib.use("Agg")
 
@@ -40,7 +40,7 @@ PROJECT_ROOT = CURRENT_DIR.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-# Mappatura standard dei nomi degli agenti per leggibilita nei grafici
+# Mappatura standard dei nomi degli agenti per leggibilità nei grafici
 AGENT_DISPLAY_NAMES = {
     "signals_sma_ema": "SMA/EMA (Trend)",
     "signals_zscore": "Z-Score (Mean-Rev)",
@@ -83,18 +83,6 @@ def load_all_signals_for_asset(
     Carica tutti i segnali disponibili per un determinato asset dalla cartella data/signals/.
     Se alcuni segnali (es. macro) non sono ancora stati esportati su CSV, tenta di generarli
     al volo per fornire un quadro completo.
-    
-    Parametri:
-    -----------
-    asset : str
-        Ticker dell'asset (es. 'SPY', 'IEF', 'GLD', 'SHY').
-    signals_dir : Path o str, opzionale
-        Cartella contenente i file CSV dei segnali. Default: <PROJECT_ROOT>/data/signals.
-        
-    Ritorna:
-    --------
-    Dict[str, pd.DataFrame]
-        Dizionario {NomeAgente: DataFrame con colonne ['signal', 'confidence']}.
     """
     asset_upper = asset.upper()
     asset_lower = asset.lower()
@@ -105,7 +93,6 @@ def load_all_signals_for_asset(
 
     signals_dict: Dict[str, pd.DataFrame] = {}
 
-    # File attesi per ciascun agente
     expected_files = [
         ("signals_sma_ema", f"signals_sma_ema_{asset_lower}.csv"),
         ("signals_zscore", f"signals_zscore_{asset_lower}.csv"),
@@ -127,7 +114,7 @@ def load_all_signals_for_asset(
             except Exception as e:
                 print(f"[AVVISO] Errore nel caricamento di {filepath}: {e}")
 
-    # Fallback per Macro Yield Curve se il file non e presente
+    # Fallback per Macro Yield Curve se il file non è presente
     macro_name = AGENT_DISPLAY_NAMES["signals_macro"]
     if macro_name not in signals_dict:
         try:
@@ -137,17 +124,16 @@ def load_all_signals_for_asset(
             df_market = load_agent_dataset(root_dir=PROJECT_ROOT)
             macro_agent = MacroYieldCurveAgent(target_asset=asset_upper)
             macro_pred = macro_agent.predict_multi_asset(df_market, assets=[asset_upper])
-            
+
             sig_col = f"{asset_upper}_signal"
             if sig_col in macro_pred.columns:
                 m_sig = macro_pred[sig_col]
                 m_score = macro_agent.calculate_macro_score(df_market)
                 m_conf = (m_score.abs() / 2.0).clip(0.0, 1.0).round(4)
                 m_conf = pd.Series(np.where(m_sig != 0, np.maximum(0.50, m_conf), 0.0), index=df_market.index)
-                
+
                 df_macro = pd.DataFrame({"signal": m_sig, "confidence": m_conf}, index=df_market.index)
                 signals_dict[macro_name] = df_macro
-                # Salva per future consultazioni
                 df_macro.to_csv(sig_path / f"signals_macro_{asset_lower}.csv")
         except Exception:
             pass
@@ -169,32 +155,9 @@ def plot_agent_signal_distributions(
     """
     Crea un singolo plot per un asset che visualizza e confronta la distribuzione
     dei segnali discreti (-1 Short, 0 Flat, 1 Long) per tutti gli agenti di trading.
-    
-    Parametri:
-    -----------
-    asset : str
-        Ticker dell'asset di riferimento (es. 'SPY').
-    signals_dict : Dict[str, Union[pd.DataFrame, pd.Series]], opzionale
-        Dizionario di segnali fornito dall'utente. Se None, carica automaticamente
-        tutti i file salvati in data/signals/ per l'asset specificato.
-    save_path : Path o str, opzionale
-        Percorso in cui salvare l'immagine (PNG, SVG o PDF). Se None, salva di default
-        in data/results/plots/signal_distribution_{asset}.png.
-    show_plot : bool, default False
-        Se True, chiama plt.show() per visualizzazione a schermo.
-    figsize : Tuple[int, int], default (15, 8)
-        Dimensioni della figura in pollici (larghezza, altezza).
-    title : str, opzionale
-        Titolo personalizzato per il grafico.
-        
-    Ritorna:
-    --------
-    Tuple[plt.Figure, plt.Axes]
-        Riferimento alla figura e all'asse Matplotlib per ulteriori personalizzazioni.
     """
     asset_upper = asset.upper()
 
-    # Carica i segnali se non forniti esplicitamente
     if signals_dict is None or len(signals_dict) == 0:
         signals_dict = load_all_signals_for_asset(asset=asset_upper)
 
@@ -204,18 +167,15 @@ def plot_agent_signal_distributions(
             f"Assicurati che i file CSV siano presenti in data/signals/ oppure fornisci un dizionario valido."
         )
 
-    # Estrazione e calcolo delle frequenze per ciascun agente
     agent_names: List[str] = []
     counts_data: Dict[int, List[int]] = {-1: [], 0: [], 1: []}
     pcts_data: Dict[int, List[float]] = {-1: [], 0: [], 1: []}
     total_samples: List[int] = []
 
-    # Determina l'intervallo temporale comune
     date_start = None
     date_end = None
 
     for raw_name, item in signals_dict.items():
-        # Risoluzione della serie di segnali
         if isinstance(item, pd.DataFrame):
             if "signal" in item.columns:
                 s_series = item["signal"].astype(int)
@@ -226,7 +186,6 @@ def plot_agent_signal_distributions(
         else:
             s_series = pd.Series(item, dtype=int)
 
-        # Traccia estremi temporali
         if isinstance(s_series.index, pd.DatetimeIndex) and len(s_series.index) > 0:
             if date_start is None or s_series.index[0] < date_start:
                 date_start = s_series.index[0]
@@ -249,11 +208,9 @@ def plot_agent_signal_distributions(
     indices = np.arange(n_agents)
     bar_width = 0.25
 
-    # Creazione della figura con stile elegante e professionale
     plt.style.use("seaborn-v0_8-whitegrid" if "seaborn-v0_8-whitegrid" in plt.style.available else "default")
     fig, ax = plt.subplots(figsize=figsize, dpi=120)
 
-    # Disegno delle barre raggruppate: Short (-1), Flat (0), Long (+1)
     rects_short = ax.bar(
         indices - bar_width,
         pcts_data[-1],
@@ -290,7 +247,6 @@ def plot_agent_signal_distributions(
         zorder=3,
     )
 
-    # Aggiunta etichette sopra ogni barra (Percentuale + Conteggio)
     def _add_bar_labels(rects, signal_key: int):
         for idx, rect in enumerate(rects):
             h = rect.get_height()
@@ -323,7 +279,6 @@ def plot_agent_signal_distributions(
     _add_bar_labels(rects_flat, 0)
     _add_bar_labels(rects_long, 1)
 
-    # Evidenziazione visiva dell'Orchestratore (se presente)
     for idx, name in enumerate(agent_names):
         if "Orchestrator" in name:
             ax.axvspan(
@@ -347,18 +302,15 @@ def plot_agent_signal_distributions(
                 color="#B7950B",
             )
 
-    # Personalizzazione assi e griglia
     ax.set_xticks(indices)
     ax.set_xticklabels(agent_names, fontsize=11, fontweight="bold")
     ax.set_ylabel("Frequenza Relativa (%)", fontsize=12, fontweight="bold")
     ax.yaxis.set_major_formatter(mtick.PercentFormatter(xmax=100))
 
-    # Limite Y con margine per non tagliare le etichette
     max_pct = max(max(pcts_data[-1]), max(pcts_data[0]), max(pcts_data[1]))
     ax.set_ylim(0, min(100.0, max(max_pct * 1.18, 50.0)))
     ax.grid(axis="y", linestyle="--", alpha=0.5, zorder=0)
 
-    # Titolo e Sottotitolo
     t_samples = total_samples[0] if total_samples else 0
     t_range_str = ""
     if date_start and date_end:
@@ -366,11 +318,10 @@ def plot_agent_signal_distributions(
 
     main_title = title or f"Distribuzione dei Segnali per Agente - Asset: {asset_upper}"
     subtitle = f"Totale Settimane: T = {t_samples}{t_range_str}"
-    
+
     fig.suptitle(main_title, fontsize=15, fontweight="bold", y=0.98, color="#1A252F")
     ax.set_title(subtitle, fontsize=10.5, color="#566573", pad=12)
 
-    # Legenda elegante in alto a destra
     legend = ax.legend(
         loc="upper right",
         frameon=True,
@@ -383,20 +334,8 @@ def plot_agent_signal_distributions(
     )
     legend.get_title().set_fontweight("bold")
 
-    # Tabella riassuntiva inserita in calce al grafico (Net Exposure & Activity Rate)
-    summary_rows = []
-    for idx, name in enumerate(agent_names):
-        short_pct = pcts_data[-1][idx]
-        flat_pct = pcts_data[0][idx]
-        long_pct = pcts_data[1][idx]
-        net_bias = long_pct - short_pct
-        active_rate = long_pct + short_pct
-        summary_rows.append(f"{name}: Bias Netto={net_bias:+5.1f}% | A Mercato={active_rate:4.1f}% | Flat={flat_pct:4.1f}%")
-
-    # Ottimizzazione layout
     plt.tight_layout(rect=[0, 0.02, 1, 0.95])
 
-    # Salvataggio dell'immagine su disco
     if save_path is None:
         plots_dir = PROJECT_ROOT / "data" / "results" / "plots"
         plots_dir.mkdir(parents=True, exist_ok=True)
@@ -415,13 +354,13 @@ def plot_agent_signal_distributions(
 
 
 # =====================================================================
-# 3. FUNZIONE BATCH PER TUTTI GLI ASSET
+# 3. FUNZIONE BATCH PER TUTTI GLI ASSSET
 # =====================================================================
 def plot_all_assets_signal_distributions(
-    assets: Optional[List[str]] = None,
-    signals_dir: Optional[Union[str, Path]] = None,
-    save_dir: Optional[Union[str, Path]] = None,
-    show_plots: bool = False,
+        assets: Optional[List[str]] = None,
+        signals_dir: Optional[Union[str, Path]] = None,
+        save_dir: Optional[Union[str, Path]] = None,
+        show_plots: bool = False,
 ) -> Dict[str, Tuple[plt.Figure, plt.Axes]]:
     """
     Genera e salva automaticamente il plot della distribuzione dei segnali
@@ -442,9 +381,13 @@ def plot_all_assets_signal_distributions(
     for asset in assets:
         target_file = plots_dir / f"signal_distribution_{asset.lower()}.png"
         try:
+            # 1. Carichiamo prima esplicitamente i segnali passando la directory corretta
+            loaded_signals = load_all_signals_for_asset(asset=asset, signals_dir=signals_dir)
+
+            # 2. Passiamo il dizionario risultante a plot_agent_signal_distributions
             fig, ax = plot_agent_signal_distributions(
                 asset=asset,
-                signals_dir=signals_dir,
+                signals_dict=loaded_signals,
                 save_path=target_file,
                 show_plot=show_plots,
             )
@@ -466,8 +409,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "target",
         nargs="?",
-        default="SPY",
-        help="Asset da plottare ('SPY', 'IEF', 'GLD', 'SHY' o 'ALL'). Default: 'SPY'",
+        default="ALL",  # <--- IMPOSTATO DI DEFAULT SU ALL PER CICLARE SU TUTTI GLI ASSET
+        help="Asset da plottare ('SPY', 'IEF', 'GLD', 'SHY' o 'ALL'). Default: 'ALL'",
     )
     parser.add_argument(
         "--show",

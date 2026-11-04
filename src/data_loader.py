@@ -448,12 +448,20 @@ def prepare_asset_data(
     asset_u = asset.upper()
     out_df = df.copy()
 
-    # Mappatura campi standard
+    # Mappatura campi standard OHLCV
     for standard_name in ["open", "high", "low", "close", "volume"]:
         source_col = f"{asset_u}_{standard_name}"
         if source_col in out_df.columns:
             out_df[standard_name] = out_df[source_col]
         elif f"{asset.lower()}_{standard_name}" in out_df.columns:
             out_df[standard_name] = out_df[f"{asset.lower()}_{standard_name}"]
+
+    # Mappatura campi di rendimento e momentum canonici
+    for metric_name in ["return_1w", "momentum_21d", "momentum_63d"]:
+        source_col = f"{asset_u}_{metric_name}"
+        if source_col in out_df.columns:
+            out_df[metric_name] = out_df[source_col]
+        elif f"{asset.lower()}_{metric_name}" in out_df.columns:
+            out_df[metric_name] = out_df[f"{asset.lower()}_{metric_name}"]
 
     return out_df
