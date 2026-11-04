@@ -1,6 +1,8 @@
 
 # Registro delle decisioni di ricerca (Decision Log)
 
+> **Addendum 4 novembre 2026:** il completamento delle versioni C_v1 e C_v2, i confronti A/B/C sul 2010–2016 e la sensibilità all'esposizione sono riportati in [Level C: consenso momentum–agenti AI](level_c_research.md). Le decisioni A/B qui sotto sono mantenute come cronologia della ricerca, non come stato corrente dell'intera pipeline.
+
 **Progetto:** ProjectAgentTrading26 | *Regime-Aware Multi-Asset Allocation*\
 **Aggiornato al:** 28 ottobre 2026\
 **Scopo:** registrare le decisioni metodologiche e architetturali rilevanti, **non** ogni modifica al codice o ogni risultato intermedio. Metodologia completa e tabelle delle performance sono riportate in [`research_design.md`](research_design.md).

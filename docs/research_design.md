@@ -1,5 +1,7 @@
 # Disegno della ricerca: Regime-Aware Multi-Asset Allocation
 
+> **Aggiornamento 4 novembre 2026:** la descrizione A/B sottostante documenta lo stato della ricerca al 28 ottobre. L'integrazione C_v1/C_v2, il confronto tra nove portafogli e l'analisi di sensibilità sono descritti in [Level C: consenso momentum–agenti AI](level_c_research.md). I risultati del Level C rimangono in-sample.
+
 **Progetto:** ProjectAgentTrading26 | LUISS, *Data-Driven Models for Investment*\
 **Stato al 28 ottobre 2026:** A1, A2 e B implementati e consolidati localmente; 123 test unitari superati dopo il refactoring; B_v2 congelata dopo la selezione sul training; validation 2017–2021 esaminata successivamente; test finale dal 2022 non eseguito per questo sistema Multi-Asset.\
 **Archivio della ricerca precedente:** [`treasury_research_review.md`](treasury_research_review.md) documenta lo studio su SHY/IEF/TLT. Le sue regole e i suoi risultati non descrivono la strategia Multi-Asset attuale, basata su SPY/IEF/GLD/SHY.

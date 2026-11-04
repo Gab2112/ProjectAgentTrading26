@@ -1,25 +1,39 @@
-# Bytecode e cache di Python
+# File compilati Python, cache e artefatti di sviluppo
 __pycache__/
 *.py[cod]
 *$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+*.egg-info/
+build/
+dist/
 
-# Configurazione IDE (PyCharm)
-.idea/
-
-# Se usi o qualcuno usa VS Code
-.vscode/
-
-# Ambienti virtuali
-venv/
+# Ambienti virtuali locali e configurazioni degli editor
 .venv/
+venv/
 env/
+.idea/
+.vscode/
+.ipynb_checkpoints/
 
-# Dati e file temporanei/log
+# Variabili d'ambiente private, log e file temporanei di sistema
+.env
+.env.*
+!.env.example
 *.log
 .DS_Store
 
-# Output generati dalla pipeline (si ricreano con: python3 main.py)
-# In Git restano solo i dati grezzi in data/raw/.
+# Prodotti generati dalla pipeline: non versionare i risultati rigenerabili.
+# Restano tracciati soltanto gli snapshot sorgente in data/raw/.
 data/processed/
 data/signals/
 data/results/
+
+# I modelli binari generati richiedono una politica dedicata agli artefatti.
+# Non escludere tutti i JSON: alcuni parametri storici sono tracciati in Git.
+src/agents/config/*.joblib
