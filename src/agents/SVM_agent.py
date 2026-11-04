@@ -201,26 +201,41 @@ class SVMAgent(BaseAgent):
         if not active_features:
             raise ValueError(f"Nessuna feature trovata nel DataFrame tra: {self.feature_cols}")
 
-        X = df[active_features].copy().ffill().bfill()
+        if not df.index.is_monotonic_increasing or not df.index.is_unique:
+            raise ValueError("Le date delle feature devono essere ordinate e univoche.")
+        # Rimosso bfill() perchè potrebbe recuperare valori successivi alla data della previsione
+        X = df[active_features].copy().ffill()
         price_series = df[price_col_resolved].astype(float)
-        future_returns = price_series.pct_change().shift(-1)
-        y = (future_returns > 0.0).astype(int)
+        future_returns = price_series.shift(-1).div(price_series).sub(1.0)
+        future_returns = future_returns.replace([np.inf, -np.inf], np.nan)
+        y = (future_returns > 0.0).astype(float).where(future_returns.notna())
 
         return X, y, future_returns
 
-    def fit(self, df: pd.DataFrame, max_year: Optional[int] = 2021) -> "SVMAgent":
+    def fit(self, df: pd.DataFrame, max_year: Optional[int]) -> "SVMAgent":
         """
         Addestra il modello SVM con vincolo temporale In-Sample (<= max_year).
         La standardizzazione (scaler) è fittata ESCLUSIVAMENTE sui dati In-Sample.
         """
-        X, y, _ = self._extract_xy(df)
+        if (
+            not isinstance(df.index, pd.DatetimeIndex)
+            or df.index.hasnans
+            or not df.index.is_monotonic_increasing
+            or not df.index.is_unique
+        ):
+            raise ValueError("Indice temporale del training non valido.")
 
-        if max_year is not None and hasattr(X.index, "year"):
-            mask = X.index.year <= max_year
-            X_train = X.loc[mask]
-            y_train = y.loc[mask]
-        else:
-            X_train, y_train = X, y
+        train_df = (
+            df.loc[df.index.year <= max_year].copy()
+            if max_year is not None
+            else df.copy()
+        )
+
+        X, y, _ = self._extract_xy(train_df)
+
+        valid_mask = X.notna().all(axis=1) & y.notna()
+        X_train = X.loc[valid_mask]
+        y_train = y.loc[valid_mask].astype(int)
 
         # Esclusione dell'ultimo record privo di forward return (NaN)
         valid_mask = ~y_train.isna() & ~X_train.isna().any(axis=1)
@@ -229,7 +244,8 @@ class SVMAgent(BaseAgent):
 
         if len(X_train) < 30:
             raise ValueError(f"Campione In-Sample insufficiente ({len(X_train)} righe) per il training SVM.")
-
+        if y_train.nunique() != 2:
+            raise ValueError("Il training SVM richiede entrambe le classi del target.")
         self.trained_features = list(X_train.columns)
 
         # Inizializzazione e fit del Trasformatore di Scala In-Sample
@@ -275,11 +291,15 @@ class SVMAgent(BaseAgent):
         if missing:
             raise KeyError(f"Feature mancanti nel DataFrame di inferenza: {missing}")
 
-        X = df[self.trained_features].copy().ffill().bfill()
-        X_scaled = self.scaler.transform(X)
+        X = df[self.trained_features].copy().ffill()
+        valid = X.notna().all(axis=1)
 
-        proba = self.model.predict_proba(X_scaled)[:, 1]
-        return pd.Series(proba, index=df.index, dtype=float)
+        proba = pd.Series(0.50, index=df.index, dtype=float)
+        if valid.any():
+            X_scaled = self.scaler.transform(X.loc[valid])
+            proba.loc[valid] = self.model.predict_proba(X_scaled)[:, 1]
+
+        return proba
 
     def predict(self, df: pd.DataFrame) -> pd.Series:
         """
@@ -517,8 +537,9 @@ class SVMWalkForwardTrainer:
         self.history: List[Dict[str, Any]] = []
         self.selected_params: Optional[Dict[str, Any]] = None
         self.final_agent: Optional[SVMAgent] = None
+        self.oof_signals = pd.DataFrame(columns=["signal", "confidence"])
 
-    def run(self, df: pd.DataFrame, max_year: Optional[int] = 2021) -> Dict[str, Any]:
+    def run(self, df: pd.DataFrame, max_year: int) -> Dict[str, Any]:
         """Esegue il ciclo completo di Walk-Forward."""
         if not isinstance(df.index, pd.DatetimeIndex):
             raise TypeError("L'indice del DataFrame deve essere di tipo DatetimeIndex.")
@@ -536,6 +557,8 @@ class SVMWalkForwardTrainer:
         print("-" * 75)
 
         self.history = []
+        self.oof_signals = pd.DataFrame(columns=["signal", "confidence"])
+        oof_chunks = []
 
         for i in range(len(all_years) - self.train_window_years):
             train_years = all_years[i : i + self.train_window_years]
@@ -545,6 +568,18 @@ class SVMWalkForwardTrainer:
             val_df = df[df.index.year == val_year]
 
             res = self.optimizer.fit(train_df=train_df, val_df=val_df)
+            if train_df.index.max() >= val_df.index.min():
+                raise ValueError("Fold OOF non cronologico.")
+
+            fold_agent = self.optimizer.best_agent
+            if fold_agent is None:
+                raise RuntimeError("Modello SVM del fold non disponibile.")
+
+            sig, conf = fold_agent.predict_with_confidence(val_df)
+            oof_chunks.append(pd.DataFrame(
+                {"signal": sig, "confidence": conf}, index=val_df.index
+            ))
+
             c_val, g_val, th = res["C"], res["gamma"], res["prob_threshold"]
             train_lbl = f"{train_years[0]}-{train_years[-1]}"
             combo_str = f"C={c_val}, g={g_val}, th={th:.2f}"
@@ -559,6 +594,10 @@ class SVMWalkForwardTrainer:
                 "gamma": g_val,
                 "prob_threshold": th,
             })
+
+        self.oof_signals = pd.concat(oof_chunks).sort_index()
+        if not self.oof_signals.index.is_unique:
+            raise ValueError("Date OOF SVM duplicate.")
 
         # Selezione dei parametri più frequenti (moda statistica)
         param_tuples = [(h["C"], h["gamma"], h["prob_threshold"]) for h in self.history]
@@ -598,11 +637,7 @@ class SVMWalkForwardTrainer:
 
 
 if __name__ == "__main__":
-    from src.agents.base_agent import BaseAgent
-    df_features = BaseAgent.load_complete_dataset(root_dir=PROJECT_ROOT)
-    print("\n[Test SVMAgent] Dataset caricato:", df_features.shape)
-
-    opt = SVMOptimizer(target_asset="SPY", C_candidates=[0.5, 1.0], gamma_candidates=["scale", 0.05])
-    trainer = SVMWalkForwardTrainer(optimizer=opt, train_window_years=5, target_asset="SPY")
-    res = trainer.run(df_features, max_year=2021)
-    print("\nParametri Ottimali SVMAgent selezionati:", res["C"], res["gamma"], res["prob_threshold"])
+    print(
+        "Utilizzare la pipeline di training centralizzata:\n"
+        "python3 src/agents/train.py SPY --train-svm --skip-rf --skip-orch"
+    )

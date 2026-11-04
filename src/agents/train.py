@@ -11,11 +11,13 @@ Script di training e tuning dei parametri per tutti gli agenti quantitativi di P
     * MacroYieldCurveAgent (Inversione e pendenza della curva dei rendimenti, regimi macro)
 - Agente Orchestratore:
     * OrchestratorAgent (Ensemble quantitativo con pesi sul simplesso, boost di consenso e penalizzazione conflitto)
+- Training e tuning limitati al periodo definito in config.yaml.
+- Warm-up precedente al training escluso dalle metriche di performance.
 
 Funzionalità principali:
 - Supporta l'universo multi-asset a 4 classi: SPY (Azionario), IEF (Obbligazionario 7-10y), GLD (Oro), SHY (Liquidità/Breve termine).
 - Esegue l'ottimizzazione Walk-Forward rolling (5 anni di training In-Sample -> 1 anno di test Validation Out-Of-Sample).
-- Rispetta rigorosamente il vincolo OOS lock del progetto: training e selezione limitati al periodo <= 2021 (max_train_year = 2021).
+
 - Funzione obiettivo di stabilità e penalizzazione del Max Drawdown ('sharpe_mdd').
 - Salva tutti i file di configurazione JSON e i modelli serializzati (.joblib) in src/agents/config/:
     * sma_ema_params_{asset}.json
@@ -35,11 +37,14 @@ Funzionalità principali:
 """
 
 import argparse
-from pathlib import Path
 import sys
-from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
+import yaml
+import json
+
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 # Risoluzione robusta dei percorsi
 CURRENT_DIR = Path(__file__).resolve().parent
@@ -48,6 +53,9 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 if str(CURRENT_DIR) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR))
+
+from src.time_split import get_time_windows
+from src.data_transformation import build_decision_feature_panel
 
 from src.agents.base_agent import (
     BaseAgent,
@@ -145,6 +153,27 @@ def combine_statistical_signals(
     return df_out
 
 
+def save_training_provenance(
+    config_path: Path,
+    training_df: pd.DataFrame,
+    cutoff_year: int,
+) -> None:
+    """Registra il periodo temporale utilizzato per il training."""
+
+    with config_path.open("r", encoding="utf-8") as f:
+        params = json.load(f)
+
+    params["training_provenance"] = {
+        "start_date": training_df.index.min().date().isoformat(),
+        "end_date": training_df.index.max().date().isoformat(),
+        "cutoff_year": int(cutoff_year),
+        "calendar": "weekly_decision_dates.csv",
+    }
+
+    with config_path.open("w", encoding="utf-8") as f:
+        json.dump(params, f, indent=4)
+
+
 # =====================================================================
 # PIPELINE DI TRAINING PER SINGOLO ASSET
 # =====================================================================
@@ -154,12 +183,13 @@ def train_single_asset(
     config_dir: Path,
     signals_dir: Path,
     results_dir: Path,
-    max_train_year: int = 2021,
+    max_train_year: int,
     objective_metric: str = "sharpe_mdd",
     train_rf: bool = True,
     train_svm: bool = True,
     train_orchestrator: bool = True,
     orch_method: str = "ga",
+    warmup_df: Optional[pd.DataFrame] = None,
 ) -> Dict[str, Any]:
     """
     Esegue il training Walk-Forward completo per un asset specifico ('SPY', 'IEF', 'GLD', 'SHY'):
@@ -170,6 +200,20 @@ def train_single_asset(
     5. Agente Macro Yield Curve -> segnali macro allineati.
     6. Agente Orchestratore (Ensemble Quantitativo) -> orchestrator_params_{asset}.json & signals_orchestrator_{asset}.csv.
     """
+    # Verifica delle condizioni temporali del dataset
+    if not isinstance(df.index, pd.DatetimeIndex) or df.empty:
+        raise ValueError("Il training richiede un DatetimeIndex non vuoto.")
+
+    if not df.index.is_monotonic_increasing or not df.index.is_unique:
+        raise ValueError("Le date di training devono essere ordinate e univoche.")
+
+    if (df.index.year > max_train_year).any():
+        raise ValueError("Il dataset contiene osservazioni successive al cutoff.")
+
+    if warmup_df is not None and not warmup_df.empty:
+        if warmup_df.index.max() >= df.index.min():
+            raise ValueError("Il warm-up si sovrappone al training.")
+
     asset_upper = asset.upper()
     asset_lower = asset.lower()
     price_col = f"{asset_upper}_close"
@@ -186,7 +230,7 @@ def train_single_asset(
     print(f"\n[{asset_upper}] >>> Walk-Forward: SMA/EMA Agent...")
     sma_opt = SMAEMAOptimizer(price_col=price_col, objective_metric=objective_metric)
     sma_trainer = SMAEMATrainer(optimizer=sma_opt, train_window_years=5, price_col=price_col)
-    sma_res = sma_trainer.run(df, max_year=max_train_year)
+    sma_res = sma_trainer.run(df, max_year=max_train_year, initial_warmup_df=warmup_df,)
 
     sma_config_file = config_dir / f"sma_ema_params_{asset_lower}.json"
     sma_trainer.save_final_agent_config(sma_config_file)
@@ -211,7 +255,7 @@ def train_single_asset(
     print(f"\n[{asset_upper}] >>> Walk-Forward: Z-Score Agent...")
     zs_opt = ZScoreOptimizer(price_col=price_col, exit_threshold=0.0, objective_metric=objective_metric)
     zs_trainer = ZScoreWalkForwardTrainer(optimizer=zs_opt, train_window_years=5, price_col=price_col)
-    zs_res = zs_trainer.run(df, max_year=max_train_year)
+    zs_res = zs_trainer.run(df, max_year=max_train_year, initial_warmup_df=warmup_df,)
 
     zs_config_file = config_dir / f"zscore_params_{asset_lower}.json"
     zs_trainer.save_final_agent_config(zs_config_file)
@@ -230,12 +274,20 @@ def train_single_asset(
         ].to_string(index=False)
     )
 
+    # Storico completo per inizializzare gli indicatori
+    signal_history = (
+        pd.concat([warmup_df, df]).sort_index()
+        if warmup_df is not None and not warmup_df.empty
+        else df
+    )
     # -----------------------------------------------------------------
     # 3. ISTANZIAZIONE E SALVATAGGIO SEGNALI DEI DUE AGENTI STATISTICI SEPARATI
     # -----------------------------------------------------------------
     sma_agent = SMAEMAAgent(price_col=price_col, target_asset=asset_upper)
     sma_agent.load_params(sma_config_file)
-    sig_sma, conf_sma = sma_agent.predict_with_confidence(df)
+    sig_sma, conf_sma = sma_agent.predict_with_confidence(signal_history)
+    sig_sma = sig_sma.reindex(df.index)
+    conf_sma = conf_sma.reindex(df.index)
     df_sma = pd.DataFrame({"signal": sig_sma, "confidence": conf_sma}, index=df.index)
     sma_csv = signals_dir / f"signals_sma_ema_{asset_lower}.csv"
     df_sma.to_csv(sma_csv)
@@ -243,7 +295,9 @@ def train_single_asset(
 
     zs_agent = ZScoreAgent(price_col=price_col, target_asset=asset_upper)
     zs_agent.load_params(zs_config_file)
-    sig_zs, conf_zs = zs_agent.predict_with_confidence(df)
+    sig_zs, conf_zs = zs_agent.predict_with_confidence(signal_history)
+    sig_zs = sig_zs.reindex(df.index)
+    conf_zs = conf_zs.reindex(df.index)
     df_zs = pd.DataFrame({"signal": sig_zs, "confidence": conf_zs}, index=df.index)
     zs_csv = signals_dir / f"signals_zscore_{asset_lower}.csv"
     df_zs.to_csv(zs_csv)
@@ -274,24 +328,19 @@ def train_single_asset(
         )
         rf_res = rf_trainer.run(df, max_year=max_train_year)
         rf_trainer.save_final_agent_config(rf_config_file)
+        save_training_provenance(rf_config_file, df, max_train_year)
 
-        sig_rf, conf_rf = rf_trainer.final_agent.predict_with_confidence(df)
-        df_rf = pd.DataFrame({"signal": sig_rf, "confidence": conf_rf}, index=df.index)
+        df_rf = rf_trainer.oof_signals.copy()
+        if df_rf.empty or df_rf[["signal", "confidence"]].isna().any().any():
+            raise ValueError("Predizioni OOF Random Forest assenti o incomplete.")
         df_rf.to_csv(rf_csv)
         print(f"[{asset_upper}] Segnali Random Forest salvati in: {rf_csv}")
-    elif rf_csv.exists():
-        df_rf = pd.read_csv(rf_csv, index_col=0, parse_dates=True).reindex(df.index).fillna({"signal": 0, "confidence": 0.0})
-        print(f"[{asset_upper}] Segnali Random Forest caricati da cache: {rf_csv}")
-    elif rf_config_file.exists():
-        try:
-            rf_agent = RandomForestAgent(target_asset=asset_upper, price_col=price_col)
-            rf_agent.load_params(rf_config_file)
-            sig_rf, conf_rf = rf_agent.predict_with_confidence(df)
-            df_rf = pd.DataFrame({"signal": sig_rf, "confidence": conf_rf}, index=df.index)
-            df_rf.to_csv(rf_csv)
-            print(f"[{asset_upper}] Segnali Random Forest generati da modello esistente: {rf_csv}")
-        except Exception as e:
-            print(f"  [AVVISO] Impossibile caricare RandomForestAgent esistente: {e}")
+    else:
+        print(
+            f"[{asset_upper}] Random Forest escluso: "
+            "nessuna cache preesistente viene utilizzata "
+            "senza verifica del protocollo temporale."
+        )
 
     # -----------------------------------------------------------------
     # 5. AGENTE MACHINE LEARNING SVM (Support Vector Classifier)
@@ -317,24 +366,18 @@ def train_single_asset(
         )
         svm_res = svm_trainer.run(df, max_year=max_train_year)
         svm_trainer.save_final_agent_config(svm_config_file)
-
-        sig_svm, conf_svm = svm_trainer.final_agent.predict_with_confidence(df)
-        df_svm = pd.DataFrame({"signal": sig_svm, "confidence": conf_svm}, index=df.index)
+        save_training_provenance(svm_config_file, df, max_train_year)
+        df_svm = svm_trainer.oof_signals.copy()
+        if df_svm.empty or df_svm[["signal", "confidence"]].isna().any().any():
+            raise ValueError("Predizioni OOF SVM assenti o incomplete.")
         df_svm.to_csv(svm_csv)
         print(f"[{asset_upper}] Segnali SVM salvati in: {svm_csv}")
-    elif svm_csv.exists():
-        df_svm = pd.read_csv(svm_csv, index_col=0, parse_dates=True).reindex(df.index).fillna({"signal": 0, "confidence": 0.0})
-        print(f"[{asset_upper}] Segnali SVM caricati da cache: {svm_csv}")
-    elif svm_config_file.exists():
-        try:
-            svm_agent = SVMAgent(target_asset=asset_upper, price_col=price_col)
-            svm_agent.load_params(svm_config_file)
-            sig_svm, conf_svm = svm_agent.predict_with_confidence(df)
-            df_svm = pd.DataFrame({"signal": sig_svm, "confidence": conf_svm}, index=df.index)
-            df_svm.to_csv(svm_csv)
-            print(f"[{asset_upper}] Segnali SVM generati da modello esistente: {svm_csv}")
-        except Exception as e:
-            print(f"  [AVVISO] Impossibile caricare SVMAgent esistente: {e}")
+    else:
+        print(
+            f"[{asset_upper}] SVM escluso: "
+            "nessuna cache preesistente viene utilizzata "
+            "senza verifica del protocollo temporale."
+        )
 
     # -----------------------------------------------------------------
     # 6. AGENTE MACRO YIELD CURVE
@@ -350,6 +393,15 @@ def train_single_asset(
     df_macro.to_csv(macro_csv)
     print(f"[{asset_upper}] Segnali Macro Yield Curve salvati in: {macro_csv}")
 
+    oof_index = df.index
+    for ml_signals in (df_rf, df_svm):
+        if ml_signals is not None:
+            if ml_signals.empty or not ml_signals.index.is_unique:
+                raise ValueError("Indice delle predizioni OOF non valido.")
+            oof_index = oof_index.intersection(ml_signals.index)
+
+    if oof_index.empty:
+        raise ValueError("Nessuna settimana OOF comune disponibile.")
     # -----------------------------------------------------------------
     # 7. AGENTE ORCHESTRATORE (Ensemble Multi-Agente)
     # -----------------------------------------------------------------
@@ -365,11 +417,18 @@ def train_single_asset(
             signals_pool["RandomForest_Agent"] = df_rf
         if df_svm is not None:
             signals_pool["SVM_Agent"] = df_svm
+        signals_pool = {
+            name: signals.loc[oof_index].copy()
+            for name, signals in signals_pool.items()
+        }
+
+        if any(s[["signal", "confidence"]].isna().any().any()
+            for s in signals_pool.values()):
+            raise ValueError("Il pool OOF contiene segnali mancanti.")
 
         print(f"\n[{asset_upper}] >>> Ottimizzazione Agente Orchestratore ({len(signals_pool)} Agenti: {', '.join(signals_pool.keys())})...")
 
-        ret_asset = df[price_col].astype(float).pct_change().fillna(0.0)
-
+        ret_asset = df[price_col].astype(float).pct_change().fillna(0.0).loc[oof_index]
         orch_opt = OrchestratorOptimizer(
             objective_metric=objective_metric,
             max_train_year=max_train_year,
@@ -398,7 +457,7 @@ def train_single_asset(
     # -----------------------------------------------------------------
     # 7. TABELLA COMPARATIVA PERFORMANCE IN-SAMPLE (<= max_train_year)
     # -----------------------------------------------------------------
-    train_mask = df.index.year <= max_train_year
+    train_mask = df.index.isin(oof_index)
     ret_asset = df[price_col].astype(float).pct_change().fillna(0.0)
 
     pos_sma = sig_sma.shift(1).fillna(0.0)
@@ -414,7 +473,11 @@ def train_single_asset(
     m_macro = calculate_performance_metrics(strat_macro)
 
     print("\n" + "-" * 88)
-    print(f"  CONFRONTO FINALE IN-SAMPLE (2004-{max_train_year}) - ASSET: {asset_upper}")
+    print(
+        f"  CONFRONTO FINALE IN-SAMPLE "
+        f"({oof_index.min():%Y-%m-%d} - {oof_index.max():%Y-%m-%d}) "
+        f"- ASSET: {asset_upper}"
+    )
     print("-" * 88)
     print(f"{'Modello / Agente':<28} | {'Cum Ret':<9} | {'Sharpe':<7} | {'Max DD':<7} | {'Prof Fact':<9} | {'Score Obj':<9}")
     print("-" * 88)
@@ -463,7 +526,7 @@ def train_single_asset(
 # =====================================================================
 def run_all_assets(
     assets: Optional[List[str]] = None,
-    max_train_year: int = 2021,
+    max_train_year: Optional[int] = None,
     objective_metric: str = "sharpe_mdd",
     train_rf: bool = True,
     train_svm: bool = True,
@@ -474,6 +537,18 @@ def run_all_assets(
     Esegue il workflow completo di training su tutti gli asset specificati
     (default: universe a 4 asset SPY, IEF, GLD, SHY).
     """
+    # Caricamento del protocollo temporale centralizzato
+    with (PROJECT_ROOT / "config.yaml").open("r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    time_windows = get_time_windows(config)
+
+    train_start = time_windows["train_start"]
+    train_end = time_windows["train_end"]
+    if max_train_year is not None and max_train_year != train_end.year:
+        raise ValueError("Il cutoff di training deve coincidere con config.yaml")
+
+    max_train_year = train_end.year
     if assets is None:
         assets = list(DEFAULT_ASSETS)
 
@@ -486,8 +561,39 @@ def run_all_assets(
     results_dir = PROJECT_ROOT / "data" / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    # Caricamento centralizzato dataset con feature macro e prezzi di tutti gli asset
-    df = BaseAgent.load_complete_dataset(root_dir=PROJECT_ROOT, save_features_weekly_csv=True)
+    # Prezzi giornalieri del progetto
+    market_daily = pd.read_csv(
+        PROJECT_ROOT / "data/processed/market_daily.csv",
+        index_col="Date",
+        parse_dates=["Date"],
+    ).loc[:train_end]
+
+    # Calendario decisionale settimanale condiviso
+    decision_dates = pd.read_csv(
+        PROJECT_ROOT / "data/processed/weekly_decision_dates.csv",
+        index_col="Date",
+        parse_dates=["Date"],
+    ).index
+
+    decision_dates = decision_dates[decision_dates <= train_end]
+
+    # Feature di mercato allineate alle date decisionali
+    df = build_decision_feature_panel(market_daily, decision_dates)
+
+    # Integrazione delle feature macroeconomiche
+    macro_df = BaseAgent.load_macro_data(
+        decision_dates=df.index,
+        root_dir=PROJECT_ROOT,
+    )
+    df = df.join(macro_df, how="left")
+    # Separazione tra warm-up storico e training ufficiale
+    warmup_df = df.loc[df.index < train_start].copy()
+    train_df = df.loc[
+        (df.index >= train_start) & (df.index <= train_end)
+    ].copy()
+
+    if train_df.empty:
+        raise ValueError("Nessun dato nel periodo di training configurato.")
     print(f"[Train] Dataset caricato: {len(df)} settimane dal {df.index[0].date()} al {df.index[-1].date()}")
     print(f"[Train] Universo Asset da ottimizzare: {assets}")
     print(f"[Train] Metrica obiettivo: '{objective_metric}'")
@@ -499,7 +605,8 @@ def run_all_assets(
     for asset in assets:
         res = train_single_asset(
             asset=asset,
-            df=df,
+            df=train_df,
+            warmup_df=warmup_df,
             config_dir=config_dir,
             signals_dir=signals_dir,
             results_dir=results_dir,
@@ -596,7 +703,6 @@ if __name__ == "__main__":
 
     run_all_assets(
         assets=target_assets,
-        max_train_year=2021,
         objective_metric=args.metric,
         train_rf=not args.skip_rf,
         train_svm=train_svm_flag,
