@@ -213,6 +213,18 @@ def train_single_asset(
     if price_col not in df.columns:
         raise KeyError(f"Colonna '{price_col}' non trovata nel dataset.")
 
+    # Filtro colonne: mantiene solo l'asset target corrente e le feature macro/globali.
+    # Esclude le colonne con prefisso degli altri 3 asset per eliminare zavorra e rumore.
+    other_assets = [a for a in DEFAULT_ASSETS if a != asset_upper]
+    excluded_prefixes = tuple(f"{a}_" for a in other_assets)
+    filtered_cols = [c for c in df.columns if not c.startswith(excluded_prefixes)]
+    excluded_count = len(df.columns) - len(filtered_cols)
+    df = df[filtered_cols].copy()
+    if warmup_df is not None and not warmup_df.empty:
+        warmup_df = warmup_df[filtered_cols].copy()
+
+    print(f"[{asset_upper}] Colonne dataset filtrate: {len(filtered_cols)} (escluse {excluded_count} colonne degli altri asset)")
+
     print("\n" + "#" * 84)
     print(f"### AVVIO TRAINING & OTTIMIZZAZIONE COMPLETA: {asset_upper} ({price_col})")
     print("#" * 84)

@@ -48,17 +48,11 @@ from src.evaluator import calculate_performance_metrics, compute_objective_score
 DEFAULT_FEATURE_COLS = [
     "curve_10y_2y",
     "curve_10y_2y_change_1w",
-    "curve_10y_3m",
-    "curve_10y_3m_change_1w",
-    "curve_30y_10y",
-    "curve_30y_10y_change_1w",
     "treasury_10y_change_1w",
     "treasury_2y_change_1w",
-    "treasury_3m_change_1w",
-    "rates__policy_rate",
     "cpi_yoy",
+    "vix_level",
     "breakeven_5y_change_1w",
-    "rate_volatility_13w",
 ]
 
 
@@ -186,9 +180,20 @@ class RandomForestAgent(BaseAgent):
 
         # Selezione feature disponibili nel DataFrame
         active_features = [col for col in self.feature_cols if col in df.columns]
-        ret_col = f"{self.target_asset}_return_1w"
-        if ret_col in df.columns and ret_col not in active_features:
-            active_features.append(ret_col)
+        # Inclusione automatica di rendimento e momentum dell'asset target se presenti
+        for candidate in [
+            f"{self.target_asset}_return_1w",
+            f"{self.target_asset}_momentum_21d",
+            f"{self.target_asset}_momentum_63d",
+        ]:
+            if candidate in df.columns and candidate not in active_features:
+                active_features.append(candidate)
+
+        # Supporto a colonne canoniche senza prefisso
+        if not any(c.startswith(f"{self.target_asset}_") for c in active_features):
+            for candidate in ["return_1w", "momentum_21d", "momentum_63d"]:
+                if candidate in df.columns and candidate not in active_features:
+                    active_features.append(candidate)
 
         if not active_features:
             raise ValueError(
