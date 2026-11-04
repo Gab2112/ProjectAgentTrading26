@@ -12,6 +12,7 @@ Verifica:
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 os.environ.setdefault("MPLCONFIGDIR", tempfile.gettempdir())
@@ -50,6 +51,21 @@ class TestPlotsModule(unittest.TestCase):
             }, index=dates),
         }
 
+    @classmethod
+    def _scrivi_segnali_sintetici(cls, root: Path):
+        """Scrive i CSV di test nel root temporaneo, senza usare data/signals locale."""
+        signals_dir = root / "data" / "signals"
+        signals_dir.mkdir(parents=True, exist_ok=True)
+        files = {
+            "signals_sma_ema_spy.csv": "Agent_Trend",
+            "signals_zscore_spy.csv": "Agent_MeanRev",
+            "signals_svm_spy.csv": "Agent_SVM",
+            "signals_macro_spy.csv": "Agent_Trend",
+            "signals_orchestrator_spy.csv": "Orchestrator_Agent",
+        }
+        for filename, key in files.items():
+            cls.dummy_signals[key].to_csv(signals_dir / filename)
+
     def tearDown(self):
         plt.close("all")
 
@@ -71,24 +87,34 @@ class TestPlotsModule(unittest.TestCase):
 
     def test_plot_loads_from_signals_directory(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            out_png = Path(tmp_dir) / "test_spy_distribution.png"
+            root = Path(tmp_dir)
+            self._scrivi_segnali_sintetici(root)
+            out_png = root / "test_spy_distribution.png"
 
-            # Esegui caricamento e plot su SPY
-            fig, ax = plot_agent_signal_distributions(
-                asset="SPY",
-                save_path=out_png,
-                show_plot=False,
-            )
+            # Esercita il caricamento automatico usando solo CSV temporanei.
+            with patch("src.plots.PROJECT_ROOT", root):
+                fig, ax = plot_agent_signal_distributions(
+                    asset="SPY", save_path=out_png, show_plot=False,
+                )
 
+            self.assertIsNotNone(fig)
+            self.assertIsNotNone(ax)
             self.assertTrue(out_png.exists())
             self.assertGreater(out_png.stat().st_size, 10000)
 
     def test_load_all_signals_returns_dict(self):
-        signals = load_all_signals_for_asset("SPY")
-        self.assertIsInstance(signals, dict)
-        self.assertGreater(len(signals), 0)
-        first_key = list(signals.keys())[0]
-        self.assertIn("signal", signals[first_key].columns)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            self._scrivi_segnali_sintetici(root)
+
+            with patch("src.plots.PROJECT_ROOT", root):
+                signals = load_all_signals_for_asset("SPY")
+
+            self.assertIsInstance(signals, dict)
+            self.assertGreaterEqual(len(signals), 4)
+            for df in signals.values():
+                self.assertIn("signal", df.columns)
+                self.assertIn("confidence", df.columns)
 
 
 if __name__ == "__main__":

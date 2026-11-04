@@ -30,7 +30,71 @@ from src.agents.random_forest_agent import RandomForestAgent
 from src.agents.orchestrator_agent import OrchestratorAgent, OrchestratorOptimizer
 
 
-class TestBaseAgentDataLoading(unittest.TestCase):
+class _CasoDatiMultiAssetSintetici(unittest.TestCase):
+    """Isola i test da CSV generati e dalle serie di mercato reali."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cartella = TemporaryDirectory()
+        cls.addClassCleanup(cartella.cleanup)
+        root = Path(cartella.name)
+
+        processed = root / "data" / "processed"
+        macro_dir = root / "data" / "raw" / "macro"
+        processed.mkdir(parents=True)
+        macro_dir.mkdir(parents=True)
+        (root / "src").mkdir()
+        (root / "config.yaml").write_text("{}\n", encoding="utf-8")
+
+        # Serie interamente artificiali e deterministiche, solo 2006-2016.
+        date = pd.date_range("2006-01-06", "2016-12-30", freq="W-FRI")
+        t = np.arange(len(date), dtype=float)
+        prezzi = pd.DataFrame(index=date)
+        prezzi.index.name = "Date"
+        for asset, base, fase in (
+            ("SPY", 100.0, 0.0),
+            ("IEF", 82.0, 0.7),
+            ("GLD", 92.0, 1.3),
+            ("SHY", 71.0, 2.1),
+        ):
+            close = base + 0.08 * t + 2.7 * np.sin(t / 3.1 + fase) + 1.1 * np.sin(t / 11.0 + fase)
+            open_ = close * (1.0 + 0.001 * np.cos(t / 4.0 + fase))
+            prezzi[f"{asset}_open"] = open_
+            prezzi[f"{asset}_high"] = np.maximum(open_, close) * 1.003
+            prezzi[f"{asset}_low"] = np.minimum(open_, close) * 0.997
+            prezzi[f"{asset}_close"] = close
+            prezzi[f"{asset}_volume"] = 1000000.0 + 2500.0 * t
+            prezzi[f"{asset}_return_1w"] = pd.Series(close, index=date).pct_change().fillna(0.0).to_numpy()
+        prezzi.to_csv(processed / "master_weekly.csv")
+
+        date_macro = pd.date_range("2005-12-01", "2016-12-30", freq="B")
+        m = np.arange(len(date_macro), dtype=float)
+        serie_macro = {
+            "DGS10": 2.3 + 0.35 * np.sin(m / 37.0),
+            "DGS2": 1.5 + 0.22 * np.cos(m / 51.0),
+            "DGS3MO": 0.85 + 0.12 * np.cos(m / 65.0),
+            "DGS30": 3.2 + 0.29 * np.sin(m / 72.0),
+            "VIXCLS": 19.0 + 5.0 * np.sin(m / 43.0),
+            "T10YIE": 2.0 + 0.2 * np.sin(m / 63.0),
+            "T5YIE": 1.8 + 0.15 * np.cos(m / 49.0),
+        }
+        for nome, valori in serie_macro.items():
+            s = pd.DataFrame({nome: valori}, index=date_macro)
+            # L'indice non nominato mantiene il contratto merge_asof di BaseAgent.
+            s.index.name = None
+            s.to_csv(macro_dir / f"{nome}.csv")
+
+        # Restituisce il root temporaneo anche ai metodi di istanza degli agenti.
+        root_base = patch("src.agents.base_agent.get_project_root", return_value=root)
+        root_base.start()
+        cls.addClassCleanup(root_base.stop)
+        root_orchestrator = patch("src.agents.orchestrator_agent.get_project_root", return_value=root)
+        root_orchestrator.start()
+        cls.addClassCleanup(root_orchestrator.stop)
+
+
+class TestBaseAgentDataLoading(_CasoDatiMultiAssetSintetici):
     """Test per le funzionalità di caricamento e normalizzazione dati in BaseAgent."""
 
     def test_load_market_data_default(self):
@@ -95,11 +159,12 @@ class TestBaseAgentDataLoading(unittest.TestCase):
             agent.resolve_price_col(pd.DataFrame({"volume": [1, 2]}))
 
 
-class TestIndividualAgentsMultiAsset(unittest.TestCase):
+class TestIndividualAgentsMultiAsset(_CasoDatiMultiAssetSintetici):
     """Test di inferenza e compatibilità multi-asset per SMA, ZScore e Macro."""
 
     @classmethod
     def setUpClass(cls):
+        super().setUpClass()
         cls.df = BaseAgent.load_complete_dataset()
 
     def test_sma_ema_agent_on_all_four_assets(self):
@@ -139,7 +204,7 @@ class TestIndividualAgentsMultiAsset(unittest.TestCase):
     def test_random_forest_agent_multi_asset(self):
         for asset in ["SPY", "IEF"]:
             rf = RandomForestAgent(target_asset=asset, n_estimators=30, max_depth=2, min_samples_leaf=20)
-            rf.fit(self.df, max_year=2021)
+            rf.fit(self.df, max_year=2016)
             sig, conf = rf.predict_with_confidence(self.df)
 
             self.assertEqual(len(sig), len(self.df))
