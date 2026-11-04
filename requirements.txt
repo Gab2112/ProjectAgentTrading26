@@ -1,31 +1,31 @@
-# Python 3.11 (ambiente virtuale del progetto)
-#
-# Installazione dalla cartella principale del progetto:
-#   python3.11 -m venv .venv
-#   source .venv/bin/activate
-#   python3 -m pip install -r requirements.txt
+# Python 3.11: utilizzare un ambiente virtuale o l'interprete Conda.
+# Installazione: python -m pip install -r requirements.txt
 
-# Elaborazione dati
+# Preparazione ed elaborazione dei dati
 pandas==3.0.6
 numpy==2.4.6
 PyYAML==6.0.3
 
-# Ottimizzazione e backtesting Multi-Asset (A1/A2)
+# Ottimizzazione e backtesting dei portafogli A/B/C
 scipy==1.17.1
 cvxpy==1.9.3
 clarabel==0.11.1
 
-# Acquisizione dati (solo quando abilitata esplicitamente)
+# Acquisizione dei dati, soltanto se abilitata esplicitamente
 yfinance==1.7.0
 pandas_datareader==0.11.1
 
-# Grafici
+# Grafici e visualizzazioni
 matplotlib==3.11.2
 seaborn==0.13.2
 
-# Lettura Excel / Parquet / Feather
+# Formati opzionali supportati da src/data_transformation.py
 openpyxl==3.1.5
 pyarrow==25.0.1
 
-# Metodi statistici e machine learning (livelli B/C)
+# Modelli predittivi degli agenti e serializzazione
 scikit-learn==1.8.0
+joblib>=1.5,<2
+
+# L'agente sentiment FinBERT è opzionale e non è usato nel confronto A/B/C.
+# torch e transformers richiedono un'installazione separata e verificata.
