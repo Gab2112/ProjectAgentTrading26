@@ -3,17 +3,12 @@ plots.py
 
 Modulo di visualizzazione grafica e diagnostica per ProjectAgentTrading26.
 Fornisce funzioni per analizzare la distribuzione dei segnali, la correlazione tra strategie
-e il comportamento comparativo di tutti gli agenti quantitativi:
-- SMAEMAAgent (Trend-Following)
-- ZScoreAgent (Mean-Reversion)
-- MacroYieldCurveAgent (Macroeconomico)
-- RandomForestAgent (Machine Learning non-lineare)
-- SVMAgent (Machine Learning a margine massimo)
-- OrchestratorAgent (Meta-Decisore di Sintesi)
+e il comportamento comparativo di tutti gli agenti quantitativi (inclusi FinBERT e Orchestratore).
 """
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -24,6 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 os.environ.setdefault("MPLCONFIGDIR", tempfile.gettempdir())
 
 import matplotlib
+
 # Configura backend headless se non è presente un display grafico interattivo
 if not os.environ.get("DISPLAY") and sys.platform != "win32":
     matplotlib.use("Agg")
@@ -36,7 +32,7 @@ import seaborn as sns
 
 # Risoluzione percorsi di progetto
 CURRENT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = CURRENT_DIR.parent
+PROJECT_ROOT = CURRENT_DIR.parents[1] if CURRENT_DIR.name == "agents" else CURRENT_DIR.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -47,13 +43,14 @@ AGENT_DISPLAY_NAMES = {
     "signals_macro": "Macro Yield Curve",
     "signals_random_forest": "Random Forest",
     "signals_svm": "SVM Classifier",
-    "signals_statistical": "Ensemble Statistico",
+    "signals_sentiment": "FinBERT Sentiment",
     "signals_orchestrator": "Orchestrator (GA)",
     "SMA_EMA_Agent": "SMA/EMA (Trend)",
     "ZScore_Agent": "Z-Score (Mean-Rev)",
     "Macro_YieldCurve_Agent": "Macro Yield Curve",
     "RandomForest_Agent": "Random Forest",
     "SVM_Agent": "SVM Classifier",
+    "FinBERT_Agent": "FinBERT Sentiment",
     "OrchestratorAgent": "Orchestrator (GA)",
     "Orchestrator_Agent": "Orchestrator (GA)",
 }
@@ -61,8 +58,8 @@ AGENT_DISPLAY_NAMES = {
 # Palette cromatica finanziaria standard
 SIGNAL_COLORS = {
     -1: "#E74C3C",  # Short: Rosso Corallo / Crimson
-    0: "#95A5A6",   # Flat: Grigio Ardesia / Slate
-    1: "#27AE60",   # Long: Verde Smeraldo / Emerald
+    0: "#95A5A6",  # Flat: Grigio Ardesia / Slate
+    1: "#27AE60",  # Long: Verde Smeraldo / Emerald
 }
 
 SIGNAL_LABELS = {
@@ -76,14 +73,10 @@ SIGNAL_LABELS = {
 # 1. FUNZIONI DI CARICAMENTO SEGNALI
 # =====================================================================
 def load_all_signals_for_asset(
-    asset: str = "SPY",
-    signals_dir: Optional[Union[str, Path]] = None,
+        asset: str = "SPY",
+        signals_dir: Optional[Union[str, Path]] = None,
 ) -> Dict[str, pd.DataFrame]:
-    """
-    Carica tutti i segnali disponibili per un determinato asset dalla cartella data/signals/.
-    Se alcuni segnali (es. macro) non sono ancora stati esportati su CSV, tenta di generarli
-    al volo per fornire un quadro completo.
-    """
+    """Carica tutti i segnali disponibili per un determinato asset dalla cartella data/signals/."""
     asset_upper = asset.upper()
     asset_lower = asset.lower()
     sig_path = Path(signals_dir) if signals_dir else (PROJECT_ROOT / "data" / "signals")
@@ -99,6 +92,7 @@ def load_all_signals_for_asset(
         ("signals_macro", f"signals_macro_{asset_lower}.csv"),
         ("signals_random_forest", f"signals_random_forest_{asset_lower}.csv"),
         ("signals_svm", f"signals_svm_{asset_lower}.csv"),
+        ("signals_sentiment", f"signals_sentiment_{asset_lower}.csv"),
         ("signals_orchestrator", f"signals_orchestrator_{asset_lower}.csv"),
     ]
 
@@ -114,30 +108,6 @@ def load_all_signals_for_asset(
             except Exception as e:
                 print(f"[AVVISO] Errore nel caricamento di {filepath}: {e}")
 
-    # Fallback per Macro Yield Curve se il file non è presente
-    macro_name = AGENT_DISPLAY_NAMES["signals_macro"]
-    if macro_name not in signals_dict:
-        try:
-            from src.agents.macro_yield_curve_agent import MacroYieldCurveAgent
-            from src.data_loader import load_agent_dataset
-
-            df_market = load_agent_dataset(root_dir=PROJECT_ROOT)
-            macro_agent = MacroYieldCurveAgent(target_asset=asset_upper)
-            macro_pred = macro_agent.predict_multi_asset(df_market, assets=[asset_upper])
-
-            sig_col = f"{asset_upper}_signal"
-            if sig_col in macro_pred.columns:
-                m_sig = macro_pred[sig_col]
-                m_score = macro_agent.calculate_macro_score(df_market)
-                m_conf = (m_score.abs() / 2.0).clip(0.0, 1.0).round(4)
-                m_conf = pd.Series(np.where(m_sig != 0, np.maximum(0.50, m_conf), 0.0), index=df_market.index)
-
-                df_macro = pd.DataFrame({"signal": m_sig, "confidence": m_conf}, index=df_market.index)
-                signals_dict[macro_name] = df_macro
-                df_macro.to_csv(sig_path / f"signals_macro_{asset_lower}.csv")
-        except Exception:
-            pass
-
     return signals_dict
 
 
@@ -145,42 +115,32 @@ def load_all_signals_for_asset(
 # 2. FUNZIONE PRINCIPALE: PLOT DISTRIBUZIONE DEI SEGNALI PER ASSET
 # =====================================================================
 def plot_agent_signal_distributions(
-    asset: str = "SPY",
-    signals_dict: Optional[Dict[str, Union[pd.DataFrame, pd.Series]]] = None,
-    save_path: Optional[Union[str, Path]] = None,
-    show_plot: bool = False,
-    figsize: Tuple[int, int] = (15, 8),
-    title: Optional[str] = None,
+        asset: str = "SPY",
+        signals_dict: Optional[Dict[str, Union[pd.DataFrame, pd.Series]]] = None,
+        save_path: Optional[Union[str, Path]] = None,
+        show_plot: bool = False,
+        figsize: Tuple[int, int] = (16, 8),
+        title: Optional[str] = None,
 ) -> Tuple[plt.Figure, plt.Axes]:
-    """
-    Crea un singolo plot per un asset che visualizza e confronta la distribuzione
-    dei segnali discreti (-1 Short, 0 Flat, 1 Long) per tutti gli agenti di trading.
-    """
+    """Crea un plot che visualizza e confronta la distribuzione dei segnali per tutti gli agenti."""
     asset_upper = asset.upper()
 
     if signals_dict is None or len(signals_dict) == 0:
         signals_dict = load_all_signals_for_asset(asset=asset_upper)
 
     if not signals_dict:
-        raise ValueError(
-            f"Nessun segnale trovato per l'asset '{asset_upper}'. "
-            f"Assicurati che i file CSV siano presenti in data/signals/ oppure fornisci un dizionario valido."
-        )
+        raise ValueError(f"Nessun segnale trovato per l'asset '{asset_upper}' in data/signals/.")
 
     agent_names: List[str] = []
     counts_data: Dict[int, List[int]] = {-1: [], 0: [], 1: []}
     pcts_data: Dict[int, List[float]] = {-1: [], 0: [], 1: []}
     total_samples: List[int] = []
 
-    date_start = None
-    date_end = None
+    date_start, date_end = None, None
 
     for raw_name, item in signals_dict.items():
         if isinstance(item, pd.DataFrame):
-            if "signal" in item.columns:
-                s_series = item["signal"].astype(int)
-            else:
-                s_series = item.iloc[:, 0].astype(int)
+            s_series = item["signal"].astype(int) if "signal" in item.columns else item.iloc[:, 0].astype(int)
         elif isinstance(item, pd.Series):
             s_series = item.astype(int)
         else:
@@ -211,69 +171,24 @@ def plot_agent_signal_distributions(
     plt.style.use("seaborn-v0_8-whitegrid" if "seaborn-v0_8-whitegrid" in plt.style.available else "default")
     fig, ax = plt.subplots(figsize=figsize, dpi=120)
 
-    rects_short = ax.bar(
-        indices - bar_width,
-        pcts_data[-1],
-        width=bar_width,
-        color=SIGNAL_COLORS[-1],
-        edgecolor="#922B21",
-        linewidth=1.2,
-        label=SIGNAL_LABELS[-1],
-        alpha=0.92,
-        zorder=3,
-    )
-
-    rects_flat = ax.bar(
-        indices,
-        pcts_data[0],
-        width=bar_width,
-        color=SIGNAL_COLORS[0],
-        edgecolor="#5D6D7E",
-        linewidth=1.2,
-        label=SIGNAL_LABELS[0],
-        alpha=0.88,
-        zorder=3,
-    )
-
-    rects_long = ax.bar(
-        indices + bar_width,
-        pcts_data[1],
-        width=bar_width,
-        color=SIGNAL_COLORS[1],
-        edgecolor="#1E8449",
-        linewidth=1.2,
-        label=SIGNAL_LABELS[1],
-        alpha=0.92,
-        zorder=3,
-    )
+    rects_short = ax.bar(indices - bar_width, pcts_data[-1], width=bar_width, color=SIGNAL_COLORS[-1],
+                         edgecolor="#922B21", linewidth=1.2, label=SIGNAL_LABELS[-1], alpha=0.92, zorder=3)
+    rects_flat = ax.bar(indices, pcts_data[0], width=bar_width, color=SIGNAL_COLORS[0], edgecolor="#5D6D7E",
+                        linewidth=1.2, label=SIGNAL_LABELS[0], alpha=0.88, zorder=3)
+    rects_long = ax.bar(indices + bar_width, pcts_data[1], width=bar_width, color=SIGNAL_COLORS[1], edgecolor="#1E8449",
+                        linewidth=1.2, label=SIGNAL_LABELS[1], alpha=0.92, zorder=3)
 
     def _add_bar_labels(rects, signal_key: int):
         for idx, rect in enumerate(rects):
             h = rect.get_height()
             cnt = counts_data[signal_key][idx]
             if h >= 2.0:
-                ax.annotate(
-                    f"{h:.1f}%\n(n={cnt})",
-                    xy=(rect.get_x() + rect.get_width() / 2, h),
-                    xytext=(0, 4),
-                    textcoords="offset points",
-                    ha="center",
-                    va="bottom",
-                    fontsize=8.5,
-                    fontweight="bold",
-                    color="#2C3E50",
-                )
+                ax.annotate(f"{h:.1f}%\n(n={cnt})", xy=(rect.get_x() + rect.get_width() / 2, h), xytext=(0, 4),
+                            textcoords="offset points", ha="center", va="bottom", fontsize=8.0, fontweight="bold",
+                            color="#2C3E50")
             elif h > 0.0:
-                ax.annotate(
-                    f"{h:.1f}%",
-                    xy=(rect.get_x() + rect.get_width() / 2, h),
-                    xytext=(0, 3),
-                    textcoords="offset points",
-                    ha="center",
-                    va="bottom",
-                    fontsize=8.0,
-                    color="#555555",
-                )
+                ax.annotate(f"{h:.1f}%", xy=(rect.get_x() + rect.get_width() / 2, h), xytext=(0, 3),
+                            textcoords="offset points", ha="center", va="bottom", fontsize=7.5, color="#555555")
 
     _add_bar_labels(rects_short, -1)
     _add_bar_labels(rects_flat, 0)
@@ -281,29 +196,13 @@ def plot_agent_signal_distributions(
 
     for idx, name in enumerate(agent_names):
         if "Orchestrator" in name:
-            ax.axvspan(
-                idx - 1.5 * bar_width,
-                idx + 1.5 * bar_width,
-                facecolor="#F4D03F",
-                alpha=0.15,
-                zorder=1,
-                linestyle="--",
-                linewidth=1.5,
-                edgecolor="#D4AC0D",
-            )
-            ax.text(
-                idx,
-                -8.5,
-                "[META-DECISORE]",
-                ha="center",
-                va="top",
-                fontsize=8.5,
-                fontweight="bold",
-                color="#B7950B",
-            )
+            ax.axvspan(idx - 1.5 * bar_width, idx + 1.5 * bar_width, facecolor="#F4D03F", alpha=0.15, zorder=1,
+                       linestyle="--", linewidth=1.5, edgecolor="#D4AC0D")
+            ax.text(idx, -8.5, "[META-DECISORE]", ha="center", va="top", fontsize=8.5, fontweight="bold",
+                    color="#B7950B")
 
     ax.set_xticks(indices)
-    ax.set_xticklabels(agent_names, fontsize=11, fontweight="bold")
+    ax.set_xticklabels(agent_names, fontsize=10, fontweight="bold", rotation=15)
     ax.set_ylabel("Frequenza Relativa (%)", fontsize=12, fontweight="bold")
     ax.yaxis.set_major_formatter(mtick.PercentFormatter(xmax=100))
 
@@ -312,9 +211,8 @@ def plot_agent_signal_distributions(
     ax.grid(axis="y", linestyle="--", alpha=0.5, zorder=0)
 
     t_samples = total_samples[0] if total_samples else 0
-    t_range_str = ""
-    if date_start and date_end:
-        t_range_str = f" | Periodo: {date_start.strftime('%Y-%m-%d')} -> {date_end.strftime('%Y-%m-%d')}"
+    t_range_str = f" | Periodo: {date_start.strftime('%Y-%m-%d')} -> {date_end.strftime('%Y-%m-%d')}" if (
+                date_start and date_end) else ""
 
     main_title = title or f"Distribuzione dei Segnali per Agente - Asset: {asset_upper}"
     subtitle = f"Totale Settimane: T = {t_samples}{t_range_str}"
@@ -322,16 +220,8 @@ def plot_agent_signal_distributions(
     fig.suptitle(main_title, fontsize=15, fontweight="bold", y=0.98, color="#1A252F")
     ax.set_title(subtitle, fontsize=10.5, color="#566573", pad=12)
 
-    legend = ax.legend(
-        loc="upper right",
-        frameon=True,
-        framealpha=0.95,
-        facecolor="#FFFFFF",
-        edgecolor="#BDC3C7",
-        fontsize=10.5,
-        title="Segnale Operativo",
-        title_fontsize=10.5,
-    )
+    legend = ax.legend(loc="upper right", frameon=True, framealpha=0.95, facecolor="#FFFFFF", edgecolor="#BDC3C7",
+                       fontsize=10.5, title="Segnale Operativo", title_fontsize=10.5)
     legend.get_title().set_fontweight("bold")
 
     plt.tight_layout(rect=[0, 0.02, 1, 0.95])
@@ -345,96 +235,196 @@ def plot_agent_signal_distributions(
         save_path.parent.mkdir(parents=True, exist_ok=True)
 
     fig.savefig(save_path, dpi=200, bbox_inches="tight")
-    print(f"[{asset_upper}] Grafico della distribuzione salvato con successo in: {save_path.resolve()}")
-
-    if show_plot:
-        plt.show()
+    print(f"[{asset_upper}] Grafico distribuzione segnali salvato in: {save_path.resolve()}")
+    plt.close(fig)
 
     return fig, ax
 
 
 # =====================================================================
-# 3. FUNZIONE BATCH PER TUTTI GLI ASSSET
+# 3. GRAFICO A TORTA DEI PESI DELL'ORCHESTRATORE PER ASSET
 # =====================================================================
-def plot_all_assets_signal_distributions(
+def plot_orchestrator_weights_pie(
         assets: Optional[List[str]] = None,
-        signals_dir: Optional[Union[str, Path]] = None,
-        save_dir: Optional[Union[str, Path]] = None,
-        show_plots: bool = False,
-) -> Dict[str, Tuple[plt.Figure, plt.Axes]]:
-    """
-    Genera e salva automaticamente il plot della distribuzione dei segnali
-    per tutti gli asset specificati (default: SPY, IEF, GLD, SHY).
-    """
+        config_dir: Optional[Union[str, Path]] = None,
+        save_path: Optional[Union[str, Path]] = None,
+        show_plot: bool = False,
+        figsize: Tuple[int, int] = (16, 12),
+) -> plt.Figure:
+    """Genera un pannello con grafici a torta dei pesi assegnati dall'Orchestratore (GA) agli agenti."""
     if assets is None:
         assets = ["SPY", "IEF", "GLD", "SHY"]
 
-    plots_dir = Path(save_dir) if save_dir else (PROJECT_ROOT / "data" / "results" / "plots")
-    plots_dir.mkdir(parents=True, exist_ok=True)
+    cfg_path = Path(config_dir) if config_dir else (PROJECT_ROOT / "src" / "agents" / "config")
 
-    results: Dict[str, Tuple[plt.Figure, plt.Axes]] = {}
+    n_assets = len(assets)
+    ncols = 2 if n_assets > 1 else 1
+    nrows = (n_assets + ncols - 1) // ncols
 
-    print("\n" + "=" * 80)
-    print("      GENERAZIONE GRAFICI DISTRIBUZIONE SEGNALI PER AGENTE (MULTI-ASSET)")
-    print("=" * 80)
+    plt.style.use("seaborn-v0_8-whitegrid" if "seaborn-v0_8-whitegrid" in plt.style.available else "default")
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize, dpi=120)
 
-    for asset in assets:
-        target_file = plots_dir / f"signal_distribution_{asset.lower()}.png"
-        try:
-            # 1. Carichiamo prima esplicitamente i segnali passando la directory corretta
-            loaded_signals = load_all_signals_for_asset(asset=asset, signals_dir=signals_dir)
+    if n_assets == 1:
+        axes = np.array([axes])
+    axes_flat = axes.flatten() if isinstance(axes, np.ndarray) else [axes]
 
-            # 2. Passiamo il dizionario risultante a plot_agent_signal_distributions
-            fig, ax = plot_agent_signal_distributions(
-                asset=asset,
-                signals_dict=loaded_signals,
-                save_path=target_file,
-                show_plot=show_plots,
-            )
-            results[asset.upper()] = (fig, ax)
-        except Exception as e:
-            print(f"[{asset.upper()}] Errore durante la generazione del plot: {e}")
+    agent_color_map = {
+        "SMA/EMA (Trend)": "#3498DB",
+        "Z-Score (Mean-Rev)": "#9B59B6",
+        "Macro Yield Curve": "#E67E22",
+        "Random Forest": "#1ABC9C",
+        "SVM Classifier": "#E74C3C",
+        "FinBERT Sentiment": "#F1C40F",
+    }
 
-    print("=" * 80 + "\n")
-    return results
+    for idx, asset in enumerate(assets):
+        ax = axes_flat[idx]
+        asset_upper = asset.upper()
+        config_file = cfg_path / f"orchestrator_params_{asset.lower()}.json"
+
+        weights_dict = {}
+        if config_file.exists():
+            try:
+                with open(config_file, "r", encoding="utf-8") as f:
+                    content = json.load(f)
+                    if "best_params" in content and "weights" in content["best_params"]:
+                        weights_dict = content["best_params"]["weights"]
+                    elif "weights" in content:
+                        weights_dict = content["weights"]
+            except Exception as e:
+                print(f"[{asset_upper}] Errore lettura config Orchestratore: {e}")
+
+        if not weights_dict:
+            ax.text(0.5, 0.5, f"Configurazione assente\nper {asset_upper}", ha="center", va="center", fontsize=11,
+                    fontweight="bold", color="#7F8C8D")
+            ax.set_title(f"Asset: {asset_upper}", fontsize=13, fontweight="bold", pad=10)
+            ax.axis("off")
+            continue
+
+        cleaned_weights = {AGENT_DISPLAY_NAMES.get(k, k): float(v) for k, v in weights_dict.items()}
+        filtered_weights = {k: v for k, v in cleaned_weights.items() if v > 0.001}
+
+        if not filtered_weights:
+            ax.text(0.5, 0.5, f"Pesi azzerati per {asset_upper}", ha="center", va="center", fontsize=11,
+                    color="#7F8C8D")
+            ax.set_title(f"Asset: {asset_upper}", fontsize=13, fontweight="bold", pad=10)
+            ax.axis("off")
+            continue
+
+        labels = list(filtered_weights.keys())
+        sizes = list(filtered_weights.values())
+        colors = [agent_color_map.get(l, "#BDC3C7") for l in labels]
+
+        wedges, texts, autotexts = ax.pie(
+            sizes,
+            labels=labels,
+            autopct=lambda p: f"{p:.1f}%" if p >= 2.0 else "",
+            startangle=140,
+            colors=colors,
+            wedgeprops={"edgecolor": "#FFFFFF", "linewidth": 1.5, "antialiased": True},
+            pctdistance=0.75,
+        )
+
+        for autotext in autotexts:
+            autotext.set_color("#2C3E50")
+            autotext.set_fontsize(9.5)
+            autotext.set_fontweight("bold")
+
+        for text in texts:
+            text.set_fontsize(10)
+            text.set_fontweight("bold")
+            text.set_color("#34495E")
+
+        ax.set_title(f"Orchestrator Weights — Asset: {asset_upper}", fontsize=13, fontweight="bold", pad=15,
+                     color="#1A252F")
+
+    for j in range(n_assets, len(axes_flat)):
+        axes_flat[j].axis("off")
+
+    fig.suptitle("Allocazione dei Pesi dell'Orchestratore (GA) per Asset", fontsize=16, fontweight="bold", y=0.98,
+                 color="#1A252F")
+    plt.tight_layout(rect=[0, 0.02, 1, 0.95])
+
+    if save_path is None:
+        plots_dir = PROJECT_ROOT / "data" / "results" / "plots"
+        plots_dir.mkdir(parents=True, exist_ok=True)
+        save_path = plots_dir / "orchestrator_weights_pie_all_assets.png"
+    else:
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+
+    fig.savefig(save_path, dpi=200, bbox_inches="tight")
+    print(f"[Orchestrator Pie Chart] Grafico a torta pesi salvato in: {save_path.resolve()}")
+    plt.close(fig)
+
+    return fig
 
 
 # =====================================================================
-# 4. ENTRY POINT CLI
+# 4. FUNZIONE AUTOMATICA COMPLETA (FA TUTTO)
+# =====================================================================
+def run_all_plots(assets: Optional[List[str]] = None, show_plots: bool = False) -> None:
+    """Esegue automaticamente tutti i plot diagnostici e di allocazione per tutti gli asset."""
+    if assets is None:
+        assets = ["SPY", "IEF", "GLD", "SHY"]
+
+    print("\n" + "=" * 90)
+    print("      AVVIO GENERAZIONE AUTOMATICA DI TUTTI I GRAFICI E DIAGNOSTICA")
+    print("=" * 90)
+
+    # 1. Distribuzione segnali per ogni asset
+    print("\n--- [1/2] Generazione Grafici Distribuzione Segnali ---")
+    for asset in assets:
+        try:
+            loaded_signals = load_all_signals_for_asset(asset=asset)
+            if loaded_signals:
+                plot_agent_signal_distributions(asset=asset, signals_dict=loaded_signals, show_plot=show_plots)
+            else:
+                print(f"[{asset}] Nessun segnale trovato in data/signals/ per generare la distribuzione.")
+        except Exception as e:
+            print(f"[{asset}] Errore nel plot della distribuzione segnali: {e}")
+
+    # 2. Pie chart dei pesi dell'Orchestratore multi-asset
+    print("\n--- [2/2] Generazione Grafico a Torta Pesi Orchestratore ---")
+    try:
+        plot_orchestrator_weights_pie(assets=assets, show_plot=show_plots)
+    except Exception as e:
+        print(f"[Orchestrator Pie] Errore nella generazione del grafico a torta: {e}")
+
+    print("\n" + "=" * 90)
+    print("  [OK] PROCESSO DI VISUALIZZAZIONE E PLOTTING COMPLETATO CON SUCCESSO.")
+    print("  I grafici sono stati salvati nella cartella: data/results/plots/")
+    print("=" * 90 + "\n")
+
+
+# =====================================================================
+# 5. ENTRY POINT CLI
 # =====================================================================
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Script di generazione grafici e diagnostica segnali.")
-    parser.add_argument(
-        "target",
-        nargs="?",
-        default="ALL",  # <--- IMPOSTATO DI DEFAULT SU ALL PER CICLARE SU TUTTI GLI ASSET
-        help="Asset da plottare ('SPY', 'IEF', 'GLD', 'SHY' o 'ALL'). Default: 'ALL'",
-    )
+    parser = argparse.ArgumentParser(
+        description="Script unificato di visualizzazione e diagnostica ProjectAgentTrading26.")
     parser.add_argument(
         "--show",
         action="store_true",
         help="Mostra i grafici a schermo tramite finestra interattiva",
     )
     parser.add_argument(
-        "--output-dir",
+        "--asset",
         type=str,
-        default=None,
-        help="Directory di destinazione per salvare i grafici",
+        default="ALL",
+        help="Asset specifico ('SPY', 'IEF', 'GLD', 'SHY') oppure 'ALL'. Default: 'ALL'",
     )
 
     args = parser.parse_args()
 
-    if args.target.upper() == "ALL":
-        plot_all_assets_signal_distributions(
-            assets=["SPY", "IEF", "GLD", "SHY"],
-            save_dir=args.output_dir,
-            show_plots=args.show,
-        )
+    if args.asset.upper() == "ALL":
+        run_all_plots(show_plots=args.show)
     else:
-        plot_agent_signal_distributions(
-            asset=args.target.upper(),
-            save_path=(Path(args.output_dir) / f"signal_distribution_{args.target.lower()}.png") if args.output_dir else None,
-            show_plot=args.show,
-        )
+        asset_target = args.asset.upper()
+        print(f"\nEsecuzione plot mirato per l'asset: {asset_target}")
+        loaded = load_all_signals_for_asset(asset=asset_target)
+        if loaded:
+            plot_agent_signal_distributions(asset=asset_target, signals_dict=loaded, show_plot=args.show)
+        plot_orchestrator_weights_pie(assets=[asset_target], show_plot=args.show)

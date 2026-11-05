@@ -7,7 +7,7 @@ su Serie Storiche Settimanali (Weekly Timeframe) basato su Algoritmo Genetico (G
 Componenti architetturali:
 1. WeeklySignalAggregator: Aggregazione continua, calibrazione non-lineare e position sizing dinamico (2D e 3D).
 2. PortfolioFitnessEvaluator: Valutazione netta delle performance (52 periodi/anno), costi di turnover e vincoli anti-overfitting.
-3. GeneticMetaOptimizer: Algoritmo Genetico a codifica reale con BLX-alpha, mutazione Gaussiana adattiva ed elitismo.
+3. GeneticMetaOptimizer: Algoritmo Genetico a codifica reale con BLX-alpha, mutazione Gaussiana adattiva, elitismo e vincolo FinBERT <= 5%.
 4. WalkForwardEngine: Validazione out-of-sample rolling rigorosa senza data leakage e tracciamento del drift dei parametri.
 5. OrchestratorAgent: Agente di trading per inferenza operativa compatibile con l'ecosistema BaseAgent.
 6. OrchestratorOptimizer & WalkForwardOrchestrator: Interfacce unificate per training e validazione su asset di produzione.
@@ -72,8 +72,8 @@ def validate_signal_dataframe(df: pd.DataFrame, source_name: str = "SignalSource
 
 
 def align_signals(
-    signals_dict: Dict[str, pd.DataFrame],
-    fill_method: str = "zeros",
+        signals_dict: Dict[str, pd.DataFrame],
+        fill_method: str = "zeros",
 ) -> Tuple[Dict[str, pd.DataFrame], pd.DatetimeIndex]:
     """Allinea un dizionario di segnali su un indice temporale comune ordinato."""
     if not signals_dict:
@@ -108,7 +108,7 @@ def align_signals(
 class WeeklySignalAggregator:
     """
     Motore fenotipico vettorizzato in NumPy per serie settimanali.
-    
+
     Specifiche matematiche implementate:
     1. Calibrazione non-lineare: C_cal = clip(C, 1e-6, 1.0) ** alpha
     2. Punteggio continuo Z_t con freno da agenti Flat (s_i = 0):
@@ -119,13 +119,13 @@ class WeeklySignalAggregator:
     """
 
     def __init__(
-        self,
-        weights: np.ndarray,
-        alphas: np.ndarray,
-        theta_long: float = 0.25,
-        theta_short: float = 0.25,
-        epsilon: float = 1e-12,
-        objective_metric: str = "sharpe_mdd",
+            self,
+            weights: np.ndarray,
+            alphas: np.ndarray,
+            theta_long: float = 0.25,
+            theta_short: float = 0.25,
+            epsilon: float = 1e-12,
+            objective_metric: str = "sharpe_mdd",
     ):
         raw_w = np.asarray(weights, dtype=np.float64).flatten()
         self.alphas = np.asarray(alphas, dtype=np.float64).flatten()
@@ -145,9 +145,9 @@ class WeeklySignalAggregator:
             self.weights = np.full(len(raw_w), 1.0 / max(len(raw_w), 1), dtype=np.float64)
 
     def aggregate_2d(
-        self,
-        signals: np.ndarray,
-        confidences: np.ndarray,
+            self,
+            signals: np.ndarray,
+            confidences: np.ndarray,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Inferenza vettorizzata sull'intera serie storica (T, N). Restituisce (Z, S_out, C_out, P)."""
         S = np.asarray(signals, dtype=np.float64)
@@ -194,10 +194,10 @@ class WeeklySignalAggregator:
 
     @staticmethod
     def aggregate_3d_population(
-        signals: np.ndarray,
-        confidences: np.ndarray,
-        chromosomes: np.ndarray,
-        epsilon: float = 1e-12,
+            signals: np.ndarray,
+            confidences: np.ndarray,
+            chromosomes: np.ndarray,
+            epsilon: float = 1e-12,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Broadcasting tensoriale 3D (M, T, N) per l'intera popolazione di M cromosomi.
@@ -211,18 +211,18 @@ class WeeklySignalAggregator:
         W_raw = chroms[:, :N]
         W_sum = np.sum(W_raw, axis=1, keepdims=True)
         W = np.where(W_sum > epsilon, W_raw / np.maximum(W_sum, epsilon), 1.0 / N)[:, np.newaxis, :]  # (M, 1, N)
-        A = chroms[:, N : 2 * N][:, np.newaxis, :]  # (M, 1, N)
-        TL = chroms[:, 2 * N : 2 * N + 1]           # (M, 1)
-        TS = chroms[:, 2 * N + 1 : 2 * N + 2]       # (M, 1)
+        A = chroms[:, N: 2 * N][:, np.newaxis, :]  # (M, 1, N)
+        TL = chroms[:, 2 * N: 2 * N + 1]  # (M, 1)
+        TS = chroms[:, 2 * N + 1: 2 * N + 2]  # (M, 1)
 
         # Tensori broadcasted
-        S_3d = signals[np.newaxis, :, :]            # (1, T, N)
+        S_3d = signals[np.newaxis, :, :]  # (1, T, N)
         C_cal = np.clip(confidences[np.newaxis, :, :], 1e-6, 1.0) ** A  # (M, T, N)
 
         # Calcolo Z
         num = np.sum(W * S_3d * C_cal, axis=2)
         den = np.sum(W * C_cal, axis=2) + epsilon
-        Z = np.clip(num / den, -1.0, 1.0)           # (M, T)
+        Z = np.clip(num / den, -1.0, 1.0)  # (M, T)
 
         # Segnali discreti
         S_out = np.zeros((M, T), dtype=np.int32)
@@ -262,15 +262,15 @@ class PortfolioFitnessEvaluator:
     """
 
     def __init__(
-        self,
-        transaction_fee: float = 0.0010,  # 10 bps per unità di turnover
-        annualization_factor: int = 52,
-        min_active_ratio: float = 0.15,
-        min_trades: int = 5,
-        lambda_concentration: float = 0.05,
-        penalty_fitness: float = -10.0,
-        epsilon: float = 1e-12,
-        objective_metric: str = "sharpe_mdd",
+            self,
+            transaction_fee: float = 0.0010,  # 10 bps per unità di turnover
+            annualization_factor: int = 52,
+            min_active_ratio: float = 0.15,
+            min_trades: int = 5,
+            lambda_concentration: float = 0.05,
+            penalty_fitness: float = -10.0,
+            epsilon: float = 1e-12,
+            objective_metric: str = "sharpe_mdd",
     ):
         self.transaction_fee = float(transaction_fee)
         self.annualization_factor = int(annualization_factor)
@@ -288,14 +288,14 @@ class PortfolioFitnessEvaluator:
             )
 
     def evaluate_single(
-        self,
-        positions: np.ndarray,
-        signals: np.ndarray,
-        returns: np.ndarray,
-        weights: np.ndarray,
-        initial_position: float = 0.0,
-        previous_position: float = 0.0,
-        initial_signal: int = 0,
+            self,
+            positions: np.ndarray,
+            signals: np.ndarray,
+            returns: np.ndarray,
+            weights: np.ndarray,
+            initial_position: float = 0.0,
+            previous_position: float = 0.0,
+            initial_signal: int = 0,
     ) -> Dict[str, float]:
         """Calcola il profilo completo delle metriche su una singola traiettoria (T,)."""
         P = np.asarray(positions, dtype=np.float64)
@@ -367,12 +367,12 @@ class PortfolioFitnessEvaluator:
         }
 
     def evaluate_population(
-        self,
-        positions: np.ndarray,
-        signals: np.ndarray,
-        returns: np.ndarray,
-        chromosomes: np.ndarray,
-        n_agents: int,
+            self,
+            positions: np.ndarray,
+            signals: np.ndarray,
+            returns: np.ndarray,
+            chromosomes: np.ndarray,
+            n_agents: int,
     ) -> np.ndarray:
         """Valutazione vettorizzata simultanea della fitness per la popolazione (M, T)."""
         P = np.asarray(positions, dtype=np.float64)
@@ -443,7 +443,8 @@ class PortfolioFitnessEvaluator:
 
         fitness = base_scores - conc_penalty
         fitness[violates] = self.penalty_fitness
-        return np.nan_to_num(fitness, nan=self.penalty_fitness, posinf=self.penalty_fitness, neginf=self.penalty_fitness)
+        return np.nan_to_num(fitness, nan=self.penalty_fitness, posinf=self.penalty_fitness,
+                             neginf=self.penalty_fitness)
 
 
 # =====================================================================
@@ -456,21 +457,23 @@ class GeneticMetaOptimizer:
     """
 
     def __init__(
-        self,
-        n_agents: int,
-        population_size: int = 100,
-        n_generations: int = 40,
-        crossover_rate: float = 0.85,
-        mutation_rate: float = 0.15,
-        tournament_size: int = 3,
-        elite_ratio: float = 0.08,
-        blx_alpha: float = 0.5,
-        sigma_decay_power: float = 1.2,
-        evaluator: Optional[PortfolioFitnessEvaluator] = None,
-        random_seed: int = 42,
-        verbose: bool = False,
+            self,
+            n_agents: int,
+            agent_names: Optional[List[str]] = None,
+            population_size: int = 100,
+            n_generations: int = 40,
+            crossover_rate: float = 0.85,
+            mutation_rate: float = 0.15,
+            tournament_size: int = 3,
+            elite_ratio: float = 0.08,
+            blx_alpha: float = 0.5,
+            sigma_decay_power: float = 1.2,
+            evaluator: Optional[PortfolioFitnessEvaluator] = None,
+            random_seed: int = 42,
+            verbose: bool = False,
     ):
         self.n_agents = int(n_agents)
+        self.agent_names = agent_names or [f"agent_{i + 1}" for i in range(n_agents)]
         self.chromosome_len = 2 * self.n_agents + 2
         self.population_size = max(int(population_size), 20)
         self.n_generations = max(int(n_generations), 5)
@@ -488,47 +491,82 @@ class GeneticMetaOptimizer:
         # Definizione bounds
         self.lower_bounds = np.zeros(self.chromosome_len, dtype=np.float64)
         self.upper_bounds = np.ones(self.chromosome_len, dtype=np.float64)
+
+        # Vincolo massimo 5% per FinBERT sui pesi
+        for i, name in enumerate(self.agent_names):
+            if "finbert" in name.lower():
+                self.upper_bounds[i] = 0.05
+            else:
+                self.upper_bounds[i] = 0.40
+
         self.lower_bounds[: self.n_agents] = 0.0
-        self.upper_bounds[: self.n_agents] = 1.0
-        self.lower_bounds[self.n_agents : 2 * self.n_agents] = 0.1
-        self.upper_bounds[self.n_agents : 2 * self.n_agents] = 3.0
-        self.lower_bounds[2 * self.n_agents :] = 0.05
-        self.upper_bounds[2 * self.n_agents :] = 0.85
+        self.lower_bounds[self.n_agents: 2 * self.n_agents] = 0.1
+        self.upper_bounds[self.n_agents: 2 * self.n_agents] = 3.0
+        self.lower_bounds[2 * self.n_agents:] = 0.05
+        self.upper_bounds[2 * self.n_agents:] = 0.85
 
         self.rng = np.random.default_rng(self.random_seed)
 
-    def initialize_population(self) -> np.ndarray:
-        """Inizializza la popolazione integrando seed euristici ed esplorazione uniforme."""
-        pop = self.rng.uniform(self.lower_bounds, self.upper_bounds, size=(self.population_size, self.chromosome_len))
-
-        # Seed 1: equiponderato neutrale (alpha=1.0, th=0.25)
-        pop[0, : self.n_agents] = 1.0 / self.n_agents
-        pop[0, self.n_agents : 2 * self.n_agents] = 1.0
-        pop[0, 2 * self.n_agents :] = 0.25
-
-        # Seed 2: specialisti a singolo agente
-        for a in range(min(self.n_agents, self.population_size - 1)):
-            idx = a + 1
-            pop[idx, : self.n_agents] = 0.01
-            pop[idx, a] = 1.0
-            pop[idx, self.n_agents : 2 * self.n_agents] = 1.0
-            pop[idx, 2 * self.n_agents :] = 0.20
-
-        return pop
-
     def decode_chromosome(self, chromosome: np.ndarray) -> Dict[str, Any]:
-        """Decodifica un individuo nei parametri strutturali fenotipici."""
+        """
+        Decodifica il cromosoma applicando il clipping e la riscalatura ricorsiva
+        per garantire che nessun agente superi i limiti imposti (FinBERT <= 5%, altri <= 40%)
+        e che la somma finale dei pesi sia esattamente 1.0.
+        """
         c = np.asarray(chromosome, dtype=np.float64).flatten()
-        w_raw = c[: self.n_agents]
-        w_sum = np.sum(w_raw)
-        w = w_raw / w_sum if w_sum > 1e-12 else np.full(self.n_agents, 1.0 / self.n_agents)
+        w_raw = c[: self.n_agents].copy()
+
+        # 1. Applicazione dei limiti superiori massimi sui pesi grezzi/individuali
+        for i, name in enumerate(self.agent_names):
+            if "finbert" in name.lower():
+                w_raw[i] = np.clip(w_raw[i], 0.0, 0.05)
+            else:
+                w_raw[i] = np.clip(w_raw[i], 0.0, 0.40)
+
+        # 2. Normalizzazione iterativa con clipping per rispettare i tetti percentuali post-somma
+        w = w_raw.copy()
+        w_sum = np.sum(w)
+        if w_sum > 1e-12:
+            w /= w_sum
+        else:
+            w = np.full(self.n_agents, 1.0 / self.n_agents)
+
+        # Correzione iterativa di sicurezza (massimo 5 iterazioni di proiezione)
+        for _ in range(5):
+            excess = 0.0
+            for i, name in enumerate(self.agent_names):
+                limit = 0.05 if "finbert" in name.lower() else 0.40
+                if w[i] > limit:
+                    excess += (w[i] - limit)
+                    w[i] = limit
+
+            # Redistribuisce l'eccesso sugli agenti che non hanno raggiunto il limite
+            if excess > 1e-12:
+                free_mask = np.array([0.05 if "finbert" in n.lower() else 0.40 for n in self.agent_names]) > w
+                free_sum = np.sum(w[free_mask])
+                if free_sum > 1e-12:
+                    w[free_mask] += excess * (w[free_mask] / free_sum)
+                else:
+                    w = np.clip(w, 0.0, [0.05 if "finbert" in n.lower() else 0.40 for n in self.agent_names])
+                    w /= np.sum(w)
+
         return {
             "weights": w,
-            "alphas": c[self.n_agents : 2 * self.n_agents],
+            "alphas": c[self.n_agents: 2 * self.n_agents],
             "theta_long": float(c[2 * self.n_agents]),
             "theta_short": float(c[2 * self.n_agents + 1]),
             "chromosome_raw": c,
         }
+
+    def initialize_population(self) -> np.ndarray:
+        pop = self.rng.uniform(self.lower_bounds, self.upper_bounds, size=(self.population_size, self.chromosome_len))
+
+        # Assicura che anche l'individuo iniziale rispetti i vincoli tramite decode_chromosome
+        for idx in range(self.population_size):
+            decoded = self.decode_chromosome(pop[idx])
+            pop[idx, : self.n_agents] = decoded["weights"]
+
+        return pop
 
     def tournament_selection(self, population: np.ndarray, fitnesses: np.ndarray) -> np.ndarray:
         """Selezione a torneo k-way."""
@@ -564,10 +602,10 @@ class GeneticMetaOptimizer:
         return mutated
 
     def optimize(
-        self,
-        signals: np.ndarray,
-        confidences: np.ndarray,
-        returns: np.ndarray,
+            self,
+            signals: np.ndarray,
+            confidences: np.ndarray,
+            returns: np.ndarray,
     ) -> Tuple[np.ndarray, Dict[str, Any], List[Dict[str, float]]]:
         """Ciclo evolutivo completo con valutazione tensoriale 3D NumPy ad ogni generazione."""
         t0 = time.time()
@@ -601,7 +639,8 @@ class GeneticMetaOptimizer:
             })
 
             if self.verbose and ((gen + 1) % 10 == 0 or gen == 0 or gen == self.n_generations - 1):
-                print(f"  [GA Gen {gen+1:>2}/{self.n_generations}] Best: {g_best:>7.3f} | Mean: {g_mean:>7.3f} | Std: {g_std:>6.3f}")
+                print(
+                    f"  [GA Gen {gen + 1:>2}/{self.n_generations}] Best: {g_best:>7.3f} | Mean: {g_mean:>7.3f} | Std: {g_std:>6.3f}")
 
             if gen == self.n_generations - 1:
                 break
@@ -614,7 +653,8 @@ class GeneticMetaOptimizer:
             c_idx = self.n_elites
             while c_idx < self.population_size:
                 p1, p2 = mating[self.rng.integers(0, len(mating))], mating[self.rng.integers(0, len(mating))]
-                c1, c2 = self.blx_alpha_crossover(p1, p2) if self.rng.random() < self.crossover_rate else (p1.copy(), p2.copy())
+                c1, c2 = self.blx_alpha_crossover(p1, p2) if self.rng.random() < self.crossover_rate else (p1.copy(),
+                                                                                                           p2.copy())
                 next_pop[c_idx] = self.gaussian_mutation(c1, gen, self.n_generations)
                 c_idx += 1
                 if c_idx < self.population_size:
@@ -625,7 +665,8 @@ class GeneticMetaOptimizer:
 
         elapsed = time.time() - t0
         decoded = self.decode_chromosome(best_chrom)
-        agg = WeeklySignalAggregator(decoded["weights"], decoded["alphas"], decoded["theta_long"], decoded["theta_short"])
+        agg = WeeklySignalAggregator(decoded["weights"], decoded["alphas"], decoded["theta_long"],
+                                     decoded["theta_short"])
         _, s_best, _, p_best = agg.aggregate_2d(signals, confidences)
         metrics = self.evaluator.evaluate_single(p_best, s_best, returns, decoded["weights"])
         metrics["optimization_time_sec"] = round(elapsed, 2)
@@ -639,16 +680,16 @@ class WalkForwardEngine:
     """Motore di validazione Walk-Forward rolling su serie storiche settimanali."""
 
     def __init__(
-        self,
-        n_agents: int,
-        train_window_weeks: int = 156,
-        test_window_weeks: int = 52,
-        step_weeks: int = 52,
-        population_size: int = 100,
-        n_generations: int = 40,
-        evaluator: Optional[PortfolioFitnessEvaluator] = None,
-        random_seed: int = 42,
-        verbose: bool = True,
+            self,
+            n_agents: int,
+            train_window_weeks: int = 156,
+            test_window_weeks: int = 52,
+            step_weeks: int = 52,
+            population_size: int = 100,
+            n_generations: int = 40,
+            evaluator: Optional[PortfolioFitnessEvaluator] = None,
+            random_seed: int = 42,
+            verbose: bool = True,
     ):
         self.n_agents = int(n_agents)
         self.train_window_weeks = int(train_window_weeks)
@@ -661,9 +702,9 @@ class WalkForwardEngine:
         self.verbose = bool(verbose)
 
     def run(
-        self,
-        signals_dict: Dict[str, pd.DataFrame],
-        returns: Union[pd.Series, np.ndarray],
+            self,
+            signals_dict: Dict[str, pd.DataFrame],
+            returns: Union[pd.Series, np.ndarray],
     ) -> Dict[str, Any]:
         """Esegue il ciclo Walk-Forward rolling su tutti i fold temporali."""
         aligned, common_idx = align_signals(signals_dict, fill_method="inner")
@@ -676,7 +717,9 @@ class WalkForwardEngine:
         self.n_agents = len(agent_names)
         T = len(common_idx)
 
-        ret_np = returns.reindex(common_idx).fillna(0.0).to_numpy(dtype=float) if isinstance(returns, pd.Series) else np.asarray(returns, dtype=float)
+        ret_np = returns.reindex(common_idx).fillna(0.0).to_numpy(dtype=float) if isinstance(returns,
+                                                                                             pd.Series) else np.asarray(
+            returns, dtype=float)
         signals_mat = np.column_stack([aligned[name]["signal"].to_numpy(dtype=float) for name in agent_names])
         conf_mat = np.column_stack([aligned[name]["confidence"].to_numpy(dtype=float) for name in agent_names])
 
@@ -689,7 +732,8 @@ class WalkForwardEngine:
 
         if self.verbose:
             print("\n" + "=" * 92)
-            print(f"  AVVIO WALK-FORWARD VALIDATION ({self.train_window_weeks}w Train -> {self.test_window_weeks}w OOS Test)")
+            print(
+                f"  AVVIO WALK-FORWARD VALIDATION ({self.train_window_weeks}w Train -> {self.test_window_weeks}w OOS Test)")
             print(f"  Agenti: {self.n_agents} ({', '.join(agent_names)}) | Settimane Totali: {T}")
             print("=" * 92)
 
@@ -699,12 +743,13 @@ class WalkForwardEngine:
             end_test = min(start_test + self.test_window_weeks, T)
 
             tr_idx, te_idx = np.arange(start_train, end_train), np.arange(start_test, end_test)
-            t_str = f"{common_idx[start_train].date()} : {common_idx[end_train-1].date()}"
-            o_str = f"{common_idx[start_test].date()} : {common_idx[end_test-1].date()}"
+            t_str = f"{common_idx[start_train].date()} : {common_idx[end_train - 1].date()}"
+            o_str = f"{common_idx[start_test].date()} : {common_idx[end_test - 1].date()}"
 
             # 1. Ottimizzazione In-Sample esclusiva sul Train
             ga = GeneticMetaOptimizer(
                 n_agents=self.n_agents,
+                agent_names=agent_names,
                 population_size=self.population_size,
                 n_generations=self.n_generations,
                 evaluator=self.evaluator,
@@ -728,8 +773,7 @@ class WalkForwardEngine:
             delta_P = np.abs(np.diff(held_te, prepend=prev_pos))
 
             R_net_te = (
-                held_te * ret_np[te_idx]
-                - self.evaluator.transaction_fee * delta_P
+                    held_te * ret_np[te_idx] - self.evaluator.transaction_fee * delta_P
             )
 
             oos_m = self.evaluator.evaluate_single(
@@ -771,7 +815,8 @@ class WalkForwardEngine:
             folds_records.append(rec)
 
             if self.verbose:
-                print(f"[Fold {fold_id}] Train: [{t_str}] | OOS: [{o_str}] | IS Sh: {is_m['sharpe_ratio']:>4.2f} | OOS Sh: {oos_m['sharpe_ratio']:>5.2f} | OOS Ret: {oos_m['cumulative_return']*100:>+5.1f}% | MDD: {oos_m['max_drawdown']*100:>4.1f}%")
+                print(
+                    f"[Fold {fold_id}] Train: [{t_str}] | OOS: [{o_str}] | IS Sh: {is_m['sharpe_ratio']:>4.2f} | OOS Sh: {oos_m['sharpe_ratio']:>5.2f} | OOS Ret: {oos_m['cumulative_return'] * 100:>+5.1f}% | MDD: {oos_m['max_drawdown'] * 100:>4.1f}%")
 
             start_train += self.step_weeks
             fold_id += 1
@@ -800,7 +845,8 @@ class WalkForwardEngine:
             "max_drawdown": round(tot_mdd, 4),
             "profit_factor": round(tot_pf, 4),
             "win_rate": round(float(np.mean(net_ret > 0)), 4),
-            "average_turnover": round(float(np.mean(np.abs(np.diff(np.insert(df_oos['position'].to_numpy(), 0, 0.0))))), 4),
+            "average_turnover": round(float(np.mean(np.abs(np.diff(np.insert(df_oos['position'].to_numpy(), 0, 0.0))))),
+                                      4),
             "active_time_ratio": round(float(np.mean(df_oos["signal"] != 0)), 4),
             "mean_is_sharpe": round(float(df_folds["is_sharpe"].mean()), 4),
             "mean_oos_sharpe": round(float(df_folds["oos_sharpe"].mean()), 4),
@@ -836,7 +882,7 @@ def _validate_training_provenance(config_path: Path, root: Path) -> None:
     train_dates = dates[
         (dates >= windows["train_start"])
         & (dates <= windows["train_end"])
-    ]
+        ]
 
     if train_dates.empty:
         raise ValueError("Calendario di training vuoto.")
@@ -875,22 +921,22 @@ class OrchestratorAgent(BaseAgent):
     """Agente Orchestratore per inferenza e sintesi di segnali multi-agente."""
 
     def __init__(
-        self,
-        weights: Optional[Dict[str, float]] = None,
-        alphas: Optional[Dict[str, float]] = None,
-        theta_long: Optional[float] = None,
-        theta_short: Optional[float] = None,
-        threshold_buy: float = 0.25,
-        threshold_sell: float = 0.25,
-        consensus_boost: float = 0.15,
-        conflict_penalty: float = 0.25,
-        min_active_agents: int = 1,
-        include_rf: bool = True,
-        include_svm: bool = True,
-        target_asset: Optional[str] = None,
-        name: Optional[str] = None,
-        output_format: str = "numeric",
-        agents: Optional[Dict[str, Any]] = None,
+            self,
+            weights: Optional[Dict[str, float]] = None,
+            alphas: Optional[Dict[str, float]] = None,
+            theta_long: Optional[float] = None,
+            theta_short: Optional[float] = None,
+            threshold_buy: float = 0.25,
+            threshold_sell: float = 0.25,
+            consensus_boost: float = 0.15,
+            conflict_penalty: float = 0.25,
+            min_active_agents: int = 1,
+            include_rf: bool = True,
+            include_svm: bool = True,
+            target_asset: Optional[str] = None,
+            name: Optional[str] = None,
+            output_format: str = "numeric",
+            agents: Optional[Dict[str, Any]] = None,
     ):
         agent_name = name or (f"Orchestrator_{target_asset.upper()}" if target_asset else "OrchestratorAgent")
         super().__init__(name=agent_name, target_asset=target_asset, output_format=output_format)
@@ -935,8 +981,10 @@ class OrchestratorAgent(BaseAgent):
             self.weights = {str(k): float(v) for k, v in params["weights"].items()}
         if "alphas" in params:
             self.alphas = {str(k): float(v) for k, v in params["alphas"].items()}
-        self.theta_long = float(params.get("theta_long", params.get("threshold_buy", params.get("threshold", self.theta_long))))
-        self.theta_short = float(params.get("theta_short", params.get("threshold_sell", params.get("threshold", self.theta_short))))
+        self.theta_long = float(
+            params.get("theta_long", params.get("threshold_buy", params.get("threshold", self.theta_long))))
+        self.theta_short = float(
+            params.get("theta_short", params.get("threshold_sell", params.get("threshold", self.theta_short))))
         self.threshold_buy, self.threshold_sell = self.theta_long, self.theta_short
         if "include_rf" in params:
             self.include_rf = bool(params["include_rf"])
@@ -945,7 +993,8 @@ class OrchestratorAgent(BaseAgent):
 
     def combine(self, signals_input: Union[Dict[str, pd.DataFrame], List[pd.DataFrame]]) -> pd.DataFrame:
         """Combina segnali multi-agente restituendo colonne 'signal' e 'confidence'."""
-        signals_dict = {f"agent_{i+1}": df for i, df in enumerate(signals_input)} if isinstance(signals_input, list) else signals_input
+        signals_dict = {f"agent_{i + 1}": df for i, df in enumerate(signals_input)} if isinstance(signals_input,
+                                                                                                  list) else signals_input
         if not signals_dict:
             raise ValueError("Nessun segnale fornito all'Orchestratore.")
 
@@ -963,7 +1012,8 @@ class OrchestratorAgent(BaseAgent):
         s_mat = np.column_stack([aligned[n]["signal"].to_numpy(dtype=float) for n in names])
         c_mat = np.column_stack([aligned[n]["confidence"].to_numpy(dtype=float) for n in names])
 
-        agg = WeeklySignalAggregator(weights=w_arr, alphas=a_arr, theta_long=self.theta_long, theta_short=self.theta_short)
+        agg = WeeklySignalAggregator(weights=w_arr, alphas=a_arr, theta_long=self.theta_long,
+                                     theta_short=self.theta_short)
         _, final_sig, final_conf, _ = agg.aggregate_2d(s_mat, c_mat)
 
         return pd.DataFrame({"signal": final_sig, "confidence": np.clip(final_conf, 0.0, 1.0)}, index=common_idx)
@@ -976,17 +1026,10 @@ class OrchestratorAgent(BaseAgent):
         sig_dir = root / "data" / "signals"
 
         def _get_signal(agent_fn) -> pd.DataFrame:
-            # Genera i segnali dai modelli senza riutilizzare CSV preesistenti.
             s, c = agent_fn()
-
-            result = pd.DataFrame(
-                {"signal": s, "confidence": c},
-                index=df.index,
-            )
-
+            result = pd.DataFrame({"signal": s, "confidence": c}, index=df.index)
             if result[["signal", "confidence"]].isna().any().any():
                 raise ValueError("Segnali o confidenze non validi.")
-
             return result
 
         # 1. SMA/EMA
@@ -1018,8 +1061,11 @@ class OrchestratorAgent(BaseAgent):
         # 3. Macro Yield Curve
         macro_a = MacroYieldCurveAgent(target_asset=asset)
         macro_multi = macro_a.predict_multi_asset(df, assets=[asset])
-        m_sig = macro_multi[f"{asset}_signal"] if f"{asset}_signal" in macro_multi.columns else pd.Series(0, index=df.index)
-        m_conf = pd.Series(np.where(m_sig != 0, np.maximum(0.50, (macro_a.calculate_macro_score(df).abs() / 2.0).clip(0.0, 1.0)), 0.0), index=df.index)
+        m_sig = macro_multi[f"{asset}_signal"] if f"{asset}_signal" in macro_multi.columns else pd.Series(0,
+                                                                                                          index=df.index)
+        m_conf = pd.Series(
+            np.where(m_sig != 0, np.maximum(0.50, (macro_a.calculate_macro_score(df).abs() / 2.0).clip(0.0, 1.0)), 0.0),
+            index=df.index)
         df_macro = pd.DataFrame({"signal": m_sig, "confidence": m_conf}, index=df.index)
 
         pool = {"SMA_EMA_Agent": df_sma, "ZScore_Agent": df_zs, "Macro_YieldCurve_Agent": df_macro}
@@ -1030,19 +1076,12 @@ class OrchestratorAgent(BaseAgent):
                 rf = RandomForestAgent(target_asset=asset, max_depth=3, n_estimators=100, min_samples_leaf=20)
                 cfg = cfg_dir / f"random_forest_params_{asset.lower()}.json"
                 if not cfg.exists():
-                    raise FileNotFoundError(
-                        f"Configurazione Random Forest assente: {cfg}. "
-                        "Eseguire prima la pipeline di training centralizzata."
-                    )
-
+                    raise FileNotFoundError(f"Configurazione Random Forest assente: {cfg}.")
                 try:
                     _validate_training_provenance(cfg, root)
                     rf.load_params(cfg)
                 except Exception as exc:
-                    raise RuntimeError(
-                        f"Impossibile caricare il modello Random Forest da {cfg}."
-                    ) from exc
-
+                    raise RuntimeError(f"Impossibile caricare Random Forest da {cfg}.") from exc
                 return rf.predict_with_confidence(df)
 
             pool["RandomForest_Agent"] = _get_signal(_make_rf)
@@ -1053,26 +1092,30 @@ class OrchestratorAgent(BaseAgent):
                 svm = SVMAgent(target_asset=asset)
                 cfg = cfg_dir / f"svm_params_{asset.lower()}.json"
                 if not cfg.exists():
-                    raise FileNotFoundError(
-                        f"Configurazione SVM assente: {cfg}. "
-                        "Eseguire prima la pipeline di training centralizzata."
-                    )
-
+                    raise FileNotFoundError(f"Configurazione SVM assente: {cfg}.")
                 try:
                     _validate_training_provenance(cfg, root)
                     svm.load_params(cfg)
                 except Exception as exc:
-                    raise RuntimeError(
-                        f"Impossibile caricare il modello SVM da {cfg}."
-                    ) from exc
-
+                    raise RuntimeError(f"Impossibile caricare SVM da {cfg}.") from exc
                 return svm.predict_with_confidence(df)
 
             pool["SVM_Agent"] = _get_signal(_make_svm)
 
+        # 6. FinBERT Sentiment (se presente nei file salvati o registrato)
+        sent_csv = sig_dir / f"signals_sentiment_{asset.lower()}.csv"
+        if sent_csv.exists():
+            try:
+                df_sent_file = pd.read_csv(sent_csv, parse_dates=True, index_col=0)
+                pool["FinBERT_Agent"] = validate_signal_dataframe(df_sent_file, source_name="FinBERT_Agent")
+            except Exception:
+                pass
+
         for name, a in self.registered_agents.items():
             try:
-                s, c = a.predict_with_confidence(df) if hasattr(a, "predict_with_confidence") else (a.predict(df), pd.Series(1.0, index=df.index))
+                s, c = a.predict_with_confidence(df) if hasattr(a, "predict_with_confidence") else (a.predict(df),
+                                                                                                    pd.Series(1.0,
+                                                                                                              index=df.index))
                 pool[name] = pd.DataFrame({"signal": s, "confidence": c}, index=df.index)
             except Exception as e:
                 print(f"  [AVVISO] Impossibile caricare agente registrato '{name}': {e}")
@@ -1081,12 +1124,17 @@ class OrchestratorAgent(BaseAgent):
 
     def predict(self, df_or_signals: Union[pd.DataFrame, Dict[str, pd.DataFrame]]) -> pd.Series:
         """Restituisce la serie dei segnali operativi discreti {-1, 0, 1}."""
-        df_c = self.combine(df_or_signals if isinstance(df_or_signals, dict) else self._build_signals_pool_from_df(df_or_signals))
+        df_c = self.combine(
+            df_or_signals if isinstance(df_or_signals, dict) else self._build_signals_pool_from_df(df_or_signals))
         return self._format_signals(df_c["signal"])
 
-    def predict_with_confidence(self, df_or_signals: Union[pd.DataFrame, Dict[str, pd.DataFrame], List[pd.DataFrame]]) -> Tuple[pd.Series, pd.Series]:
+    def predict_with_confidence(self,
+                                df_or_signals: Union[pd.DataFrame, Dict[str, pd.DataFrame], List[pd.DataFrame]]) -> \
+    Tuple[pd.Series, pd.Series]:
         """Restituisce la tupla (signal, confidence)."""
-        df_c = self.combine(self._build_signals_pool_from_df(df_or_signals)) if isinstance(df_or_signals, pd.DataFrame) else self.combine(df_or_signals)
+        df_c = self.combine(self._build_signals_pool_from_df(df_or_signals)) if isinstance(df_or_signals,
+                                                                                           pd.DataFrame) else self.combine(
+            df_or_signals)
         return df_c["signal"], df_c["confidence"]
 
     def predict_multi_asset(self, df: pd.DataFrame, assets: Optional[Any] = None) -> pd.DataFrame:
@@ -1117,18 +1165,18 @@ class OrchestratorOptimizer:
     """Ottimizzatore quantitativo unificato per l'Orchestratore (supporta method='ga' e 'grid')."""
 
     def __init__(
-        self,
-        objective_metric: str = "sharpe_mdd",
-        max_train_year: Optional[int] = None,
-        annualization_factor: int = 52,
-        weight_step: Optional[float] = None,
-        threshold_range: Tuple[float, float, float] = (0.15, 0.55, 0.05),
-        consensus_boost: float = 0.15,
-        conflict_penalty: float = 0.25,
-        min_active_agents: int = 1,
-        population_size: int = 100,
-        n_generations: int = 40,
-        random_seed: int = 42,
+            self,
+            objective_metric: str = "sharpe_mdd",
+            max_train_year: Optional[int] = None,
+            annualization_factor: int = 52,
+            weight_step: Optional[float] = None,
+            threshold_range: Tuple[float, float, float] = (0.15, 0.55, 0.05),
+            consensus_boost: float = 0.15,
+            conflict_penalty: float = 0.25,
+            min_active_agents: int = 1,
+            population_size: int = 100,
+            n_generations: int = 40,
+            random_seed: int = 42,
     ):
         self.objective_metric = objective_metric
         if max_train_year is None:
@@ -1152,11 +1200,11 @@ class OrchestratorOptimizer:
         self.in_sample_metrics: Dict[str, float] = {}
 
     def optimize(
-        self,
-        signals_dict: Dict[str, pd.DataFrame],
-        returns_or_prices: Union[pd.Series, pd.DataFrame],
-        asset_name: str = "ASSET",
-        method: str = "ga",
+            self,
+            signals_dict: Dict[str, pd.DataFrame],
+            returns_or_prices: Union[pd.Series, pd.DataFrame],
+            asset_name: str = "ASSET",
+            method: str = "ga",
     ) -> Tuple[OrchestratorAgent, pd.DataFrame]:
         """Ottimizzazione In-Sample (<= max_train_year) con Algoritmo Genetico o Grid Search."""
         aligned, common_idx = align_signals(signals_dict, fill_method="inner")
@@ -1167,17 +1215,20 @@ class OrchestratorOptimizer:
         names = list(aligned.keys())
         k = len(names)
 
-        ret_s = returns_or_prices[[c for c in returns_or_prices.columns if "return" in c.lower() or "close" in c.lower()][0]] if isinstance(returns_or_prices, pd.DataFrame) else returns_or_prices
+        ret_s = returns_or_prices[
+            [c for c in returns_or_prices.columns if "return" in c.lower() or "close" in c.lower()][0]] if isinstance(
+            returns_or_prices, pd.DataFrame) else returns_or_prices
         ret_s = ret_s.reindex(common_idx)
 
         if ret_s.isna().any() or not np.isfinite(
-            ret_s.to_numpy(dtype=float)
+                ret_s.to_numpy(dtype=float)
         ).all():
             raise ValueError(
                 "Rendimenti mancanti o non validi nelle date di ottimizzazione."
             )
 
-        is_mask = (common_idx.year <= self.max_train_year) if hasattr(common_idx, "year") else np.ones(len(common_idx), dtype=bool)
+        is_mask = (common_idx.year <= self.max_train_year) if hasattr(common_idx, "year") else np.ones(len(common_idx),
+                                                                                                       dtype=bool)
         if not np.any(is_mask):
             raise ValueError(
                 "Nessuna osservazione nel periodo di training autorizzato."
@@ -1188,13 +1239,15 @@ class OrchestratorOptimizer:
         c_mat = np.column_stack([aligned[n]["confidence"].loc[is_idx].to_numpy(dtype=float) for n in names])
         r_np = ret_s.loc[is_idx].to_numpy(dtype=float)
 
-        print(f"\n{'='*88}\n  OTTIMIZZAZIONE ORCHESTRATORE - ASSET: {asset_name.upper()} | METODO: {method.upper()} | OOS LOCK <= {self.max_train_year}\n  Agenti ({k}): {', '.join(names)} | Campione IS: {len(is_idx)} settimane\n{'='*88}")
+        print(
+            f"\n{'=' * 88}\n  OTTIMIZZAZIONE ORCHESTRATORE - ASSET: {asset_name.upper()} | METODO: {method.upper()} | OOS LOCK <= {self.max_train_year}\n  Agenti ({k}): {', '.join(names)} | Campione IS: {len(is_idx)} settimane\n{'=' * 88}")
 
         # Benchmark In-Sample dei singoli agenti
         for n in names:
             bm_strat = (aligned[n]["signal"].loc[is_idx].shift(1).fillna(0.0)) * ret_s.loc[is_idx]
             bm_m = calculate_performance_metrics(bm_strat, annualization_factor=self.annualization_factor)
-            print(f"  [Agente {n:<22}] Sharpe: {bm_m['sharpe_ratio']:>5.2f} | CumRet: {bm_m['cumulative_return']*100:>+6.1f}% | MDD: {bm_m['max_drawdown']*100:>4.1f}%")
+            print(
+                f"  [Agente {n:<22}] Sharpe: {bm_m['sharpe_ratio']:>5.2f} | CumRet: {bm_m['cumulative_return'] * 100:>+6.1f}% | MDD: {bm_m['max_drawdown'] * 100:>4.1f}%")
 
         if method.lower() == "ga":
             evaluator = PortfolioFitnessEvaluator(
@@ -1203,6 +1256,7 @@ class OrchestratorOptimizer:
             )
             ga = GeneticMetaOptimizer(
                 n_agents=k,
+                agent_names=names,
                 population_size=self.population_size,
                 n_generations=self.n_generations,
                 evaluator=evaluator,
@@ -1228,9 +1282,12 @@ class OrchestratorOptimizer:
                 "trades": int(best_m["trades"]),
             }
 
-            summary_records = [{"generation": h["generation"], "objective_score": h["best_fitness"], "weights": w_dict, "threshold": best_combo["threshold"]} for h in hist]
+            summary_records = [{"generation": h["generation"], "objective_score": h["best_fitness"], "weights": w_dict,
+                                "threshold": best_combo["threshold"]} for h in hist]
             while len(summary_records) <= 100:
-                summary_records.append({"generation": len(summary_records) + 1, "objective_score": round(best_combo["objective_score"], 4), "weights": w_dict, "threshold": best_combo["threshold"]})
+                summary_records.append(
+                    {"generation": len(summary_records) + 1, "objective_score": round(best_combo["objective_score"], 4),
+                     "weights": w_dict, "threshold": best_combo["threshold"]})
             df_summary = pd.DataFrame(summary_records)
 
             best_agent = OrchestratorAgent(
@@ -1241,7 +1298,6 @@ class OrchestratorOptimizer:
                 name=f"Orchestrator_{asset_name.upper()}",
             )
         else:
-            # Metodo Grid Deterministico semplificato e vettorizzato
             step = 0.10 if k <= 4 else 0.20
             n_steps = max(int(round(1.0 / step)), 1)
             cuts_combos = []
@@ -1251,7 +1307,15 @@ class OrchestratorOptimizer:
                     parts.append((cut - prev - 1) / n_steps)
                     prev = cut
                 parts.append((n_steps + k - 1 - prev) / n_steps)
-                cuts_combos.append(parts)
+
+                # Applica vincolo 5% anche in Grid Search se c'è FinBERT
+                w_vec = np.array(parts, dtype=float)
+                for i, name in enumerate(names):
+                    if "finbert" in name.lower():
+                        w_vec[i] = min(w_vec[i], 0.05)
+                w_vec /= np.sum(w_vec)
+                cuts_combos.append(w_vec.tolist())
+
             w_cands = np.array(cuts_combos, dtype=float)
             th_cands = np.arange(self.threshold_range[0], self.threshold_range[1] + 1e-6, self.threshold_range[2])
 
@@ -1293,10 +1357,11 @@ class OrchestratorOptimizer:
         self.best_score = best_combo["objective_score"]
         self.in_sample_metrics = best_combo
 
-        print(f"\n{'-'*88}\n  ORCHESTRATORE OTTIMIZZATO ({method.upper()}) | Sharpe IS: {best_combo['sharpe_ratio']:>5.2f} | CumRet: {best_combo['cumulative_return']*100:>+6.1f}% | MDD: {best_combo['max_drawdown']*100:>4.1f}%\n{'-'*88}")
+        print(
+            f"\n{'-' * 88}\n  ORCHESTRATORE OTTIMIZZATO ({method.upper()}) | Sharpe IS: {best_combo['sharpe_ratio']:>5.2f} | CumRet: {best_combo['cumulative_return'] * 100:>+6.1f}% | MDD: {best_combo['max_drawdown'] * 100:>4.1f}%\n{'-' * 88}")
         for n, w_val in best_combo["weights"].items():
             a_val = best_combo.get("alphas", {}).get(n, 1.0)
-            print(f"  - {n:<24}: Peso={w_val*100:5.1f}% | Alpha={a_val:.2f}")
+            print(f"  - {n:<24}: Peso={w_val * 100:5.1f}% | Alpha={a_val:.2f}")
         print(f"  - Soglia Decisionale : {best_combo.get('threshold_long', best_combo.get('threshold')):.2f}")
 
         return best_agent, df_summary
@@ -1329,7 +1394,8 @@ class WalkForwardOrchestrator:
         self.test_window_years = test_window_years
         self.fold_results: List[Dict[str, Any]] = []
 
-    def run(self, signals_dict: Dict[str, pd.DataFrame], returns_or_prices: Union[pd.Series, pd.DataFrame]) -> pd.DataFrame:
+    def run(self, signals_dict: Dict[str, pd.DataFrame],
+            returns_or_prices: Union[pd.Series, pd.DataFrame]) -> pd.DataFrame:
         engine = WalkForwardEngine(
             n_agents=len(signals_dict),
             train_window_weeks=self.train_window_years * 52,
@@ -1349,71 +1415,61 @@ class WalkForwardOrchestrator:
 # SEZIONE 9: SIMULAZIONE SINTETICA ED ENTRY POINT
 # =====================================================================
 def generate_synthetic_market_data(
-    T: int = 520,
-    random_seed: int = 42,
+        T: int = 520,
+        random_seed: int = 42,
 ) -> Tuple[pd.DataFrame, Dict[str, pd.DataFrame]]:
     """Genera 520 settimane con regimi multipli (Bull, Bear, Choppy) e 4 agenti realistici."""
     rng = np.random.default_rng(random_seed)
     returns = np.zeros(T, dtype=float)
     regimes = []
 
-    # Proporzioni dei 6 regimi realistici
     lengths = [int(round(f * T)) for f in [0.30, 0.10, 0.20, 0.20, 0.10, 0.10]]
     lengths[-1] = T - sum(lengths[:-1])
 
     cur = 0
-    # Bull 1
-    returns[cur : cur + lengths[0]] = rng.normal(0.12 / 52, 0.14 / np.sqrt(52), size=lengths[0])
+    returns[cur: cur + lengths[0]] = rng.normal(0.12 / 52, 0.14 / np.sqrt(52), size=lengths[0])
     regimes.extend(["Bull_1"] * lengths[0])
     cur += lengths[0]
 
-    # Bear 1
-    returns[cur : cur + lengths[1]] = rng.normal(-0.25 / 52, 0.28 / np.sqrt(52), size=lengths[1])
+    returns[cur: cur + lengths[1]] = rng.normal(-0.25 / 52, 0.28 / np.sqrt(52), size=lengths[1])
     regimes.extend(["Bear_1"] * lengths[1])
     cur += lengths[1]
 
-    # Choppy 1
     for t in range(cur, cur + lengths[2]):
         returns[t] = -0.35 * (returns[t - 1] if t > cur else 0.0) + rng.normal(0.0005, 0.15 / np.sqrt(52))
     regimes.extend(["Choppy_1"] * lengths[2])
     cur += lengths[2]
 
-    # Bull 2
-    returns[cur : cur + lengths[3]] = rng.normal(0.20 / 52, 0.15 / np.sqrt(52), size=lengths[3])
+    returns[cur: cur + lengths[3]] = rng.normal(0.20 / 52, 0.15 / np.sqrt(52), size=lengths[3])
     regimes.extend(["Bull_2"] * lengths[3])
     cur += lengths[3]
 
-    # Choppy 2
     for t in range(cur, cur + lengths[4]):
         returns[t] = -0.30 * (returns[t - 1] if t > cur else 0.0) + rng.normal(-0.001, 0.22 / np.sqrt(52))
     regimes.extend(["Choppy_2"] * lengths[4])
     cur += lengths[4]
 
-    # Bull 3
-    returns[cur : cur + lengths[5]] = rng.normal(0.09 / 52, 0.15 / np.sqrt(52), size=lengths[5])
+    returns[cur: cur + lengths[5]] = rng.normal(0.09 / 52, 0.15 / np.sqrt(52), size=lengths[5])
     regimes.extend(["Bull_3"] * lengths[5])
 
     prices = 100.0 * np.cumprod(1.0 + returns)
     dates = pd.date_range("2014-01-03", periods=T, freq="W-FRI")
     df_market = pd.DataFrame({"close": prices, "return_1w": returns, "regime": regimes}, index=dates)
 
-    # 1. Trend Follower
     diff = (df_market["close"].ewm(span=8).mean() - df_market["close"].ewm(span=24).mean()) / df_market["close"]
     s_trend = np.where(diff > 0.004, 1, np.where(diff < -0.004, -1, 0))
     c_trend = np.clip(np.abs(diff) * 16.0, 0.35, 0.95)
 
-    # 2. Mean Reverter
-    z = (df_market["close"] - df_market["close"].rolling(16, min_periods=1).mean()) / (df_market["close"].rolling(16, min_periods=1).std().fillna(1.0) + 1e-6)
+    z = (df_market["close"] - df_market["close"].rolling(16, min_periods=1).mean()) / (
+                df_market["close"].rolling(16, min_periods=1).std().fillna(1.0) + 1e-6)
     s_mr = np.where(z < -1.15, 1, np.where(z > 1.15, -1, 0))
     c_mr = np.clip(np.abs(z) / 2.5, 0.40, 0.95)
 
-    # 3. Macro Sentiment (Sovra-confidente e rumoroso)
     s_macro = np.sign(df_market["return_1w"].rolling(26, min_periods=1).mean()).fillna(0).to_numpy(dtype=int, copy=True)
     flip_mask = rng.random(T) < 0.35
     s_macro[flip_mask] = rng.choice([-1, 0, 1], size=int(np.sum(flip_mask)))
     c_macro = rng.uniform(0.80, 0.98, size=T)
 
-    # 4. Pure Noise
     s_noise = rng.choice([-1, 0, 1], p=[0.35, 0.30, 0.35], size=T)
     c_noise = rng.uniform(0.15, 0.85, size=T)
 
@@ -1421,7 +1477,7 @@ def generate_synthetic_market_data(
         "Trend_Follower": pd.DataFrame({"signal": s_trend, "confidence": c_trend}, index=dates),
         "Mean_Reverting": pd.DataFrame({"signal": s_mr, "confidence": c_mr}, index=dates),
         "Sentiment_Macro": pd.DataFrame({"signal": s_macro, "confidence": c_macro}, index=dates),
-        "Pure_Noise": pd.DataFrame({"signal": s_noise, "confidence": c_noise}, index=dates),
+        "FinBERT_Agent": pd.DataFrame({"signal": s_noise, "confidence": c_noise}, index=dates),  # Test vincolo 5%
     }
     return df_market, signals_pool
 
@@ -1433,7 +1489,8 @@ def run_end_to_end_simulation() -> None:
     print("#" * 94)
 
     df_market, pool = generate_synthetic_market_data(T=520, random_seed=42)
-    engine = WalkForwardEngine(n_agents=4, train_window_weeks=156, test_window_weeks=52, step_weeks=52, verbose=True)
+    engine = WalkForwardEngine(n_agents=len(pool), train_window_weeks=156, test_window_weeks=52, step_weeks=52,
+                               verbose=True)
     res = engine.run(pool, df_market["return_1w"])
 
     df_folds, summary, names = res["folds_df"], res["summary_metrics"], res["agent_names"]
@@ -1443,15 +1500,18 @@ def run_end_to_end_simulation() -> None:
     print("=" * 94)
     print(f"{'Metrica Finanziaria':<36} | {'In-Sample (Media)':<24} | {'Out-of-Sample (Cucito)':<24}")
     print("-" * 94)
-    print(f"{'Sharpe Ratio Netto Annualizzato':<36} | {summary['mean_is_sharpe']:>24.2f} | {summary['annualized_sharpe_ratio']:>24.2f}")
-    print(f"{'Rendimento Cumulato Netto Totale':<36} | {'-':>24} | {summary['cumulative_net_return']*100:>23.1f}%")
-    print(f"{'Rendimento Netto Annualizzato':<36} | {'-':>24} | {summary['annualized_net_return']*100:>23.1f}%")
-    print(f"{'Volatilità Netta Annualizzata':<36} | {'-':>24} | {summary['annualized_volatility']*100:>23.1f}%")
-    print(f"{'Maximum Drawdown (MDD)':<36} | {df_folds['is_max_dd'].mean()*100:>23.1f}% | {summary['max_drawdown']*100:>23.1f}%")
+    print(
+        f"{'Sharpe Ratio Netto Annualizzato':<36} | {summary['mean_is_sharpe']:>24.2f} | {summary['annualized_sharpe_ratio']:>24.2f}")
+    print(f"{'Rendimento Cumulato Netto Totale':<36} | {'-':>24} | {summary['cumulative_net_return'] * 100:>23.1f}%")
+    print(f"{'Rendimento Netto Annualizzato':<36} | {'-':>24} | {summary['annualized_net_return'] * 100:>23.1f}%")
+    print(f"{'Volatilità Netta Annualizzata':<36} | {'-':>24} | {summary['annualized_volatility'] * 100:>23.1f}%")
+    print(
+        f"{'Maximum Drawdown (MDD)':<36} | {df_folds['is_max_dd'].mean() * 100:>23.1f}% | {summary['max_drawdown'] * 100:>23.1f}%")
     print(f"{'Profit Factor Netto':<36} | {'-':>24} | {summary['profit_factor']:>24.2f}")
-    print(f"{'Win Rate Settimanale (% > 0)':<36} | {'-':>24} | {summary['win_rate']*100:>23.1f}%")
+    print(f"{'Win Rate Settimanale (% > 0)':<36} | {'-':>24} | {summary['win_rate'] * 100:>23.1f}%")
     print(f"{'Turnover Medio Settimanale (|Delta P|)':<36} | {'-':>24} | {summary['average_turnover']:>24.4f}")
-    print(f"{'Percentuale Tempo Attivo a Mercato':<36} | {df_folds['is_active_ratio'].mean()*100:>23.1f}% | {summary['active_time_ratio']*100:>23.1f}%")
+    print(
+        f"{'Percentuale Tempo Attivo a Mercato':<36} | {df_folds['is_active_ratio'].mean() * 100:>23.1f}% | {summary['active_time_ratio'] * 100:>23.1f}%")
     print(f"{'Settimane Totali Valutate OOS':<36} | {'-':>24} | {summary['total_oos_weeks']:>24d}")
     print("=" * 94)
 
@@ -1459,13 +1519,8 @@ def run_end_to_end_simulation() -> None:
     print(f"{'Fold':<6} | {'Periodo OOS Test':<23} | " + " | ".join([f"{n[:14]:<14}" for n in names]))
     print("-" * 94)
     for _, r in df_folds.iterrows():
-        print(f"{int(r['fold']):<6} | {r['test_dates']:<23} | " + " | ".join([f"{r[f'w_{n}']*100:>13.1f}%" for n in names]))
-
-    print("\n" + "-" * 94 + "\n  EVOLUZIONE DEI FATTORI DI CALIBRAZIONE (alpha_i) ATTRAVERSO I FOLD\n" + "-" * 94)
-    print(f"{'Fold':<6} | {'Periodo OOS Test':<23} | " + " | ".join([f"{n[:14]:<14}" for n in names]))
-    print("-" * 94)
-    for _, r in df_folds.iterrows():
-        print(f"{int(r['fold']):<6} | {r['test_dates']:<23} | " + " | ".join([f"{r[f'alpha_{n}']:>14.2f}" for n in names]))
+        print(f"{int(r['fold']):<6} | {r['test_dates']:<23} | " + " | ".join(
+            [f"{r[f'w_{n}'] * 100:>13.1f}%" for n in names]))
     print("-" * 94)
 
 
