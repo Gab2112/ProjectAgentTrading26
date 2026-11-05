@@ -3,7 +3,7 @@ plots.py
 
 Modulo di visualizzazione grafica e diagnostica per ProjectAgentTrading26.
 Fornisce funzioni per analizzare la distribuzione dei segnali, la correlazione tra strategie
-e il comportamento comparativo di tutti gli agenti quantitativi (inclusi FinBERT e Orchestratore).
+e il comportamento comparativo di tutti gli agenti quantitativi (inclusi FinBERT e Orchestrator).
 """
 
 from __future__ import annotations
@@ -242,7 +242,42 @@ def plot_agent_signal_distributions(
 
 
 # =====================================================================
-# 3. GRAFICO A TORTA DEI PESI DELL'ORCHESTRATORE PER ASSET
+# 3. FUNZIONE RIPRISTINATA PER I TEST (plot_all_assets_signal_distributions)
+# =====================================================================
+def plot_all_assets_signal_distributions(
+        assets: Optional[List[str]] = None,
+        signals_dir: Optional[Union[str, Path]] = None,
+        save_dir: Optional[Union[str, Path]] = None,
+        show_plots: bool = False,
+) -> Dict[str, Tuple[plt.Figure, plt.Axes]]:
+    """Genera e salva automaticamente il plot della distribuzione dei segnali per tutti gli asset."""
+    if assets is None:
+        assets = ["SPY", "IEF", "GLD", "SHY"]
+
+    plots_dir = Path(save_dir) if save_dir else (PROJECT_ROOT / "data" / "results" / "plots")
+    plots_dir.mkdir(parents=True, exist_ok=True)
+
+    results: Dict[str, Tuple[plt.Figure, plt.Axes]] = {}
+
+    for asset in assets:
+        target_file = plots_dir / f"signal_distribution_{asset.lower()}.png"
+        try:
+            loaded_signals = load_all_signals_for_asset(asset=asset, signals_dir=signals_dir)
+            fig, ax = plot_agent_signal_distributions(
+                asset=asset,
+                signals_dict=loaded_signals,
+                save_path=target_file,
+                show_plot=show_plots,
+            )
+            results[asset.upper()] = (fig, ax)
+        except Exception as e:
+            print(f"[{asset.upper()}] Errore durante la generazione del plot: {e}")
+
+    return results
+
+
+# =====================================================================
+# 4. GRAFICO A TORTA DEI PESI DELL'ORCHESTRATORE PER ASSET
 # =====================================================================
 def plot_orchestrator_weights_pie(
         assets: Optional[List[str]] = None,
@@ -361,7 +396,7 @@ def plot_orchestrator_weights_pie(
 
 
 # =====================================================================
-# 4. FUNZIONE AUTOMATICA COMPLETA (FA TUTTO)
+# 5. FUNZIONE AUTOMATICA COMPLETA (FA TUTTO)
 # =====================================================================
 def run_all_plots(assets: Optional[List[str]] = None, show_plots: bool = False) -> None:
     """Esegue automaticamente tutti i plot diagnostici e di allocazione per tutti gli asset."""
@@ -372,17 +407,9 @@ def run_all_plots(assets: Optional[List[str]] = None, show_plots: bool = False) 
     print("      AVVIO GENERAZIONE AUTOMATICA DI TUTTI I GRAFICI E DIAGNOSTICA")
     print("=" * 90)
 
-    # 1. Distribuzione segnali per ogni asset
+    # 1. Distribuzione segnali per ogni asset tramite plot_all_assets_signal_distributions
     print("\n--- [1/2] Generazione Grafici Distribuzione Segnali ---")
-    for asset in assets:
-        try:
-            loaded_signals = load_all_signals_for_asset(asset=asset)
-            if loaded_signals:
-                plot_agent_signal_distributions(asset=asset, signals_dict=loaded_signals, show_plot=show_plots)
-            else:
-                print(f"[{asset}] Nessun segnale trovato in data/signals/ per generare la distribuzione.")
-        except Exception as e:
-            print(f"[{asset}] Errore nel plot della distribuzione segnali: {e}")
+    plot_all_assets_signal_distributions(assets=assets, show_plots=show_plots)
 
     # 2. Pie chart dei pesi dell'Orchestratore multi-asset
     print("\n--- [2/2] Generazione Grafico a Torta Pesi Orchestratore ---")
@@ -398,7 +425,7 @@ def run_all_plots(assets: Optional[List[str]] = None, show_plots: bool = False) 
 
 
 # =====================================================================
-# 5. ENTRY POINT CLI
+# 6. ENTRY POINT CLI
 # =====================================================================
 if __name__ == "__main__":
     import argparse
