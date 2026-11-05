@@ -337,6 +337,22 @@ def train_single_asset(
 
     if oof_index.empty:
         raise ValueError("Nessuna settimana OOF comune disponibile.")
+
+        # -----------------------------------------------------------------
+        # 6. BIS. AGENTE FINBERT SENTIMENT (Lettura file segnali dedicati)
+        # -----------------------------------------------------------------
+    finbert_csv = signals_dir / f"signals_sentiment_{asset_lower}.csv"
+    df_finbert = None
+    if finbert_csv.exists():
+        print(f"\n[{asset_upper}] >>> Caricamento segnali FinBERT Sentiment da: {finbert_csv}")
+        df_finbert = pd.read_csv(finbert_csv, index_col=0, parse_dates=True)
+        # Assicura che le colonne siano esattamente 'signal' e 'confidence' e allinea al dataframe principale
+        df_finbert = df_finbert[["signal", "confidence"]].reindex(df.index).fillna({"signal": 0, "confidence": 0.0})
+        df_finbert["signal"] = df_finbert["signal"].astype(int)
+        df_finbert["confidence"] = df_finbert["confidence"].astype(float)
+    else:
+        print(
+            f"\n[{asset_upper}] [WARN] File segnali FinBERT non trovato ({finbert_csv}). L'agente FinBERT verrà escluso dall'ensemble.")
     # -----------------------------------------------------------------
     # 7. AGENTE ORCHESTRATORE (Ensemble Multi-Agente)
     # -----------------------------------------------------------------
@@ -352,6 +368,9 @@ def train_single_asset(
             signals_pool["RandomForest_Agent"] = df_rf
         if df_svm is not None:
             signals_pool["SVM_Agent"] = df_svm
+        if df_finbert is not None:
+            signals_pool["FinBERT_Agent"] = df_finbert
+
         signals_pool = {
             name: signals.loc[oof_index].copy()
             for name, signals in signals_pool.items()
