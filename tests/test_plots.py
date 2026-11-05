@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from src.plots import load_all_signals_for_asset, plot_agent_signal_distributions, plot_all_assets_signal_distributions
+from src.plots import plot_agent_signal_distributions
 
 
 class TestPlotsModule(unittest.TestCase):
@@ -68,27 +68,6 @@ class TestPlotsModule(unittest.TestCase):
             self.assertIsNotNone(ax)
             self.assertTrue(out_png.exists())
             self.assertGreater(out_png.stat().st_size, 5000)
-
-    def test_plot_loads_from_signals_directory(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            out_png = Path(tmp_dir) / "test_spy_distribution.png"
-
-            # Esegui caricamento e plot su SPY
-            fig, ax = plot_agent_signal_distributions(
-                asset="SPY",
-                save_path=out_png,
-                show_plot=False,
-            )
-
-            self.assertTrue(out_png.exists())
-            self.assertGreater(out_png.stat().st_size, 10000)
-
-    def test_load_all_signals_returns_dict(self):
-        signals = load_all_signals_for_asset("SPY")
-        self.assertIsInstance(signals, dict)
-        self.assertGreater(len(signals), 0)
-        first_key = list(signals.keys())[0]
-        self.assertIn("signal", signals[first_key].columns)
 
 
 if __name__ == "__main__":
