@@ -65,7 +65,7 @@ from src.agents.random_forest_agent import (
     RandomForestOptimizer,
     RandomForestWalkForwardTrainer,
 )
-from src.agents.SVM_agent import SVMOptimizer, SVMWalkForwardTrainer
+from src.agents.SVM_agent import SVMWalkForwardTrainer
 from src.agents.orchestrator_agent import (
     OrchestratorAgent,
     OrchestratorOptimizer,
@@ -142,6 +142,9 @@ def train_single_asset(
     if price_col not in df.columns:
         raise KeyError(f"Colonna '{price_col}' non trovata nel dataset.")
 
+    # La SVM usa anche il momentum degli altri ETF: tiene il pannello completo.
+    df_all_assets = df.copy()
+
     # Filtro colonne: mantiene solo l'asset target corrente e le feature macro/globali.
     # Esclude le colonne con prefisso degli altri 3 asset per eliminare zavorra e rumore.
     other_assets = [a for a in ASSETS if a != asset_upper]
@@ -155,8 +158,6 @@ def train_single_asset(
     print(f"[{asset_upper}] Colonne dataset filtrate: {len(filtered_cols)} (escluse {excluded_count} colonne degli altri asset)")
 
     print("\n" + "#" * 84)
-    print(df.head())
-    print(df.info())
     print(f"### AVVIO TRAINING & OTTIMIZZAZIONE COMPLETA: {asset_upper} ({price_col})")
     print("#" * 84)
 
@@ -289,17 +290,8 @@ def train_single_asset(
         print(f"\n[{asset_upper}] >>> Walk-Forward: SVM Agent (Support Vector Classifier)...")
         # Impostazioni in config.yaml (strategies.C.svm_agent): walk-forward
         # annuale con purge, iperparametri scelti con CV temporale interna.
-        svm_opt = SVMOptimizer(
-            target_asset=asset_upper,
-            price_col=price_col,
-            objective_metric=objective_metric,
-        )
-        svm_trainer = SVMWalkForwardTrainer(
-            optimizer=svm_opt,
-            train_window_years=5,
-            target_asset=asset_upper,
-        )
-        svm_res = svm_trainer.run(df, max_year=max_train_year)
+        svm_trainer = SVMWalkForwardTrainer(target_asset=asset_upper, root_dir=PROJECT_ROOT)
+        svm_res = svm_trainer.run(df_all_assets, max_year=max_train_year)
         svm_trainer.save_final_agent_config(svm_config_file)
         save_training_provenance(svm_config_file, df, max_train_year)
         df_svm = svm_trainer.oof_signals.copy()

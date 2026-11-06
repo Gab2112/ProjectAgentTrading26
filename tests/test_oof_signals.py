@@ -52,20 +52,13 @@ class TestOOFSignals(unittest.TestCase):
 
     @staticmethod
     def svm_trainer():
-        from src.agents.SVM_agent import SVMOptimizer
-        opt = SVMOptimizer(
-            target_asset='SPY',
-            price_col='SPY_close',
-            feature_cols=['known_factor'],
-            C_candidates=[1.0],
-            gamma_candidates=['scale'],
-            threshold_candidates=[0.51],
-        )
-        return SVMWalkForwardTrainer(
-            optimizer=opt,
-            train_window_years=5,
-            target_asset='SPY',
-        )
+        settings = {
+            'horizon_weeks': 1, 'first_test_year': 2014, 'min_train_weeks': 52,
+            'cv_splits': 2, 'C_values': [1.0], 'gamma_values': ['scale'],
+            'class_weight': 'none', 'neutral_band': 0.25, 'long_only': False,
+            'use_macro_features': False,
+        }
+        return SVMWalkForwardTrainer(target_asset='SPY', settings=settings)
 
     def _check_real_folds(self, trainer):
         df = self.panel()
@@ -98,7 +91,7 @@ class TestOOFSignals(unittest.TestCase):
         self.assertFalse(trainer.oof_signals.isna().any().any())
         self.assertTrue(trainer.oof_signals['signal'].isin([-1, 0, 1]).all())
         self.assertTrue(trainer.oof_signals['confidence'].between(0, 1).all())
-        self.assertEqual([h['val_year'] for h in trainer.history], [2014, 2015])
+        self.assertEqual([h['year'] for h in trainer.history], [2014, 2015])
         self.assertIsNotNone(trainer.final_agent)
 
     def _run_pipeline_with_mocked_other_agents(self, rf_index, svm_index):
