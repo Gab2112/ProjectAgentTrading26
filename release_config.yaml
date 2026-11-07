@@ -1,0 +1,44 @@
+# Descriptive, immutable release contract. The historical config.yaml and
+# model-selection code remain byte-identical to the pre-OOS freeze.
+# Values here are ASSERTIONS of the frozen implementation, not retuning knobs.
+release:
+  selected_strategy: Core35_Satellite65
+  original_frozen_config: config.yaml
+  development_end: '2021-12-31'
+  final_oos_first_decision: '2022-01-07'
+  final_oos_end: '2026-10-09'
+  macro_point_in_time_verified: false
+  in_sample_scores_are_independent_validation: false
+
+final_portfolio:
+  core_asset: SPY
+  core_weight: 0.35
+  satellite_weight: 0.65
+  satellite_direction: long_short
+  max_gross_target_weight: 1.0
+  gross_realized_exposure_may_exceed_target_due_to_drift: true
+  satellite_tie_order: [SHY, IEF, GLD, SPY]
+  selection:
+    minimum_confidence: 0.35
+    hysteresis_buffer: 0.015
+    fallback_volatility: 0.10
+    volatility_source: constant_fallback_no_volatility_columns_in_saved_signals
+    spy_trend_sma_weekly_observations: 30
+    spy_short_blocked_when_above_sma: true
+    spy_trend_score_multiplier_min: 1.2
+    spy_trend_score_multiplier_max: 2.5
+
+execution:
+  decision_frequency: weekly
+  execution: next_available_market_open
+  accounting: daily
+  starting_usd: 100000
+  commission_bps: 2
+  slippage_bps: 1
+  borrow_rate_annual: 0.01
+  short_margin_buffer: 0.50
+  unremunerated_cash: true
+
+metrics:
+  annualization_trading_days: 252
+  assumed_risk_free_rate: 0.0

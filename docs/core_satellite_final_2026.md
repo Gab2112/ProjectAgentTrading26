@@ -107,7 +107,7 @@ This final Core-Satellite system is not the same as the project's earlier experi
 
 ### 5.1 Core and satellite
 
-The strategy starts with a **nominal +35% SPY core**. A **65% satellite** is dynamically assigned based on the frozen selection procedure, which uses agent-derived signals, confidence and historical volatility information.
+The strategy starts with a **nominal +35% SPY core**. A **65% satellite** is dynamically assigned based on the frozen selection procedure, which uses agent-derived direction and confidence. The saved signal CSVs lack a volatility column, so the selector uses the fixed 0.10 volatility fallback for every asset, **not an ETF-specific historical volatility estimate**.
 
 | Setting | Frozen value |
 |---|---:|
@@ -119,7 +119,15 @@ The strategy starts with a **nominal +35% SPY core**. A **65% satellite** is dyn
 | Decision frequency | Weekly |
 | Execution rule | Next available trading Open |
 
-The implementation in `src/core_satellite.py`, not the shorthand in this document, is authoritative for the exact scoring, fallback and switching rules.
+Additional frozen selector rules:
+
+- **SPY SMA filter:** block a short SPY signal whenever SPY is above its 30-observation weekly moving average.
+- **SPY selection boost:** under that condition multiply the SPY score by `min(2.5, max(1.2, close/SMA30))`, giving at least a 20% preference even just above the SMA.
+- **Volatility fallback:** all eight archived Orchestrator signal CSVs include direction and confidence only; `volatility = 0.10` for every instrument when calculating the selection ranking. This is **not** realized-volatility-based risk parity.
+- **Tie preference:** `SHY, IEF, GLD, SPY` is the historical ordering, with asset-switch hysteresis; a sign reversal within one asset does not necessarily count as switching assets.
+- **Exposure:** target gross weight is constrained to 100%, but marked-to-market realized gross exposure can exceed it through price drift. A realized maximum around 101.51% was observed.
+
+Frozen source and `config.yaml` remain authoritative for historical model behavior. `release_config.yaml` records the final settings as an assertion rather than as editable training knobs.
 
 ### 5.2 Net equity exposure can be negative
 
@@ -230,7 +238,7 @@ It would be incorrect to claim that the final system consistently reduced drawdo
 | 2025 | +12.78% | +17.72% | +14.52% |
 | 2026 YTD, through 9 Oct | +8.53% | +15.06% | +7.05% |
 
-Annual percentages are rounded. **2026 is not a full calendar year.**
+Annual percentages are rounded. **2022 is partial because the first recorded OOS decision was 7 January; 2026 is partial through 9 October.**
 
 The substantial 2022 loss and the lower subsequent capture of equity gains are consistent with the weaker overall OOS result, but the table alone cannot prove which model decisions caused the difference.
 
@@ -298,29 +306,47 @@ An external archive, **`ProjectAgentTrading26_frozen_20261107.zip`**, was create
 
 Some `.joblib` binaries, processed data and generated signals are not tracked by Git. A new clone will **not** reproduce the complete frozen evaluation solely from the tracked source tree unless the corresponding verified artifacts are restored.
 
-## 12. Supported Local Commands
+## 12. Supported Local Commands (Group 9 release)
 
-Use **Python 3.11**, the repository dependencies and the required archived artifacts.
+Use **Python 3.11**, the included frozen artifacts and the declared dependencies.
 
 ```bash
-# Audit frozen scientific code, inputs and archived results.
-python3.11 main.py --release-action audit
-
-# Read the archived final OOS metrics, without running another OOS backtest.
-python3.11 main.py --release-action frozen-results
-
-# Reproduce the 2010-2021 development backtest using frozen models.
-python3.11 main.py --core-development
-
-# Run the complete automated suite.
-python3.11 -m unittest discover -s tests -p 'test_*.py' -q
+python main.py                                      # Read frozen OOS results
+python main.py --release-action audit                # 47 + 13 + complete ZIP manifest + calendars
+python main.py --release-action verify-models        # Load all four GA parameter snapshots safely
+python main.py --level CORE                         # Frozen 2010-2021 development backtest
+python main.py --level C                            # Historic C_v1/C_v2, development only
+python main.py --release-action replay               # Independent temp-copy OOS backtest replay
+python main.py --release-action charts               # Generate figures from archived NAV
+python -m unittest discover -s tests -p 'test_*.py' -q
 ```
 
-The two **release** operations are read-only with respect to trading evaluation. The **development** operation recalculates historical development results but does not retrain the models or access the protected OOS as an optimization target.
+`--level ALL` executes historical A1, A2, B_v1, B_v2 and C development
+comparisons in an isolated temporary folder before the final Core development
+comparison. `--level C` and `--level CORE` are distinct: C belongs to the
+historical B/C consensus research, while CORE is the selected 35/65 candidate.
 
-The established `python3.11 main.py --level ALL` command still means the historical **A1+A2** pipeline. It does not execute the final Core-Satellite strategy. The historical `--level C` dispatcher remains unimplemented; the final candidate uses the dedicated entry points above.
+**Reproduction versus retuning:** The OOS replay reproduces the original
+frozen execution on the same input data in a disposable workspace and
+compares all five core outputs against the originals. It does **not** train,
+optimize or select new parameters. This is permitted as a reproducibility
+check, but new hyperparameter tuning after viewing OOS is not valid.
 
-**Verified local checkpoint, 7 November 2026:** 272 automated tests passed; the release audit verified 47 frozen files and 13 indexed artifacts.
+**Audit scope:** `PACKAGE_MANIFEST.json` verifies every file distributed in
+the submission including `data/processed/market_daily.csv`, which the
+scientific 47-file freeze did not originally cover. The historical 47-file
+manifest is preserved unaltered. Both OOS and development signal date
+calendars are required to be complete across the observed window.
+
+**Orchestrator loading:** The legacy `OrchestratorAgent.load_params()` does not
+understand nested frozen `best_params` with asymmetric thresholds. Use
+`src.orchestrator_loader.load_frozen_orchestrator(asset)`; this adapter
+validates and reconstructs the exact effective weights and directional
+thresholds without modifying the frozen agent implementation.
+
+**CI history:** 272 tests passed on the complete GitHub research branch and
+GitHub Actions. This **reduced submission** carries its own focused tests;
+it does not include the complete historical 272-test suite.
 
 ## 13. Research Interpretation
 
@@ -350,13 +376,13 @@ The contrast between encouraging development drawdowns and weaker OOS performanc
 - [x] Add release integrity and archived-result CLI commands.
 - [x] Add the frozen development comparison CLI.
 - [x] Pass 272 automated tests locally.
-- [ ] Add a current final-status entry point to `README.md`.
-- [ ] Clearly distinguish historical A/B/C documentation from the final strategy.
-- [ ] Define artifact restoration and distribution from the scientific ZIP.
-- [ ] Verify full operation on a clean Python 3.11 clone.
-- [ ] Run and review CI on the published feature branch or PR.
-- [ ] Review and merge the integration Pull Request.
-- [ ] Prepare the LUISS final presentation and submission materials.
+- [x] Add a final-status entry point to `README.md`.
+- [x] Clearly distinguish historical A/B/C from the final strategy.
+- [x] Include model and data artifacts needed by the submission.
+- [ ] Verify this revised submission on a fresh Python 3.11 environment (current container: Python 3.13).
+- [x] Original research branch PR #3: 272-test CI passed.
+- [ ] Team review and merge of the original research PR.
+- [ ] Add the LUISS final presentation after the Monday briefing.
 
 ## 16. Final Conclusion
 
@@ -400,3 +426,20 @@ ProjectAgentTrading26-final/
 ## Appendix B. Research Integrity Statement
 
 The published final metrics refer to the archived one-shot evaluation. Subsequent release tooling does not modify frozen scientific inputs, models, strategy parameters or OOS performance outputs. SHA-256 records provide evidence of file consistency, not independent proof of every historical data availability assumption or future trading profitability.
+
+## Appendix C. Exact evaluation vs optimized GA surrogate
+
+The training Genetic Algorithm evaluates candidate agent combinations using
+a weekly, per-ETF fitness function with its own exposure and trading-cost
+conventions. The selected Core-Satellite portfolio then uses one asset at a
+time in the satellite, a permanent 35% nominal SPY core, and a daily next-open
+accounting engine. Thus the GA did **not** directly optimize the precise daily
+net Core-Satellite portfolio objective. This mismatch may contribute to
+underperformance, but no independent attribution experiment was conducted.
+
+The **2005-2021** period contains model-fitting and warm-up history; matched
+portfolio development metrics are calculated for **2010-2021**. Chronological
+OOF forecasting for some ML agents does not independently validate the
+GA-selected final combination. The macro one-week lag noted for the SVM
+features must not be generalized automatically to all agents or all FRED
+observation vintages.

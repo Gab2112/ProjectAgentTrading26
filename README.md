@@ -79,10 +79,13 @@ archived OOS results; neither performs model fitting or backtesting.
 from frozen inputs, but does not refit models. Do not run the one-shot
 OOS evaluator as a means of iterating on the strategy.
 
-**Legacy research interface:** `python main.py --level ALL` still means
-A1+A2. The original `--level C` dispatcher is not implemented; it does
-not represent the final Core-Satellite workflow. See the archived README
-for older research experiments and commands.
+**Unified research interface:** `python main.py` now displays the frozen OOS
+comparison. `--level C` executes the historical B/C development comparison
+in a temporary worktree; `--level CORE` runs the final candidate's
+development comparison. `--level ALL` runs historical A/B/C/CORE
+development only, never optimizes on the held-out OOS.
+Use `--release-action replay` for a non-destructive frozen OOS reproduction,
+and `--release-action charts` for final figures.
 
 ## Distribution and verification
 
@@ -110,3 +113,14 @@ faithfully is part of the research protocol. The frozen data and code
 hashes verify consistency with the archived experiment, but cannot
 independently establish historic macro availability, model profitability
 or live execution feasibility.
+
+
+## Group 9 submission update (7 November 2026)
+
+The standalone `group_9_revised.zip` contains `project/` with all required
+frozen source, datasets, parameters, derived artifacts and final OOS charts.
+The LUISS presentation will be added after Monday's briefing.
+The original `config.yaml` remains SHA-256 frozen; `release_config.yaml`
+documents and validates the exact effective final settings.
+A complete `PACKAGE_MANIFEST.json` is included in the standalone ZIP.
+The original 272-test research suite is retained in this Git repository.

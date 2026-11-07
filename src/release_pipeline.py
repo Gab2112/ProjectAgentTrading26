@@ -29,6 +29,44 @@ def verify_hashes(mapping: dict, root: Path, label: str) -> None:
             )
 
 
+def verify_package_manifest(root: Path) -> int | None:
+    """Guard all distributed files, including processed replay inputs.
+
+    The manifest is generated only when the submission ZIP is assembled.
+    Scientific Git repositories without the ZIP manifest remain supported.
+    """
+    manifest_path = root / 'PACKAGE_MANIFEST.json'
+    if not manifest_path.exists():
+        print('INFO: standalone Git tree; submission manifest not present.')
+        return None
+    manifest = read_json(manifest_path)
+    mapping = manifest.get('files')
+    if not isinstance(mapping, dict) or not mapping:
+        raise RuntimeError('Invalid submission manifest')
+    for name, record in mapping.items():
+        path = (root / name).resolve()
+        if not path.is_relative_to(root.resolve()) or not path.is_file():
+            raise RuntimeError(f'Invalid submission path: {name}')
+        if digest(path) != record['sha256']:
+            raise RuntimeError(f'Submission manifest checksum mismatch: {name}')
+        if path.stat().st_size != record['size_bytes']:
+            raise RuntimeError(f'Submission manifest byte length mismatch: {name}')
+    def part_of_release(path: Path) -> bool:
+        relative = path.relative_to(root)
+        ignored = {'.git', '.venv', '__pycache__', 'outputs', '.pytest_cache'}
+        return not any(p in ignored for p in relative.parts)
+    present = {
+        p.relative_to(root).as_posix()
+        for p in root.rglob('*')
+        if p.is_file() and part_of_release(p) and p.name != 'PACKAGE_MANIFEST.json'
+    }
+    unexpected = present - set(mapping)
+    if unexpected:
+        raise RuntimeError('Unindexed files in submission: '+', '.join(sorted(unexpected)[:12]))
+    print(f'OK: submission manifest: {len(mapping)} complete file checksums.')
+    return len(mapping)
+
+
 def audit_release(root: Path = ROOT) -> dict:
     reports = root / "reports"
 
@@ -106,6 +144,12 @@ def audit_release(root: Path = ROOT) -> dict:
         print("OK: external ZIP backup verified.")
     else:
         print("INFO: external ZIP backup not present here.")
+
+    verify_package_manifest(root)
+    from src.submission_validation import verify_signal_calendar
+    verify_signal_calendar(root, oos=False)
+    verify_signal_calendar(root, oos=True)
+    print("OK: complete development and OOS weekly decision calendars.")
 
     print(
         f"OK: {len(freeze['code_and_model_sha256'])} "
