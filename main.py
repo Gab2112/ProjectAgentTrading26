@@ -247,7 +247,37 @@ def main(argv: list[str] | None = None) -> None:
         "--config", type=Path, default=None,
         help="Alternative YAML configuration, relative to the repository root.",
     )
+    parser.add_argument(
+        "--release-action",
+        choices=("audit", "frozen-results"),
+        default=None,
+        help="Read-only access to the archived final OOS evaluation.",
+    )
+
     args = parser.parse_args(argv)
+
+    if args.release_action is not None:
+        if (
+            args.level is not None
+            or args.b_version is not None
+            or args.config is not None
+        ):
+            parser.error(
+                "--release-action cannot be combined with "
+                "--level, --b-version or --config"
+            )
+
+        from src.release_pipeline import (
+            audit_release,
+            show_frozen_results,
+        )
+
+        if args.release_action == "audit":
+            audit_release()
+        else:
+            show_frozen_results()
+
+        return
     try:
         run_pipeline(
             level=args.level,
