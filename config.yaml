@@ -242,14 +242,11 @@ validation:
   method: chronological
 
   train_start: "2005-05-20"
-  train_end: "2020-12-30"
+  train_end: "2021-12-31"
 
-  validation_start: "2020-12-31"
-  validation_end: "2020-12-31"
+  oos_start: "2022-01-01"
 
-  oos_start: "2021-01-01"
-
-  walk_forward: false
+  walk_forward: true
   development_only: true
 
 # ------------------------------------------------------------

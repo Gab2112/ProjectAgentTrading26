@@ -1,0 +1,51 @@
+{
+    "target_asset": "SPY",
+    "price_col": "SPY_close",
+    "max_depth": 3,
+    "min_samples_leaf": 20,
+    "prob_threshold": 0.53,
+    "n_estimators": 100,
+    "frequency_count": 7,
+    "total_windows": 12,
+    "max_train_year": 2021,
+    "final_in_sample_metrics": {
+        "cumulative_return": 24.753642066306107,
+        "annualized_return": 0.21484337068140902,
+        "annualized_volatility": 0.12935892399365184,
+        "sharpe_ratio": 1.6608314606261896,
+        "max_drawdown": 0.21036893222963693,
+        "profit_factor": 2.828313194756484,
+        "calmar_ratio": 1.0212694831140172
+    },
+    "feature_importances": {
+        "cpi_yoy": 0.1728,
+        "SPY_return_1w": 0.154,
+        "SPY_momentum_63d": 0.1153,
+        "treasury_2y_change_1w": 0.0966,
+        "SPY_momentum_21d": 0.0917,
+        "curve_10y_2y": 0.0813,
+        "breakeven_5y_change_1w": 0.0805,
+        "vix_level": 0.0718,
+        "treasury_10y_change_1w": 0.0698,
+        "curve_10y_2y_change_1w": 0.0662
+    },
+    "trained_features": [
+        "curve_10y_2y",
+        "curve_10y_2y_change_1w",
+        "treasury_10y_change_1w",
+        "treasury_2y_change_1w",
+        "cpi_yoy",
+        "vix_level",
+        "breakeven_5y_change_1w",
+        "SPY_return_1w",
+        "SPY_momentum_21d",
+        "SPY_momentum_63d"
+    ],
+    "model_joblib_file": "random_forest_params_spy.joblib",
+    "training_provenance": {
+        "start_date": "2005-05-20",
+        "end_date": "2021-12-31",
+        "cutoff_year": 2021,
+        "calendar": "weekly_decision_dates.csv"
+    }
+}

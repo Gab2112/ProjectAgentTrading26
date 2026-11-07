@@ -1,0 +1,57 @@
+{
+    "best_params": {
+        "weights": {
+            "SMA_EMA_Agent": 0.4930782253567982,
+            "ZScore_Agent": 0.016888838769684302,
+            "Macro_YieldCurve_Agent": 0.4686168174311667,
+            "RandomForest_Agent": 0.0,
+            "SVM_Agent": 0.021416118442350827
+        },
+        "alphas": {
+            "SMA_EMA_Agent": 1.6727288283552382,
+            "ZScore_Agent": 0.1,
+            "Macro_YieldCurve_Agent": 1.7969784147239785,
+            "RandomForest_Agent": 2.8980479097729344,
+            "SVM_Agent": 2.8424559808782424
+        },
+        "threshold_long": 0.050804106780691916,
+        "threshold_short": 0.8498578418114974,
+        "threshold": 0.45033097429609464,
+        "objective_score": 1.0861,
+        "sharpe_ratio": 1.1321,
+        "max_drawdown": 0.0202,
+        "cumulative_return": 0.1191,
+        "annualized_return": 0.0094,
+        "profit_factor": 1.5932,
+        "trades": 15
+    },
+    "in_sample_metrics": {
+        "weights": {
+            "SMA_EMA_Agent": 0.4930782253567982,
+            "ZScore_Agent": 0.016888838769684302,
+            "Macro_YieldCurve_Agent": 0.4686168174311667,
+            "RandomForest_Agent": 0.0,
+            "SVM_Agent": 0.021416118442350827
+        },
+        "alphas": {
+            "SMA_EMA_Agent": 1.6727288283552382,
+            "ZScore_Agent": 0.1,
+            "Macro_YieldCurve_Agent": 1.7969784147239785,
+            "RandomForest_Agent": 2.8980479097729344,
+            "SVM_Agent": 2.8424559808782424
+        },
+        "threshold_long": 0.050804106780691916,
+        "threshold_short": 0.8498578418114974,
+        "threshold": 0.45033097429609464,
+        "objective_score": 1.0861,
+        "sharpe_ratio": 1.1321,
+        "max_drawdown": 0.0202,
+        "cumulative_return": 0.1191,
+        "annualized_return": 0.0094,
+        "profit_factor": 1.5932,
+        "trades": 15
+    },
+    "objective_metric": "sharpe_mdd",
+    "max_train_year": 2021,
+    "annualization_factor": 52
+}

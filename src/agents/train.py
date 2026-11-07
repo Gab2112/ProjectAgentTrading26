@@ -112,6 +112,7 @@ def train_single_asset(
     train_orchestrator: bool = True,
     orch_method: str = "ga",
     warmup_df: Optional[pd.DataFrame] = None,
+    sentiment_enabled: bool = False,
 ) -> Dict[str, Any]:
     """
     Esegue il training Walk-Forward completo per un asset specifico ('SPY', 'IEF', 'GLD', 'SHY'):
@@ -335,7 +336,9 @@ def train_single_asset(
         # -----------------------------------------------------------------
     finbert_csv = signals_dir / f"signals_sentiment_{asset_lower}.csv"
     df_finbert = None
-    if finbert_csv.exists():
+    if sentiment_enabled and not finbert_csv.is_file():
+        raise FileNotFoundError(f'FinBERT abilitato ma CSV assente: {finbert_csv}')
+    if sentiment_enabled:
         print(f"\n[{asset_upper}] >>> Caricamento segnali FinBERT Sentiment da: {finbert_csv}")
         df_finbert = pd.read_csv(finbert_csv, index_col=0, parse_dates=True)
         # Assicura che le colonne siano esattamente 'signal' e 'confidence' e allinea al dataframe principale
@@ -495,6 +498,9 @@ def run_all_assets(
         raise ValueError("Il cutoff di training deve coincidere con config.yaml")
 
     max_train_year = train_end.year
+    sentiment_enabled = config['strategies']['C'].get('sentiment_enabled', False)
+    if not isinstance(sentiment_enabled, bool):
+        raise ValueError('sentiment_enabled deve essere booleano')
     if assets is None:
         assets = list(ASSETS)
 
@@ -563,6 +569,7 @@ def run_all_assets(
             train_svm=train_svm,
             train_orchestrator=train_orchestrator,
             orch_method=orch_method,
+            sentiment_enabled=sentiment_enabled,
         )
         all_results[asset.upper()] = res
 

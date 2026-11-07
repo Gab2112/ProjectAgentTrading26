@@ -450,6 +450,38 @@ class PortfolioFitnessEvaluator:
 # =====================================================================
 # SEZIONE 4: MOTORE EVOLUTIVO (GENETIC META-OPTIMIZER)
 # =====================================================================
+
+def _bounded_agent_weights(raw, agent_names):
+    """Normalizza i pesi, rispettando FinBERT <= 5%."""
+    w = np.asarray(raw, dtype=float).reshape(-1)
+    if not len(w) or len(w) != len(agent_names):
+        raise ValueError("Dimensioni dei pesi non valide")
+    if not np.isfinite(w).all():
+        raise ValueError("Pesi non finiti")
+
+    caps = np.array([
+        0.05 if "finbert" in name.lower() else 1.0
+        for name in agent_names
+    ])
+
+    if caps.sum() < 1.0 - 1e-12:
+        raise ValueError("Vincoli sui pesi non ammissibili")
+
+    w = np.maximum(w, 0.0)
+    if w.sum() <= 1e-12:
+        w = np.ones_like(w)
+
+    w = w / w.sum()
+    excess = np.maximum(w - caps, 0.0).sum()
+    w = np.minimum(w, caps)
+
+    if excess > 1e-12:
+        room = np.maximum(caps - w, 0.0)
+        w += excess * room / room.sum()
+
+    return w
+
+
 class GeneticMetaOptimizer:
     """
     Algoritmo Genetico a Codifica Reale (Real-Coded GA) per la sintesi ottima dei parametri:
@@ -492,12 +524,10 @@ class GeneticMetaOptimizer:
         self.lower_bounds = np.zeros(self.chromosome_len, dtype=np.float64)
         self.upper_bounds = np.ones(self.chromosome_len, dtype=np.float64)
 
-        # Vincolo massimo 5% per FinBERT sui pesi
+        # Solo FinBERT ha un cap individuale del 5%.
         for i, name in enumerate(self.agent_names):
             if "finbert" in name.lower():
                 self.upper_bounds[i] = 0.05
-            else:
-                self.upper_bounds[i] = 0.40
 
         self.lower_bounds[: self.n_agents] = 0.0
         self.lower_bounds[self.n_agents: 2 * self.n_agents] = 0.1
@@ -516,39 +546,7 @@ class GeneticMetaOptimizer:
         c = np.asarray(chromosome, dtype=np.float64).flatten()
         w_raw = c[: self.n_agents].copy()
 
-        # 1. Applicazione dei limiti superiori massimi sui pesi grezzi/individuali
-        for i, name in enumerate(self.agent_names):
-            if "finbert" in name.lower():
-                w_raw[i] = np.clip(w_raw[i], 0.0, 0.05)
-            else:
-                w_raw[i] = np.clip(w_raw[i], 0.0, 0.40)
-
-        # 2. Normalizzazione iterativa con clipping per rispettare i tetti percentuali post-somma
-        w = w_raw.copy()
-        w_sum = np.sum(w)
-        if w_sum > 1e-12:
-            w /= w_sum
-        else:
-            w = np.full(self.n_agents, 1.0 / self.n_agents)
-
-        # Correzione iterativa di sicurezza (massimo 5 iterazioni di proiezione)
-        for _ in range(5):
-            excess = 0.0
-            for i, name in enumerate(self.agent_names):
-                limit = 0.05 if "finbert" in name.lower() else 0.40
-                if w[i] > limit:
-                    excess += (w[i] - limit)
-                    w[i] = limit
-
-            # Redistribuisce l'eccesso sugli agenti che non hanno raggiunto il limite
-            if excess > 1e-12:
-                free_mask = np.array([0.05 if "finbert" in n.lower() else 0.40 for n in self.agent_names]) > w
-                free_sum = np.sum(w[free_mask])
-                if free_sum > 1e-12:
-                    w[free_mask] += excess * (w[free_mask] / free_sum)
-                else:
-                    w = np.clip(w, 0.0, [0.05 if "finbert" in n.lower() else 0.40 for n in self.agent_names])
-                    w /= np.sum(w)
+        w = _bounded_agent_weights(w_raw, self.agent_names)
 
         return {
             "weights": w,
@@ -599,6 +597,9 @@ class GeneticMetaOptimizer:
                 self.lower_bounds[mask],
                 self.upper_bounds[mask],
             )
+        mutated[:self.n_agents] = _bounded_agent_weights(
+            mutated[:self.n_agents], self.agent_names
+        )
         return mutated
 
     def optimize(
@@ -616,6 +617,10 @@ class GeneticMetaOptimizer:
         best_chrom = population[0].copy()
 
         for gen in range(self.n_generations):
+            for chrom in population:
+                chrom[:self.n_agents] = _bounded_agent_weights(
+                    chrom[:self.n_agents], self.agent_names
+                )
             P_pop, S_pop, _ = WeeklySignalAggregator.aggregate_3d_population(signals, confidences, population)
             fitnesses = self.evaluator.evaluate_population(P_pop, S_pop, returns, population, self.n_agents)
 
@@ -1308,12 +1313,9 @@ class OrchestratorOptimizer:
                     prev = cut
                 parts.append((n_steps + k - 1 - prev) / n_steps)
 
-                # Applica vincolo 5% anche in Grid Search se c'è FinBERT
-                w_vec = np.array(parts, dtype=float)
-                for i, name in enumerate(names):
-                    if "finbert" in name.lower():
-                        w_vec[i] = min(w_vec[i], 0.05)
-                w_vec /= np.sum(w_vec)
+                w_vec = _bounded_agent_weights(
+                    np.array(parts, dtype=float), names
+                )
                 cuts_combos.append(w_vec.tolist())
 
             w_cands = np.array(cuts_combos, dtype=float)
