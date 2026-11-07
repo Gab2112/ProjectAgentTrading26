@@ -254,7 +254,66 @@ def main(argv: list[str] | None = None) -> None:
         help="Read-only access to the archived final OOS evaluation.",
     )
 
+    parser.add_argument(
+        "--core-development",
+        action="store_true",
+        help="Reproduce the frozen Core-Satellite development comparison only.",
+    )
+
     args = parser.parse_args(argv)
+
+    if args.core_development:
+        if (
+            args.level is not None
+            or args.b_version is not None
+            or args.config is not None
+            or args.release_action is not None
+        ):
+            parser.error(
+                "--core-development cannot be combined "
+                "with other execution modes"
+            )
+
+        from src.release_pipeline import read_json, verify_hashes
+        from src.core_satellite import run_core_satellite_training
+
+        freeze = read_json(
+            ROOT_DIR / "reports/development_freeze_2021.json"
+        )
+
+        if (
+            freeze["status"] != "FROZEN_BEFORE_FINAL_OOS"
+            or freeze["selected_strategy"] != "Core35_Satellite65"
+            or freeze["training_end"] != "2021-12-31"
+        ):
+            raise RuntimeError("Invalid frozen development protocol")
+
+        verify_hashes(
+            freeze["code_and_model_sha256"],
+            ROOT_DIR,
+            "Frozen development",
+        )
+
+        config = load_config(ROOT_DIR / "config.yaml")
+        validate_config(config)
+
+        result = run_core_satellite_training(config, ROOT_DIR)
+
+        view = result["summary"][[
+            "cagr",
+            "annualized_volatility",
+            "sharpe_ratio",
+            "max_drawdown",
+            "trades",
+        ]].copy()
+
+        for col in ("cagr", "annualized_volatility", "max_drawdown"):
+            view[col] *= 100.0
+
+        print("\n=== FROZEN CORE-SATELLITE DEVELOPMENT: 2010-2021 ===")
+        print(view.round(3).to_string())
+        print("\nDEVELOPMENT ONLY: no retraining or OOS evaluation.")
+        return
 
     if args.release_action is not None:
         if (
