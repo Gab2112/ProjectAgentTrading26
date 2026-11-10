@@ -68,7 +68,7 @@ In Git vengono conservati gli snapshot dei file originali in **`data/raw/market/
 - `data/results/`: backtest, NAV, costi, diagnostiche e confronti.
 - `src/agents/config/`: alcuni JSON storici tracciati. Nuovi file di parametri e modelli `.joblib` devono seguire una politica di conservazione e provenienza concordata; **non aggiungere indiscriminatamente questa cartella a Git**.
 
-Il file `data/raw/market/TLT.csv` e alcuni parametri degli agenti SHY/IEF/TLT appartengono alla ricerca precedente sui Treasury; TLT **non** fa parte dell'universo investibile corrente. Consultare [`data/README.md`](data/README.md).
+Il file `data/raw/market/TLT.csv` e alcuni parametri degli agenti SHY/IEF/TLT appartengono alla ricerca precedente sui Treasury; TLT **non** fa parte dell'universo investibile corrente. Consultare [`data/README.md`](../../data/README.md).
 
 ## 5. Riproduzione delle analisi
 
@@ -123,7 +123,7 @@ C_v2 migliora B_v2 **nel campione di sviluppo**, ma non supera il benchmark 60/4
 
 Nell'esperimento separato di sensibilità, **16 scenari** variano il moltiplicatore dei pesi (×1, ×1,25, ×1,5, ×2) e il limite di volatilità (8%, 12%). L'esposizione maggiore aumenta il rendimento assoluto, ma **non migliora lo Sharpe di base di C_v2**. Questo esercizio **non è uno stress test di mercato** né una validation indipendente.
 
-Per dettagli e risultati completi: [`docs/level_c_research.md`](docs/level_c_research.md). Le decisioni storiche A/B restano in [`docs/research_design.md`](docs/research_design.md) e [`docs/decision_log.md`](docs/decision_log.md). La precedente ricerca sui Treasury è archiviata in [`docs/treasury_research_review.md`](docs/treasury_research_review.md).
+Per dettagli e risultati completi: [`docs/level_c_research.md`](../level_c_research.md). Le decisioni storiche A/B restano in [`docs/research_design.md`](../research_design.md) e [`docs/decision_log.md`](../decision_log.md). La precedente ricerca sui Treasury è archiviata in [`docs/treasury_research_review.md`](treasury_research_review.md).
 
 ## 7. Struttura del codice
 
@@ -146,4 +146,4 @@ Ogni responsabilità ha un solo modulo (ridivisione del 4 novembre, nessuna rego
 - Il refactoring dei moduli in `src/` (sezione 7) e la sostituzione dell'agente SVM sono stati integrati dal branch `refactor-moduli` dopo `modulo-C`, verificando che A, B, gli altri agenti e i confronti producano file identici.
 - La validation C 2017–2021 richiede un protocollo specifico. Il test finale 2022+ resta bloccato.
 
-Per le verifiche ancora aperte: [`docs/pre_pr_audit_2026-11-04.md`](docs/pre_pr_audit_2026-11-04.md).
+Per le verifiche ancora aperte: [`docs/pre_pr_audit_2026-11-04.md`](pre_pr_audit_2026-11-04.md).
