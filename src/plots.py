@@ -646,7 +646,7 @@ def plot_equity_curves_comparison(
         )
 
     ax1.set_title(f"Confronto Performance e Rischio — {title_suffix}", fontsize=14, fontweight="bold", pad=12)
-    ax1.set_ylabel("Moltiplicatore Patrimonio (Base = 1.0)", fontsize=11, fontweight="bold")
+    ax1.set_ylabel("Moltiplicatore Patrimonio (Base = 1.0)", fontsize=12, fontweight="bold")
     ax1.grid(True, linestyle="--", alpha=0.5)
     ax1.legend(loc="upper left", frameon=True, framealpha=0.95, fontsize=10)
 
