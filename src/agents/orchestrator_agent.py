@@ -497,7 +497,7 @@ class GeneticMetaOptimizer:
             if "finbert" in name.lower():
                 self.upper_bounds[i] = 0.05
             else:
-                self.upper_bounds[i] = 0.40
+                self.upper_bounds[i] = 0.80
 
         self.lower_bounds[: self.n_agents] = 0.0
         self.lower_bounds[self.n_agents: 2 * self.n_agents] = 0.1
@@ -519,9 +519,9 @@ class GeneticMetaOptimizer:
         # 1. Applicazione dei limiti superiori massimi sui pesi grezzi/individuali
         for i, name in enumerate(self.agent_names):
             if "finbert" in name.lower():
-                w_raw[i] = np.clip(w_raw[i], 0.0, 0.05)
+                w_raw[i] = np.clip(w_raw[i], 0.0, 0.01)
             else:
-                w_raw[i] = np.clip(w_raw[i], 0.0, 0.40)
+                w_raw[i] = np.clip(w_raw[i], 0.0, 0.80)
 
         # 2. Normalizzazione iterativa con clipping per rispettare i tetti percentuali post-somma
         w = w_raw.copy()
@@ -535,19 +535,19 @@ class GeneticMetaOptimizer:
         for _ in range(5):
             excess = 0.0
             for i, name in enumerate(self.agent_names):
-                limit = 0.05 if "finbert" in name.lower() else 0.40
+                limit = 0.01 if "finbert" in name.lower() else 0.80
                 if w[i] > limit:
                     excess += (w[i] - limit)
                     w[i] = limit
 
             # Redistribuisce l'eccesso sugli agenti che non hanno raggiunto il limite
             if excess > 1e-12:
-                free_mask = np.array([0.05 if "finbert" in n.lower() else 0.40 for n in self.agent_names]) > w
+                free_mask = np.array([0.01 if "finbert" in n.lower() else 0.80 for n in self.agent_names]) > w
                 free_sum = np.sum(w[free_mask])
                 if free_sum > 1e-12:
                     w[free_mask] += excess * (w[free_mask] / free_sum)
                 else:
-                    w = np.clip(w, 0.0, [0.05 if "finbert" in n.lower() else 0.40 for n in self.agent_names])
+                    w = np.clip(w, 0.0, [0.01 if "finbert" in n.lower() else 0.80 for n in self.agent_names])
                     w /= np.sum(w)
 
         return {
@@ -1312,7 +1312,7 @@ class OrchestratorOptimizer:
                 w_vec = np.array(parts, dtype=float)
                 for i, name in enumerate(names):
                     if "finbert" in name.lower():
-                        w_vec[i] = min(w_vec[i], 0.05)
+                        w_vec[i] = min(w_vec[i], 0.01)
                 w_vec /= np.sum(w_vec)
                 cuts_combos.append(w_vec.tolist())
 
