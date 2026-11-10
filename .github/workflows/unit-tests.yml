@@ -3,7 +3,7 @@ name: Test automatici Python (solo sviluppo)
 on:
   pull_request:
   push:
-    branches: [main, gianluca, modulo-C]
+    branches: [main, gianluca, modulo-C, integrazione-finale]
 
 jobs:
   unittest:
@@ -19,9 +19,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
-      # Alcuni test leggono data/processed/, che non è versionato: lo si
-      # ricostruisce dai CSV grezzi tracciati (solo training, nessun download).
-      - name: Prepara i dati elaborati dai CSV grezzi
-        run: python main.py --level ALL
-      - name: Esegue i test senza consultare la validation o il test finale
+      # CI receives only Git-tracked raw data; frozen ML binaries/OOS artifacts
+      # are distributed separately in the submission archive.
+      - name: Prepara la pipeline storica A1/A2 per i test
+        run: python -c "from main import run_pipeline; run_pipeline(level='ALL')"
+      - name: Esegui tutti i test del repository
         run: python -m unittest discover -s tests -p 'test_*.py' -q

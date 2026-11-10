@@ -1,0 +1,51 @@
+{
+    "target_asset": "IEF",
+    "price_col": "IEF_close",
+    "max_depth": 3,
+    "min_samples_leaf": 20,
+    "prob_threshold": 0.52,
+    "n_estimators": 100,
+    "frequency_count": 5,
+    "total_windows": 12,
+    "max_train_year": 2021,
+    "final_in_sample_metrics": {
+        "cumulative_return": 3.510412025599112,
+        "annualized_return": 0.09444181226036119,
+        "annualized_volatility": 0.04895165380158503,
+        "sharpe_ratio": 1.9292874688802282,
+        "max_drawdown": 0.0559950710690168,
+        "profit_factor": 2.4750664232478945,
+        "calmar_ratio": 1.6866093828858044
+    },
+    "feature_importances": {
+        "curve_10y_2y": 0.1674,
+        "vix_level": 0.1367,
+        "curve_10y_2y_change_1w": 0.127,
+        "IEF_return_1w": 0.1196,
+        "cpi_yoy": 0.1027,
+        "IEF_momentum_21d": 0.0856,
+        "treasury_2y_change_1w": 0.0749,
+        "breakeven_5y_change_1w": 0.0686,
+        "IEF_momentum_63d": 0.0591,
+        "treasury_10y_change_1w": 0.0583
+    },
+    "trained_features": [
+        "curve_10y_2y",
+        "curve_10y_2y_change_1w",
+        "treasury_10y_change_1w",
+        "treasury_2y_change_1w",
+        "cpi_yoy",
+        "vix_level",
+        "breakeven_5y_change_1w",
+        "IEF_return_1w",
+        "IEF_momentum_21d",
+        "IEF_momentum_63d"
+    ],
+    "model_joblib_file": "random_forest_params_ief.joblib",
+    "training_provenance": {
+        "start_date": "2005-05-20",
+        "end_date": "2021-12-31",
+        "cutoff_year": 2021,
+        "calendar": "weekly_decision_dates.csv"
+    }
+}

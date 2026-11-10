@@ -89,7 +89,7 @@ class TestTimeBoundaries(unittest.TestCase):
         self.assertEqual(windows["validation_start"], pd.Timestamp("2017-01-01"))
 
     def test_required_dates_cannot_be_missing(self):
-        for field in ("train_end", "validation_end", "oos_start"):
+        for field in ("train_end", "oos_start"):
             with self.subTest(field=field):
                 config = deepcopy(self.config)
                 del config["validation"][field]

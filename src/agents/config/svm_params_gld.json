@@ -1,0 +1,53 @@
+{
+    "target_asset": "GLD",
+    "horizon_weeks": 4,
+    "first_test_year": 2010,
+    "min_train_weeks": 156,
+    "cv_splits": 4,
+    "C_values": [
+        0.1,
+        1.0,
+        10.0
+    ],
+    "gamma_values": [
+        "scale",
+        0.01,
+        0.1
+    ],
+    "class_weight": "none",
+    "neutral_band": 0.25,
+    "long_only": false,
+    "use_macro_features": true,
+    "final_model": {
+        "kernel": "linear",
+        "C": 10.0,
+        "gamma": "scale",
+        "cv_balanced_accuracy": 0.5576
+    },
+    "score_scale": 0.7660593618873737,
+    "trained_features": [
+        "ret_1w",
+        "mom_4w",
+        "mom_13w",
+        "mom_26w",
+        "mom_52w",
+        "vol_13w",
+        "dist_52w_high",
+        "SPY_mom_13w",
+        "IEF_mom_13w",
+        "SHY_mom_13w",
+        "treasury_2y_change_13w",
+        "curve_10y_2y_change_13w",
+        "rate_volatility_13w"
+    ],
+    "n_samples_train": 812,
+    "train_start": "2006-05-19",
+    "train_end": "2021-12-03",
+    "model_joblib_file": "svm_params_gld.joblib",
+    "training_provenance": {
+        "start_date": "2005-05-20",
+        "end_date": "2021-12-31",
+        "cutoff_year": 2021,
+        "calendar": "weekly_decision_dates.csv"
+    }
+}
