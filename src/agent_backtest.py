@@ -290,25 +290,6 @@ def run_comparison_3vs4_assets_is():
     results = {}
 
     # ------------------------------------------------------------------
-    # 1. Strategy Equal Active - 3 Asset (SPY, IEF, GLD)
-    # ------------------------------------------------------------------
-    agg_3 = MultiAssetSignalAggregator(
-        assets=assets_3,
-        min_conf=0.20,
-        rebalance_threshold=0.05,
-        transaction_cost=0.0,
-    )
-    weights_3 = agg_3.build_target_weights(
-        signals_df=signals_is[assets_3],
-        confidences_df=confs_is[assets_3],
-        returns_df=returns_is[assets_3],
-        method="equal_active",
-        max_weight_per_asset=cap,
-    )
-    _, m_quant_3 = run_backtest_no_costs(weights_3, returns_is[assets_3], rebalance_threshold=0.05)
-    results["Equal Active (3 Asset: SPY/IEF/GLD)"] = m_quant_3
-
-    # ------------------------------------------------------------------
     # 2. Strategy Equal Active - 4 Asset (SPY, IEF, GLD, SHY)
     # ------------------------------------------------------------------
     agg_4 = MultiAssetSignalAggregator(

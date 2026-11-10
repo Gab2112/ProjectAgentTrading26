@@ -511,7 +511,7 @@ def plot_orchestrator_weights_pie(
 
 
 # =====================================================================
-# 5. CONFRONTO RENDIMENTO CUMULATO (%) E DRAWDOWN (3 ASSET VS 4 ASSET VS BENCHMARK)
+# 5. CONFRONTO STRATEGIA 4 ASSET (EQUAL ACTIVE) VS BENCHMARK (SPY & SHY)
 # =====================================================================
 def plot_equity_curves_comparison(
         start_date: str = "2021-01-01",
@@ -520,12 +520,16 @@ def plot_equity_curves_comparison(
         save_filename: str = "equity_curves_comparison.png",
 ) -> plt.Figure:
     """
-    Genera e salva un grafico a doppio pannello:
-    - Pannello 1: Rendimento Percentuale Cumulato (%).
-    - Pannello 2: Andamento temporale del Drawdown percentuale (MDD).
+    Genera e salva un grafico a doppio pannello ben evidenziato:
+    - Subplot 1: Rendimento Percentuale Cumulato (%).
+    - Subplot 2: Andamento temporale del Drawdown percentuale (MDD).
+
+    Confronto mirato tra:
+    1. Strategia Quant (4 Asset: SPY, IEF, GLD, SHY) [Cap 50%]
+    2. Benchmark Buy & Hold (100% SPY)
+    3. Benchmark Buy & Hold (100% SHY)
     """
     all_assets = ["SPY", "IEF", "GLD", "SHY"]
-    assets_3 = ["SPY", "IEF", "GLD"]
     assets_4 = ["SPY", "IEF", "GLD", "SHY"]
     cap = 0.50
 
@@ -573,32 +577,25 @@ def plot_equity_curves_comparison(
     conf_eval = confidences_full.loc[target_idx]
     rets_eval = returns_full.loc[target_idx]
 
-    # 1. Equal Active 3 Asset
-    agg_3 = MultiAssetSignalAggregator(assets=assets_3, min_conf=0.20, rebalance_threshold=0.05)
-    w_3 = agg_3.build_target_weights(sig_eval[assets_3], conf_eval[assets_3], rets_eval[assets_3],
-                                     max_weight_per_asset=cap)
-    bt_3 = _run_backtest_no_costs(w_3, rets_eval[assets_3])
-
-    # 2. Equal Active 4 Asset
+    # 1. Equal Active 4 Asset (SPY, IEF, GLD, SHY)
     agg_4 = MultiAssetSignalAggregator(assets=assets_4, min_conf=0.20, rebalance_threshold=0.05)
     w_4 = agg_4.build_target_weights(sig_eval[assets_4], conf_eval[assets_4], rets_eval[assets_4],
                                      max_weight_per_asset=cap)
     bt_4 = _run_backtest_no_costs(w_4, rets_eval[assets_4])
 
-    # 3. Buy & Hold SPY
+    # 2. Buy & Hold SPY
     pos_spy = pd.DataFrame(0.0, index=target_idx, columns=all_assets)
     pos_spy["SPY"] = 1.0
     bt_spy = _run_backtest_no_costs(pos_spy, rets_eval[all_assets])
 
-    # 4. Buy & Hold SHY
+    # 3. Buy & Hold SHY
     pos_shy = pd.DataFrame(0.0, index=target_idx, columns=all_assets)
     pos_shy["SHY"] = 1.0
     bt_shy = _run_backtest_no_costs(pos_shy, rets_eval[all_assets])
 
     # Dataframe Curve di Equity
     equity_df = pd.DataFrame({
-        "Equal Active (3 Asset: SPY/IEF/GLD)": bt_3["Equity"],
-        "Equal Active (4 Asset: incl. SHY)": bt_4["Equity"],
+        "Equal Active (4 Asset: SPY/IEF/GLD/SHY)": bt_4["Equity"],
         "Buy & Hold (100% SPY)": bt_spy["Equity"],
         "Buy & Hold (100% SHY)": bt_shy["Equity"],
     })
@@ -615,15 +612,13 @@ def plot_equity_curves_comparison(
                                    gridspec_kw={'height_ratios': [2, 1]})
 
     colors = {
-        "Equal Active (3 Asset: SPY/IEF/GLD)": "#2980B9",
-        "Equal Active (4 Asset: incl. SHY)": "#27AE60",
-        "Buy & Hold (100% SPY)": "#E74C3C",
-        "Buy & Hold (100% SHY)": "#7F8C8D",
+        "Equal Active (4 Asset: SPY/IEF/GLD/SHY)": "#16A085",  # Verde Smeraldo Scuro / Teal
+        "Buy & Hold (100% SPY)": "#E74C3C",  # Rosso Corallo
+        "Buy & Hold (100% SHY)": "#7F8C8D",  # Grigio Ardesia
     }
 
     linestyles = {
-        "Equal Active (3 Asset: SPY/IEF/GLD)": "-",
-        "Equal Active (4 Asset: incl. SHY)": "-",
+        "Equal Active (4 Asset: SPY/IEF/GLD/SHY)": "-",
         "Buy & Hold (100% SPY)": "--",
         "Buy & Hold (100% SHY)": ":",
     }
@@ -631,39 +626,65 @@ def plot_equity_curves_comparison(
     # ------------------------------------------------------------------
     # SUBPLOT 1: RENDIMENTO PERCENTUALE CUMULATO (%)
     # ------------------------------------------------------------------
-    for col in returns_cum_df.columns:
+    # Disegna prima i benchmark
+    for col in ["Buy & Hold (100% SHY)", "Buy & Hold (100% SPY)"]:
         ax1.plot(
             returns_cum_df.index,
             returns_cum_df[col],
             label=col,
-            color=colors.get(col, None),
-            linestyle=linestyles.get(col, "-"),
-            linewidth=2.2 if "Equal" in col else 1.8,
+            color=colors[col],
+            linestyle=linestyles[col],
+            linewidth=1.8,
+            alpha=0.85,
+            zorder=2,
         )
 
+    # Disegna la strategia a 4 asset in evidenza
+    main_col = "Equal Active (4 Asset: SPY/IEF/GLD/SHY)"
+    ax1.plot(
+        returns_cum_df.index,
+        returns_cum_df[main_col],
+        label=main_col,
+        color=colors[main_col],
+        linestyle=linestyles[main_col],
+        linewidth=3.0,
+        zorder=4,
+    )
+    ax1.fill_between(returns_cum_df.index, returns_cum_df[main_col], 0, color=colors[main_col], alpha=0.08, zorder=1)
+
     ax1.axhline(0.0, color="#333333", linestyle="-", linewidth=0.8, alpha=0.7)
-    ax1.set_title(f"Confronto Rendimento Cumulato (%) e Rischio — {title_suffix}", fontsize=14, fontweight="bold",
-                  pad=12)
+    ax1.set_title(f"Rendimento Cumulato e Rischio — Strategia 4 Asset vs Benchmark ({title_suffix})", fontsize=14,
+                  fontweight="bold", pad=12)
     ax1.set_ylabel("Rendimento Cumulato (%)", fontsize=11, fontweight="bold")
     ax1.yaxis.set_major_formatter(mtick.PercentFormatter(xmax=100.0, decimals=0))
     ax1.grid(True, linestyle="--", alpha=0.5)
-    ax1.legend(loc="upper left", frameon=True, framealpha=0.95, fontsize=10)
+    ax1.legend(loc="upper left", frameon=True, framealpha=0.95, fontsize=10.5)
 
     # ------------------------------------------------------------------
     # SUBPLOT 2: ANDAMENTO DRAWDOWN (%)
     # ------------------------------------------------------------------
-    for col in drawdown_df.columns:
+    for col in ["Buy & Hold (100% SHY)", "Buy & Hold (100% SPY)"]:
         ax2.plot(
             drawdown_df.index,
             drawdown_df[col],
             label=col,
-            color=colors.get(col, None),
-            linestyle=linestyles.get(col, "-"),
-            linewidth=1.8 if "Equal" in col else 1.4,
-            alpha=0.85,
+            color=colors[col],
+            linestyle=linestyles[col],
+            linewidth=1.5,
+            alpha=0.8,
+            zorder=2,
         )
-        if "Equal Active (4 Asset" in col:
-            ax2.fill_between(drawdown_df.index, drawdown_df[col], 0, color=colors[col], alpha=0.1)
+
+    ax2.plot(
+        drawdown_df.index,
+        drawdown_df[main_col],
+        label=main_col,
+        color=colors[main_col],
+        linestyle=linestyles[main_col],
+        linewidth=2.5,
+        zorder=4,
+    )
+    ax2.fill_between(drawdown_df.index, drawdown_df[main_col], 0, color=colors[main_col], alpha=0.2, zorder=3)
 
     ax2.set_ylabel("Drawdown (%)", fontsize=11, fontweight="bold")
     ax2.set_xlabel("Data", fontsize=11, fontweight="bold")
@@ -680,7 +701,6 @@ def plot_equity_curves_comparison(
     plt.close(fig)
 
     return fig
-
 
 # =====================================================================
 # 6. FUNZIONE AUTOMATICA COMPLETA (FA TUTTO)
