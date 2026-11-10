@@ -2,8 +2,9 @@
 plots.py
 
 Modulo di visualizzazione grafica e diagnostica per ProjectAgentTrading26.
-Fornisce funzioni per analizzare la distribuzione dei segnali, la correlazione tra strategie
-e il comportamento comparativo di tutti gli agenti quantitativi (inclusi FinBERT e Orchestrator).
+Fornisce funzioni per analizzare la distribuzione dei segnali, la correlazione tra strategie,
+la distribuzione dei pesi dell'Orchestratore e il confronto delle 4 curve di equity
+(Equal Active 3 Asset, Equal Active 4 Asset con SHY, Buy & Hold SPY, Buy & Hold SHY).
 """
 
 from __future__ import annotations
@@ -29,12 +30,18 @@ import matplotlib.ticker as mtick
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import yaml
 
 # Risoluzione percorsi di progetto
 CURRENT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = CURRENT_DIR.parents[1] if CURRENT_DIR.name == "agents" else CURRENT_DIR.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.agents.orchestrator_agent import OrchestratorAgent
+from src.data_loader import load_agent_macro_data, load_daily_market_data
+from src.features import build_decision_feature_panel
+from src.time_split import build_weekly_decision_dates
 
 # Mappatura standard dei nomi degli agenti per leggibilità nei grafici
 AGENT_DISPLAY_NAMES = {
@@ -58,8 +65,8 @@ AGENT_DISPLAY_NAMES = {
 # Palette cromatica finanziaria standard
 SIGNAL_COLORS = {
     -1: "#E74C3C",  # Short: Rosso Corallo / Crimson
-    0: "#95A5A6",  # Flat: Grigio Ardesia / Slate
-    1: "#27AE60",  # Long: Verde Smeraldo / Emerald
+    0: "#95A5A6",   # Flat: Grigio Ardesia / Slate
+    1: "#27AE60",   # Long: Verde Smeraldo / Emerald
 }
 
 SIGNAL_LABELS = {
@@ -70,11 +77,119 @@ SIGNAL_LABELS = {
 
 
 # =====================================================================
+# AGGREGATORE MULTI-ASSET INTEGRATO (SOLUZIONE DEFINITIVA IMPORT ERROR)
+# =====================================================================
+
+class MultiAssetSignalAggregator:
+    """
+    Motore quantitativo di aggregazione segnali e asset allocation dinamica multi-asset.
+    """
+
+    def __init__(
+        self,
+        assets: Optional[List[str]] = None,
+        min_conf: float = 0.20,
+        rebalance_threshold: float = 0.05,
+        transaction_cost: float = 0.0,
+        vol_window: int = 26,
+    ):
+        self.assets = assets or ["SPY", "IEF", "GLD", "SHY"]
+        self.min_conf = float(min_conf)
+        self.rebalance_threshold = float(rebalance_threshold)
+        self.transaction_cost = float(transaction_cost)
+        self.vol_window = int(vol_window)
+
+    def determine_active_mask(
+        self,
+        signals_df: pd.DataFrame,
+        confidences_df: pd.DataFrame,
+    ) -> pd.DataFrame:
+        active_mask = pd.DataFrame(False, index=signals_df.index, columns=self.assets)
+
+        for asset in self.assets:
+            if asset not in signals_df.columns:
+                continue
+            s = signals_df[asset]
+            c = confidences_df[asset] if asset in confidences_df.columns else pd.Series(1.0, index=s.index)
+
+            if asset == "SPY":
+                short_signal = (s < 0) & (c >= self.min_conf)
+                active_mask[asset] = ~short_signal
+            else:
+                active_mask[asset] = (s == 1) & (c >= self.min_conf)
+
+        return active_mask
+
+    def build_target_weights(
+        self,
+        signals_df: pd.DataFrame,
+        confidences_df: pd.DataFrame,
+        returns_df: pd.DataFrame,
+        method: str = "equal_active",
+        max_weight_per_asset: float = 0.50,
+    ) -> pd.DataFrame:
+        common_idx = signals_df.index.intersection(returns_df.index)
+        sig = signals_df.loc[common_idx]
+        conf = confidences_df.loc[common_idx]
+
+        active_mask = self.determine_active_mask(sig, conf)
+        target_weights = pd.DataFrame(0.0, index=common_idx, columns=self.assets)
+
+        for t in common_idx:
+            active_assets_t = [a for a in self.assets if active_mask.loc[t, a]]
+
+            if not active_assets_t:
+                continue
+
+            if method == "equal_active":
+                w_each = 1.0 / len(active_assets_t)
+                for a in active_assets_t:
+                    target_weights.loc[t, a] = min(w_each, max_weight_per_asset)
+
+                tot = target_weights.loc[t].sum()
+                if 0 < tot < 1.0 and len(active_assets_t) > 1:
+                    target_weights.loc[t] = target_weights.loc[t] / tot
+
+        return target_weights
+
+
+def _run_backtest_no_costs(
+    positions_matrix: pd.DataFrame,
+    returns_matrix: pd.DataFrame,
+    rebalance_threshold: float = 0.05,
+) -> pd.DataFrame:
+    common_idx = positions_matrix.index.intersection(returns_matrix.index)
+    pos_target = positions_matrix.loc[common_idx]
+    rets = returns_matrix.loc[common_idx]
+
+    executed_positions = pd.DataFrame(0.0, index=common_idx, columns=pos_target.columns)
+    current_pos = pd.Series(0.0, index=pos_target.columns)
+
+    for t in common_idx:
+        target = pos_target.loc[t]
+        weight_changes = (target - current_pos).abs()
+
+        if (weight_changes >= rebalance_threshold).any():
+            current_pos = target.copy()
+
+        executed_positions.loc[t] = current_pos
+
+    shifted_pos = executed_positions.shift(1).fillna(0.0)
+    net_returns = (shifted_pos * rets).sum(axis=1)
+    equity_curve = (1.0 + net_returns).cumprod()
+
+    return pd.DataFrame({
+        "Return": net_returns,
+        "Equity": equity_curve,
+    })
+
+
+# =====================================================================
 # 1. FUNZIONI DI CARICAMENTO SEGNALI
 # =====================================================================
 def load_all_signals_for_asset(
-        asset: str = "SPY",
-        signals_dir: Optional[Union[str, Path]] = None,
+    asset: str = "SPY",
+    signals_dir: Optional[Union[str, Path]] = None,
 ) -> Dict[str, pd.DataFrame]:
     """Carica tutti i segnali disponibili per un determinato asset dalla cartella data/signals/."""
     asset_upper = asset.upper()
@@ -115,12 +230,12 @@ def load_all_signals_for_asset(
 # 2. FUNZIONE PRINCIPALE: PLOT DISTRIBUZIONE DEI SEGNALI PER ASSET
 # =====================================================================
 def plot_agent_signal_distributions(
-        asset: str = "SPY",
-        signals_dict: Optional[Dict[str, Union[pd.DataFrame, pd.Series]]] = None,
-        save_path: Optional[Union[str, Path]] = None,
-        show_plot: bool = False,
-        figsize: Tuple[int, int] = (16, 8),
-        title: Optional[str] = None,
+    asset: str = "SPY",
+    signals_dict: Optional[Dict[str, Union[pd.DataFrame, pd.Series]]] = None,
+    save_path: Optional[Union[str, Path]] = None,
+    show_plot: bool = False,
+    figsize: Tuple[int, int] = (16, 8),
+    title: Optional[str] = None,
 ) -> Tuple[plt.Figure, plt.Axes]:
     """Crea un plot che visualizza e confronta la distribuzione dei segnali per tutti gli agenti."""
     asset_upper = asset.upper()
@@ -245,10 +360,10 @@ def plot_agent_signal_distributions(
 # 3. FUNZIONE RIPRISTINATA PER I TEST (plot_all_assets_signal_distributions)
 # =====================================================================
 def plot_all_assets_signal_distributions(
-        assets: Optional[List[str]] = None,
-        signals_dir: Optional[Union[str, Path]] = None,
-        save_dir: Optional[Union[str, Path]] = None,
-        show_plots: bool = False,
+    assets: Optional[List[str]] = None,
+    signals_dir: Optional[Union[str, Path]] = None,
+    save_dir: Optional[Union[str, Path]] = None,
+    show_plots: bool = False,
 ) -> Dict[str, Tuple[plt.Figure, plt.Axes]]:
     """Genera e salva automaticamente il plot della distribuzione dei segnali per tutti gli asset."""
     if assets is None:
@@ -280,11 +395,11 @@ def plot_all_assets_signal_distributions(
 # 4. GRAFICO A TORTA DEI PESI DELL'ORCHESTRATORE PER ASSET
 # =====================================================================
 def plot_orchestrator_weights_pie(
-        assets: Optional[List[str]] = None,
-        config_dir: Optional[Union[str, Path]] = None,
-        save_path: Optional[Union[str, Path]] = None,
-        show_plot: bool = False,
-        figsize: Tuple[int, int] = (16, 12),
+    assets: Optional[List[str]] = None,
+    config_dir: Optional[Union[str, Path]] = None,
+    save_path: Optional[Union[str, Path]] = None,
+    show_plot: bool = False,
+    figsize: Tuple[int, int] = (16, 12),
 ) -> plt.Figure:
     """Genera un pannello con grafici a torta dei pesi assegnati dall'Orchestratore (GA) agli agenti."""
     if assets is None:
@@ -363,7 +478,7 @@ def plot_orchestrator_weights_pie(
         for autotext in autotexts:
             autotext.set_color("#2C3E50")
             autotext.set_fontsize(9.5)
-            autotext.set_fontweight("bold")
+            autotext.set_fontweight="bold"
 
         for text in texts:
             text.set_fontsize(10)
@@ -396,10 +511,184 @@ def plot_orchestrator_weights_pie(
 
 
 # =====================================================================
-# 5. FUNZIONE AUTOMATICA COMPLETA (FA TUTTO)
+# 5. CONFRONTO CURVE DI EQUITY (3 ASSET VS 4 ASSET VS BENCHMARK)
+# =====================================================================
+# =====================================================================
+# 5. CONFRONTO CURVE DI EQUITY E DRAWDOWN (3 ASSET VS 4 ASSET VS BENCHMARK)
+# =====================================================================
+# =====================================================================
+# 5. CONFRONTO CURVE DI EQUITY E DRAWDOWN (3 ASSET VS 4 ASSET VS BENCHMARK)
+# =====================================================================
+def plot_equity_curves_comparison(
+        start_date: str = "2021-01-01",
+        end_date: Optional[str] = None,
+        title_suffix: str = "Out-Of-Sample (2021 - 2026)",
+        save_filename: str = "equity_curves_comparison.png",
+) -> plt.Figure:
+    """
+    Genera e salva un grafico a doppio pannello:
+    - Pannello 1: Curve di Equity (Moltiplicatore patrimonio).
+    - Pannello 2: Andamento temporale del Drawdown percentuale (MDD).
+    """
+    all_assets = ["SPY", "IEF", "GLD", "SHY"]
+    assets_3 = ["SPY", "IEF", "GLD"]
+    assets_4 = ["SPY", "IEF", "GLD", "SHY"]
+    cap = 0.50
+
+    with open(PROJECT_ROOT / "config.yaml", "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    daily_market, _ = load_daily_market_data(config, PROJECT_ROOT)
+    decision_dates = build_weekly_decision_dates(daily_market).index
+
+    df_panel = build_decision_feature_panel(daily_market, decision_dates)
+    macro_df = load_agent_macro_data(decision_dates=df_panel.index, root_dir=PROJECT_ROOT)
+    df_full = df_panel.join(macro_df, how="left")
+
+    returns_dict = {a: df_full[f"{a}_close"].pct_change() for a in all_assets}
+    returns_full = pd.DataFrame(returns_dict).dropna()
+
+    signals_dict, confs_dict = {}, {}
+    cfg_dir = PROJECT_ROOT / "src" / "agents" / "config"
+
+    for asset in all_assets:
+        cfg_file = cfg_dir / f"orchestrator_params_{asset.lower()}.json"
+        with open(cfg_file, "r", encoding="utf-8") as f:
+            cfg_data = json.load(f)
+
+        orch = OrchestratorAgent(target_asset=asset)
+        orch._apply_params(cfg_data.get("best_params", {}))
+
+        pool = orch._build_signals_pool_from_df(df_full)
+        combined = orch.combine(pool)
+
+        signals_dict[asset] = combined["signal"]
+        confs_dict[asset] = combined["confidence"]
+
+    signals_full = pd.DataFrame(signals_dict)
+    confidences_full = pd.DataFrame(confs_dict)
+
+    common_idx = signals_full.index.intersection(returns_full.index)
+    mask = common_idx >= start_date
+    if end_date:
+        mask = mask & (common_idx <= end_date)
+
+    target_idx = common_idx[mask]
+
+    sig_eval = signals_full.loc[target_idx]
+    conf_eval = confidences_full.loc[target_idx]
+    rets_eval = returns_full.loc[target_idx]
+
+    # 1. Equal Active 3 Asset
+    agg_3 = MultiAssetSignalAggregator(assets=assets_3, min_conf=0.20, rebalance_threshold=0.05)
+    w_3 = agg_3.build_target_weights(sig_eval[assets_3], conf_eval[assets_3], rets_eval[assets_3],
+                                     max_weight_per_asset=cap)
+    bt_3 = _run_backtest_no_costs(w_3, rets_eval[assets_3])
+
+    # 2. Equal Active 4 Asset
+    agg_4 = MultiAssetSignalAggregator(assets=assets_4, min_conf=0.20, rebalance_threshold=0.05)
+    w_4 = agg_4.build_target_weights(sig_eval[assets_4], conf_eval[assets_4], rets_eval[assets_4],
+                                     max_weight_per_asset=cap)
+    bt_4 = _run_backtest_no_costs(w_4, rets_eval[assets_4])
+
+    # 3. Buy & Hold SPY
+    pos_spy = pd.DataFrame(0.0, index=target_idx, columns=all_assets)
+    pos_spy["SPY"] = 1.0
+    bt_spy = _run_backtest_no_costs(pos_spy, rets_eval[all_assets])
+
+    # 4. Buy & Hold SHY
+    pos_shy = pd.DataFrame(0.0, index=target_idx, columns=all_assets)
+    pos_shy["SHY"] = 1.0
+    bt_shy = _run_backtest_no_costs(pos_shy, rets_eval[all_assets])
+
+    # Dataframe Equity
+    equity_df = pd.DataFrame({
+        "Equal Active (3 Asset: SPY/IEF/GLD)": bt_3["Equity"],
+        "Equal Active (4 Asset: incl. SHY)": bt_4["Equity"],
+        "Buy & Hold (100% SPY)": bt_spy["Equity"],
+        "Buy & Hold (100% SHY)": bt_shy["Equity"],
+    })
+
+    # Calcolo serie del Drawdown (%) per ciascuna strategia
+    drawdown_df = (equity_df - equity_df.cummax()) / equity_df.cummax() * 100.0
+
+    plt.style.use("seaborn-v0_8-whitegrid" if "seaborn-v0_8-whitegrid" in plt.style.available else "default")
+
+    # Creazione figura a 2 Subplot verticali (sharex per allineare l'asse temporale)
+    fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, figsize=(14, 10), dpi=150, sharex=True,
+                                   gridspec_kw={'height_ratios': [2, 1]})
+
+    colors = {
+        "Equal Active (3 Asset: SPY/IEF/GLD)": "#2980B9",  # Blu Navy
+        "Equal Active (4 Asset: incl. SHY)": "#27AE60",  # Verde Smeraldo
+        "Buy & Hold (100% SPY)": "#E74C3C",  # Rosso Corallo
+        "Buy & Hold (100% SHY)": "#7F8C8D",  # Grigio Ardesia
+    }
+
+    linestyles = {
+        "Equal Active (3 Asset: SPY/IEF/GLD)": "-",
+        "Equal Active (4 Asset: incl. SHY)": "-",
+        "Buy & Hold (100% SPY)": "--",
+        "Buy & Hold (100% SHY)": ":",
+    }
+
+    # ------------------------------------------------------------------
+    # SUBPLOT 1: CURVE DI EQUITY
+    # ------------------------------------------------------------------
+    for col in equity_df.columns:
+        ax1.plot(
+            equity_df.index,
+            equity_df[col],
+            label=col,
+            color=colors.get(col, None),
+            linestyle=linestyles.get(col, "-"),
+            linewidth=2.2 if "Equal" in col else 1.8,
+        )
+
+    ax1.set_title(f"Confronto Performance e Rischio — {title_suffix}", fontsize=14, fontweight="bold", pad=12)
+    ax1.set_ylabel("Moltiplicatore Patrimonio (Base = 1.0)", fontsize=11, fontweight="bold")
+    ax1.grid(True, linestyle="--", alpha=0.5)
+    ax1.legend(loc="upper left", frameon=True, framealpha=0.95, fontsize=10)
+
+    # ------------------------------------------------------------------
+    # SUBPLOT 2: ANDAMENTO DRAWDOWN (%)
+    # ------------------------------------------------------------------
+    for col in drawdown_df.columns:
+        ax2.plot(
+            drawdown_df.index,
+            drawdown_df[col],
+            label=col,
+            color=colors.get(col, None),
+            linestyle=linestyles.get(col, "-"),
+            linewidth=1.8 if "Equal" in col else 1.4,
+            alpha=0.85,
+        )
+        # Riempimento per evidenziare visivamente la profondità del Drawdown per le strategie quant
+        if "Equal Active (4 Asset" in col:
+            ax2.fill_between(drawdown_df.index, drawdown_df[col], 0, color=colors[col], alpha=0.1)
+
+    ax2.set_ylabel("Drawdown (%)", fontsize=11, fontweight="bold")
+    ax2.set_xlabel("Data", fontsize=11, fontweight="bold")
+    ax2.yaxis.set_major_formatter(mtick.PercentFormatter(xmax=100.0, decimals=0))
+    ax2.grid(True, linestyle="--", alpha=0.5)
+
+    plots_dir = PROJECT_ROOT / "data" / "results" / "plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    save_path = plots_dir / save_filename
+
+    plt.tight_layout()
+    fig.savefig(save_path, dpi=200, bbox_inches="tight")
+    print(f"[Equity & Drawdown Plot] Grafico salvato in: {save_path.resolve()}")
+    plt.close(fig)
+
+    return fig
+
+
+# =====================================================================
+# 6. FUNZIONE AUTOMATICA COMPLETA (FA TUTTO)
 # =====================================================================
 def run_all_plots(assets: Optional[List[str]] = None, show_plots: bool = False) -> None:
-    """Esegue automaticamente tutti i plot diagnostici e di allocazione per tutti gli asset."""
+    """Esegue automaticamente tutti i plot diagnostici, di allocazione e le curve di equity per tutti gli asset."""
     if assets is None:
         assets = ["SPY", "IEF", "GLD", "SHY"]
 
@@ -407,16 +696,33 @@ def run_all_plots(assets: Optional[List[str]] = None, show_plots: bool = False) 
     print("      AVVIO GENERAZIONE AUTOMATICA DI TUTTI I GRAFICI E DIAGNOSTICA")
     print("=" * 90)
 
-    # 1. Distribuzione segnali per ogni asset tramite plot_all_assets_signal_distributions
-    print("\n--- [1/2] Generazione Grafici Distribuzione Segnali ---")
+    # 1. Distribuzione segnali per ogni asset
+    print("\n--- [1/3] Generazione Grafici Distribuzione Segnali ---")
     plot_all_assets_signal_distributions(assets=assets, show_plots=show_plots)
 
     # 2. Pie chart dei pesi dell'Orchestratore multi-asset
-    print("\n--- [2/2] Generazione Grafico a Torta Pesi Orchestratore ---")
+    print("\n--- [2/3] Generazione Grafico a Torta Pesi Orchestratore ---")
     try:
         plot_orchestrator_weights_pie(assets=assets, show_plot=show_plots)
     except Exception as e:
         print(f"[Orchestrator Pie] Errore nella generazione del grafico a torta: {e}")
+
+    # 3. Curve di Equity (OOS e IS)
+    print("\n--- [3/3] Generazione Grafici Curve di Equity Comparative ---")
+    try:
+        plot_equity_curves_comparison(
+            start_date="2021-01-01",
+            title_suffix="Out-Of-Sample (2021 - 2026)",
+            save_filename="equity_curves_oos.png",
+        )
+        plot_equity_curves_comparison(
+            start_date="2005-05-20",
+            end_date="2020-12-30",
+            title_suffix="In-Sample / Train (2005 - 2020)",
+            save_filename="equity_curves_is.png",
+        )
+    except Exception as e:
+        print(f"[Equity Curves] Errore durante il calcolo delle curve di equity: {e}")
 
     print("\n" + "=" * 90)
     print("  [OK] PROCESSO DI VISUALIZZAZIONE E PLOTTING COMPLETATO CON SUCCESSO.")
@@ -425,7 +731,7 @@ def run_all_plots(assets: Optional[List[str]] = None, show_plots: bool = False) 
 
 
 # =====================================================================
-# 6. ENTRY POINT CLI
+# 7. ENTRY POINT CLI
 # =====================================================================
 if __name__ == "__main__":
     import argparse
