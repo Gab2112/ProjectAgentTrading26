@@ -511,13 +511,7 @@ def plot_orchestrator_weights_pie(
 
 
 # =====================================================================
-# 5. CONFRONTO CURVE DI EQUITY (3 ASSET VS 4 ASSET VS BENCHMARK)
-# =====================================================================
-# =====================================================================
-# 5. CONFRONTO CURVE DI EQUITY E DRAWDOWN (3 ASSET VS 4 ASSET VS BENCHMARK)
-# =====================================================================
-# =====================================================================
-# 5. CONFRONTO CURVE DI EQUITY E DRAWDOWN (3 ASSET VS 4 ASSET VS BENCHMARK)
+# 5. CONFRONTO RENDIMENTO CUMULATO (%) E DRAWDOWN (3 ASSET VS 4 ASSET VS BENCHMARK)
 # =====================================================================
 def plot_equity_curves_comparison(
         start_date: str = "2021-01-01",
@@ -527,7 +521,7 @@ def plot_equity_curves_comparison(
 ) -> plt.Figure:
     """
     Genera e salva un grafico a doppio pannello:
-    - Pannello 1: Curve di Equity (Moltiplicatore patrimonio).
+    - Pannello 1: Rendimento Percentuale Cumulato (%).
     - Pannello 2: Andamento temporale del Drawdown percentuale (MDD).
     """
     all_assets = ["SPY", "IEF", "GLD", "SHY"]
@@ -601,7 +595,7 @@ def plot_equity_curves_comparison(
     pos_shy["SHY"] = 1.0
     bt_shy = _run_backtest_no_costs(pos_shy, rets_eval[all_assets])
 
-    # Dataframe Equity
+    # Dataframe Curve di Equity
     equity_df = pd.DataFrame({
         "Equal Active (3 Asset: SPY/IEF/GLD)": bt_3["Equity"],
         "Equal Active (4 Asset: incl. SHY)": bt_4["Equity"],
@@ -609,20 +603,22 @@ def plot_equity_curves_comparison(
         "Buy & Hold (100% SHY)": bt_shy["Equity"],
     })
 
-    # Calcolo serie del Drawdown (%) per ciascuna strategia
+    # Dataframe Rendimento Percentuale Cumulato (%)
+    returns_cum_df = (equity_df - 1.0) * 100.0
+
+    # Dataframe Drawdown (%) per ciascuna strategia
     drawdown_df = (equity_df - equity_df.cummax()) / equity_df.cummax() * 100.0
 
     plt.style.use("seaborn-v0_8-whitegrid" if "seaborn-v0_8-whitegrid" in plt.style.available else "default")
 
-    # Creazione figura a 2 Subplot verticali (sharex per allineare l'asse temporale)
     fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, figsize=(14, 10), dpi=150, sharex=True,
                                    gridspec_kw={'height_ratios': [2, 1]})
 
     colors = {
-        "Equal Active (3 Asset: SPY/IEF/GLD)": "#2980B9",  # Blu Navy
-        "Equal Active (4 Asset: incl. SHY)": "#27AE60",  # Verde Smeraldo
-        "Buy & Hold (100% SPY)": "#E74C3C",  # Rosso Corallo
-        "Buy & Hold (100% SHY)": "#7F8C8D",  # Grigio Ardesia
+        "Equal Active (3 Asset: SPY/IEF/GLD)": "#2980B9",
+        "Equal Active (4 Asset: incl. SHY)": "#27AE60",
+        "Buy & Hold (100% SPY)": "#E74C3C",
+        "Buy & Hold (100% SHY)": "#7F8C8D",
     }
 
     linestyles = {
@@ -633,20 +629,23 @@ def plot_equity_curves_comparison(
     }
 
     # ------------------------------------------------------------------
-    # SUBPLOT 1: CURVE DI EQUITY
+    # SUBPLOT 1: RENDIMENTO PERCENTUALE CUMULATO (%)
     # ------------------------------------------------------------------
-    for col in equity_df.columns:
+    for col in returns_cum_df.columns:
         ax1.plot(
-            equity_df.index,
-            equity_df[col],
+            returns_cum_df.index,
+            returns_cum_df[col],
             label=col,
             color=colors.get(col, None),
             linestyle=linestyles.get(col, "-"),
             linewidth=2.2 if "Equal" in col else 1.8,
         )
 
-    ax1.set_title(f"Confronto Performance e Rischio — {title_suffix}", fontsize=14, fontweight="bold", pad=12)
-    ax1.set_ylabel("Moltiplicatore Patrimonio (Base = 1.0)", fontsize=12, fontweight="bold")
+    ax1.axhline(0.0, color="#333333", linestyle="-", linewidth=0.8, alpha=0.7)
+    ax1.set_title(f"Confronto Rendimento Cumulato (%) e Rischio — {title_suffix}", fontsize=14, fontweight="bold",
+                  pad=12)
+    ax1.set_ylabel("Rendimento Cumulato (%)", fontsize=11, fontweight="bold")
+    ax1.yaxis.set_major_formatter(mtick.PercentFormatter(xmax=100.0, decimals=0))
     ax1.grid(True, linestyle="--", alpha=0.5)
     ax1.legend(loc="upper left", frameon=True, framealpha=0.95, fontsize=10)
 
@@ -663,7 +662,6 @@ def plot_equity_curves_comparison(
             linewidth=1.8 if "Equal" in col else 1.4,
             alpha=0.85,
         )
-        # Riempimento per evidenziare visivamente la profondità del Drawdown per le strategie quant
         if "Equal Active (4 Asset" in col:
             ax2.fill_between(drawdown_df.index, drawdown_df[col], 0, color=colors[col], alpha=0.1)
 
@@ -678,7 +676,7 @@ def plot_equity_curves_comparison(
 
     plt.tight_layout()
     fig.savefig(save_path, dpi=200, bbox_inches="tight")
-    print(f"[Equity & Drawdown Plot] Grafico salvato in: {save_path.resolve()}")
+    print(f"[Return & Drawdown Plot] Grafico salvato in: {save_path.resolve()}")
     plt.close(fig)
 
     return fig
