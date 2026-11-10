@@ -3,7 +3,7 @@
 **Project:** ProjectAgentTrading26
 **Course:** Data-Driven Models for Investment, LUISS Guido Carli
 **Research snapshot:** 7 November 2026
-**Status:** Final out-of-sample evaluation completed; software release preparation ongoing
+**Status:** Original final OOS evaluation frozen and complete; this is the archived candidate report, not the separate post-freeze SMA200 report
 **Study design:** Systematic multi-asset allocation with frozen agent inference and daily execution accounting
 
 ---
@@ -17,6 +17,8 @@ The final strategy and model artifacts were frozen using information through **3
 **Principal finding:** The final Core-Satellite strategy **did not outperform** either SPY Buy & Hold or a weekly rebalanced 60/40 SPY-IEF portfolio. It achieved a 5.872% CAGR and a 0.551 Sharpe ratio, compared with 13.116% and 0.799 for SPY, and 7.388% and 0.694 for the 60/40 benchmark. Its OOS maximum drawdown was also worse than both comparators.
 
 The research therefore offers an inspectable systematic-trading engineering workflow and an informative **negative empirical result**, not evidence of a deployable alpha strategy. An unresolved limitation is that historic FRED macroeconomic vintages and precise information-release timing have not been fully verified point-in-time.
+
+**Historical scope note (10 November 2026).** This document preserves the original frozen candidate and its official evaluation. The later 2023–2026 slice and regime-adaptive SMA200 results are documented separately in [`regime_adaptive_exploratory_2026.md`](regime_adaptive_exploratory_2026.md); they do not revise the performance in this report.
 
 ## 2. Research Question and Testable Claims
 
@@ -344,9 +346,7 @@ understand nested frozen `best_params` with asymmetric thresholds. Use
 validates and reconstructs the exact effective weights and directional
 thresholds without modifying the frozen agent implementation.
 
-**CI history:** 272 tests passed on the complete GitHub research branch and
-GitHub Actions. This **reduced submission** carries its own focused tests;
-it does not include the complete historical 272-test suite.
+**Testing scope:** The local Group 9 checkout was reported to pass **275 tests, 5 skipped** on 10 November 2026. This historical report was originally drafted alongside a smaller standalone release ZIP; its test counts and file-map examples should not be confused with the current full Git branch. GitHub Actions tests the tracked source tree, but does not restore all ignored frozen model/report artifacts for a complete release audit.
 
 ## 13. Research Interpretation
 
@@ -364,7 +364,7 @@ The contrast between encouraging development drawdowns and weaker OOS performanc
 6. **Artifact availability:** The Git tree alone is not a complete frozen scientific archive; binaries and generated artifacts need controlled restoration.
 7. **No post-test retuning:** Any later rule modification constitutes a new experiment and must not retroactively rewrite the frozen OOS result.
 
-## 15. Release and Submission Checklist
+## 15. Release and Submission Checklist (historical snapshot; recheck at final packaging)
 
 - [x] Define and freeze the 2010-2021 selected candidate.
 - [x] Preserve model and training provenance.
@@ -375,14 +375,14 @@ The contrast between encouraging development drawdowns and weaker OOS performanc
 - [x] Create a scientific backup ZIP and release artifact index.
 - [x] Add release integrity and archived-result CLI commands.
 - [x] Add the frozen development comparison CLI.
-- [x] Pass 272 automated tests locally.
+- [x] Local test run on 10 November 2026: **275 tests, 5 skipped, zero failures** (user-provided test output).
 - [x] Add a final-status entry point to `README.md`.
 - [x] Clearly distinguish historical A/B/C from the final strategy.
 - [x] Include model and data artifacts needed by the submission.
 - [ ] Verify this revised submission on a fresh Python 3.11 environment (current container: Python 3.13).
-- [x] Original research branch PR #3: 272-test CI passed.
+- [x] Preserve historical CI evidence separately from a full package audit; no claim of a current 275-test GitHub Actions run.
 - [ ] Team review and merge of the original research PR.
-- [ ] Add the LUISS final presentation after the Monday briefing.
+- [ ] Add the finalized presentation to the project root and the required outer ZIP root.
 
 ## 16. Final Conclusion
 

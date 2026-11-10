@@ -1,117 +1,141 @@
-# Final Release Reproducibility | 7 November 2026
+# Reproducibility and Final Group 9 Submission | 10 November 2026
 
-This runbook documents the **frozen Core-Satellite** experiment, not the
-historical 2010-2016 C_v1/C_v2 exploratory comparisons.
+**Project:** ProjectAgentTrading26 | **Course:** Data-Driven Models for Investment (LUISS)
 
-## Inputs and boundaries
+This document describes the **current source branch** and the expected **complete
+course submission**, not a claim that a new archive has already been built or tested.
+The 7 November scientific freeze and original evaluation remain unchanged.
 
-- Development: 2010-2021; all agent and orchestrator fitting/selection.
-- Protected OOS: January 2022 to 9 October 2026; frozen evaluation once.
-- Frozen manifest: `reports/development_freeze_2021.json` (47 hashes).
-- Data audit: `reports/oos_input_audit.json`.
-- Signal provenance: `reports/oos_signals/inference_provenance.json`.
-- Evaluation provenance: `reports/oos_final_2022_2026/evaluation_provenance.json`.
-- Release index: `reports/release_artifact_index.json` (13 artifacts).
-- Selected model: Core35_Satellite65, 35% SPY Core, 65% dynamic Satellite.
+## 1. Evidence layers: do not confuse their roles
 
-## Software environment
+| Evidence | Location | Interpretation |
+|---|---|---|
+| Original scientific freeze | `reports/development_freeze_2021.json` | Checksums for **47 original code/model/input files** |
+| Input integrity | `reports/oos_input_audit.json` | Historical raw-input checks |
+| Model inference provenance | `reports/oos_signals/inference_provenance.json` | Frozen OOS agent-signal provenance |
+| Registered final evaluation | `reports/oos_final_2022_2026/` | Official archived 2022–2026 NAV, metrics and weights |
+| Release evidence | `reports/release_artifact_index.json` | Checksums for **13 release artifacts** |
+| Submission manifest | `project/PACKAGE_MANIFEST.json` **inside the final ZIP** | Checks all project files *after* documentation, slides and report copies are finalized |
 
-Python **3.11** and the dependencies from `requirements.txt` are required.
-On macOS, verify the chosen interpreter using `python3.11 --version` and
-avoid accidentally using the system's Python 3.13 for this release.
+The 47-file freeze and the 13-artifact index are **historical records**: do not
+regenerate or rewrite them when updating Markdown or packaging. The release
+index intentionally refers to an earlier scientific integration commit, not
+necessarily to the latest documentation commit. `release_config.yaml` is a
+read-only specification of the selected strategy, while `config.yaml` retains
+its historical development settings: neither is a prompt to retune the model.
 
-```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
+## 2. Restoring a complete working project
+
+Use **Python 3.11**. The Git repository contains tracked source and raw data,
+but may **not** contain generated inputs (`data/processed/`, `data/signals/`),
+frozen `.joblib` agent models or `reports/`. A source-only clone is **not** a
+complete release. Obtain the finished `group_9.zip` rather than claiming a
+source clone can replay the original evaluation unaided.
+
+Expected course archive layout:
+
+```text
+group_9.zip
+|-- project/
+|   |-- README.md
+|   |-- main.py
+|   |-- config.yaml
+|   |-- release_config.yaml
+|   |-- requirements.txt
+|   |-- PACKAGE_MANIFEST.json
+|   |-- src/  data/  reports/  docs/  tests/
+|   |-- presentation.pptx           # optional duplicate in project root
+|   `-- final_report.tex            # optional, after final editorial review
+`-- presentation.pptx              # REQUIRED by LUISS at the ZIP outer root
 ```
 
-The CI environment independently installs dependencies from this file.
-In practice, dependency resolution on a new date may differ if a package
-is no longer available for that platform; record versions if divergence
-occurs. FinBERT (`torch`, `transformers`) is optional and not required.
+If the final deck is a PDF, the outer item may instead be `presentation.pdf`.
+The optional report's eventual exact filename should match the actual release;
+it is **not** yet guaranteed to exist. The `.github/workflows` directory may
+be included for source provenance; it is not required to run tests locally.
 
-## Clean restoration: preferred single-archive method
-
-Receive the separately distributed file
-`ProjectAgentTrading26_RELEASE_20261107.zip` and its SHA-256 checksum.
-The archive contains Git-tracked code and documents, frozen model binaries,
-ignored development inputs, OOS reports and a `RELEASE_MANIFEST.json`.
-
-On a machine with Python 3.11:
+For a fresh extraction:
 
 ```bash
-mkdir ProjectAgentTrading26_reproduced
-cd ProjectAgentTrading26_reproduced
-unzip ../ProjectAgentTrading26_RELEASE_20261107.zip
+unzip group_9.zip
+cd project
 python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 python main.py --release-action audit
 python main.py --release-action frozen-results
-python main.py --core-development
+python main.py --release-action verify-models
+python main.py --release-action replay
 python -m unittest discover -s tests -p 'test_*.py' -q
 ```
 
-The archive is not itself a Git clone and does not contain `.git` history.
-If Git history is required, clone the official repository and copy the
-archive's *ignored data/model/report files* into the clone without
-overwriting a different tracked source version. Check frozen hashes after
-restoration. Never restore onto a dirty original `modulo-C` worktree.
+The full unit suite includes tests for training and utilities; the audit and
+replay specifically depend on the separately archived model/signal/report
+artifacts. A short CI run on GitHub **does not** prove the packaged scientific
+release is complete. MacOS and Linux may differ in solver/library behavior;
+record the Python version and actual package installation results.
 
-## What each command verifies
+## 3. Correct interpretation of commands
 
-**`--release-action audit`** hashes archived files and checks provenance;
-it must be run after restoring the ignored artifact files. It does not
-execute the OOS evaluator. The original scientific backup ZIP is optional
-if absent from a separately unpacked distribution; the audit will note
-its absence rather than claiming to verify it.
+| Command | What it does | What it does **not** do |
+|---|---|---|
+| `python main.py` | Audit and read archived final metrics | Fit or optimize models |
+| `python main.py --release-action audit` | Verify freeze/input/release hashes, decision dates and optional package manifest | Run OOS training or backtesting |
+| `python main.py --release-action frozen-results` | Read archived OOS comparison | Change the frozen strategy |
+| `python main.py --release-action verify-models` | Check the four frozen Orchestrators can load | Retrain RF/SVM/GA |
+| `python main.py --release-action replay` | Reconstruct **the same** OOS strategy in an isolated working copy and compare archived outputs | Re-select a candidate or claim a fresh independent OOS |
+| `python main.py --level CORE` | Re-evaluate the archived 2010–2021 development strategy | Open the final OOS for tuning |
+| `python main.py --level C` | Development-only historical B/C consensus study | Run the selected Core portfolio |
+| `python main.py --analysis temporal-robustness` | Report existing continuous NAV series over 2022 and 2023–2026 slices | Train a 2022-extended model or create a new test |
+| `python main.py --analysis regime-adaptive` | Retrospective conditional-SMA200 research on saved frozen agents and prices | Change archived Core OOS metrics or demonstrate validated alpha |
 
-**`--release-action frozen-results`** reads archived evaluation metrics
-after the audit. It does not recompute OOS forecasts, refit models or
-backtest the final period.
+For optional research CSV output, `--analysis regime-adaptive --output-dir
+exploratory_outputs` saves a file outside protected folders. The output
+must not be placed in `data/`, `reports/`, `docs/`, `src/`, `tests/` or
+`figures/` inside the checked-out project.
 
-**`--core-development`** recalculates the 2010-2021 development performance
-using existing trained models/signals. This does run a development
-backtest, but does not train agents or optimize the GA Orchestrator.
+## 4. Source-of-truth results and limitations
 
-**Unit tests** cover pipeline behavior and release/development dispatch.
-They do not certify macro data vintages or turn a historical simulation
-into a live-executable strategy.
+The **official unchanged** OOS comparison covers 7 January 2022 to
+9 October 2026 (1,193 daily observations, 249 weekly decisions):
 
-## Data distribution rules
+| Strategy | CAGR | Sharpe | Maximum drawdown |
+|---|---:|---:|---:|
+| Frozen Core35–Satellite65 | 5.872% | 0.551 | −26.543% |
+| SPY buy & hold | 13.116% | 0.799 | −23.424% |
+| Weekly 60/40 SPY/IEF | 7.388% | 0.694 | −19.840% |
 
-Git tracks raw market/macro snapshots and source code. The following
-local paths are not fully included in Git and must be restored through
-the release artifact package: `data/processed/`, `data/signals/`,
-`src/agents/config/*.joblib` and `reports/`. The packaging script checks
-the 47 original frozen checksums, the raw-input audit and 13 release files
-before collecting these paths. All archive member paths are relative to
-the repository root.
+The 2023–2026 retrospective Core CAGR **14.343%** is a continuous historical
+slice, **not** a 2023-start retrained OOS. The Regime-Adaptive SMA200 variant
+showed 2022–2026 **9.805% CAGR**, **0.912 Sharpe**, **−12.802% MDD**, but is
+post-freeze research; see `docs/regime_adaptive_exploratory_2026.md`.
+Historical FRED vintages are not fully point-in-time verified. Fixed
+commission/slippage/borrow fees and stylized execution are not live quotes.
 
-Keep the original pre-OOS scientific backup
-`ProjectAgentTrading26_frozen_20261107.zip` separately if long-term
-provenance of the initial freeze is required. It predates later CLI/docs
-commits. The consolidated `ProjectAgentTrading26_RELEASE_20261107.zip`
-is the deliverable for code-and-artifacts restoration.
+The supplemental HAC alpha p-values (SPY 0.344; 60/40 0.200; Core 0.055) are
+not produced by the public CLI and **not** part of the scientific 47-file
+freeze. If the group includes them in the final report, retain and identify
+the supplemental daily-return input and calculation script separately.
 
-## What is and is not reproduced
+## 5. Final release verification (not yet completed)
 
-**Reproduced:** archived strategy and benchmark NAV/metrics, checksum
-checks, frozen development comparison, and local unit tests.
+After the last source/document/deck/report change, regenerate the distribution
+`PACKAGE_MANIFEST.json` from the **actual files under `project/`**, excluding
+`.git`, `.venv`, caches, transient logs and the manifest itself. The check is
+strict: an added file can cause `audit_release` to fail until indexed.
 
-**Not claimed:** validation on true historical FRED macro vintages,
-independently established live-trading profitability, or portability
-to an environment with missing binary model dependencies.
+From a **fresh extracted copy** of `group_9.zip`:
 
-The final OOS result was negative: CAGR 5.872% and Sharpe 0.551 for
-Core35_Satellite65, below SPY (13.116%, 0.799) and 60/40 (7.388%,
-0.694). Do not re-optimize the model using these test results.
+1. Check that `project/` and **outer** `presentation.pptx` or `.pdf` exist.
+2. Run `python main.py --release-action audit` and `--release-action replay`.
+3. Run `python -m unittest discover -s tests -p 'test_*.py' -q`.
+4. Verify official and supplemental figures match their source files.
+5. Independently verify the ZIP file list, manifest SHA-256 entries and the
+   presentation/report binary integrity after packaging.
 
-## GitHub Actions limitation
-
-`.github/workflows/unit-tests.yml` runs the ordinary Python unit suite
-for pull requests. It prepares training-period data from tracked raw
-sources, but does **not** install ignored frozen `.joblib` models or OOS
-reports. Therefore a green PR build is **not** a full frozen-release
-audit. That additional check must pass using the distributed release ZIP.
+Keep `reports/` and `.joblib` files in the distributed scientific package even
+if they remain ignored or untracked in Git; deleting them breaks
+reproduction. The original `ProjectAgentTrading26_frozen_20261107.zip`, if
+available, is an **external historical backup**, not a replacement for the
+current complete LUISS submission. GitHub Actions verifies tracked-source
+behavior, not the complete original OOS archive.

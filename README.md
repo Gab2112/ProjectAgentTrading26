@@ -2,7 +2,7 @@
 
 **LUISS Guido Carli — Data-Driven Models for Investment**
 **Research system:** multi-asset systematic trading with quantitative agents
-**Document revision:** 9 November 2026 · **Code reference:** `integrazione-finale`, commit `5e2f2b0`
+**Scientific documentation review:** 10 November 2026 · **Code reference:** branch `integrazione-finale`; the frozen experiment is identified by `reports/development_freeze_2021.json`
 
 > **Reading guide.** The archived **Core35–Satellite65** strategy is the official, pre-2022-frozen candidate. Temporal-slice statistics and the **Regime-Adaptive SMA200** extension are subsequent research diagnostics. They are not replacements for, or independent new out-of-sample validations of, the official candidate.
 
@@ -40,7 +40,7 @@ The archived NAVs were also summarized separately for 2022 and **3 January 2023�
 | SPY buy and hold | 22.381% | 1.431 | −18.755% |
 | 60/40 SPY–IEF | 14.061% | 1.428 | −10.505% |
 
-This helps quantify the effect of the exceptionally difficult 2022 sample; it does **not** justify dropping 2022 from the official test.
+The archived Core lost **20.787% cumulatively in the 2022 portion** (2022 segment CAGR **−21.160%**). The 2023–2026 values are a retrospective slice; they do **not** justify excluding 2022 from the official comparison or claiming a newly trained 2023-start OOS experiment.
 
 ### Regime-Adaptive SMA200 research extension
 
@@ -57,7 +57,7 @@ The SMA200 uses information observable at the decision close and the result is e
 | B/C-inspired Long/Flat filter, always enabled | 8.928% | 11.280% | 1.166 | −8.506% |
 | **Regime-Adaptive SMA200** | **10.599%** | **9.805%** | **0.912** | **−12.802%** |
 
-The adaptive strategy underperformed the original in development. Exploratory HAC/Newey–West regressions do **not** establish positive alpha significant at the 5% level versus SPY (p≈0.344), 60/40 (p≈0.200), or the frozen Core strategy (p≈0.055), using a 5-lag daily-return specification. These p-values are diagnostic and do not correct for multiple strategy searches. The alternative is **not presented as a statistically validated alpha generator**.
+The adaptive strategy underperformed the original in development. Exploratory daily-return **regression-intercept alpha** tests (Newey–West HAC, 5 lags; intercept × 252, zero risk-free assumption) are not significant at 5%: SPY **+2.55% annualized, p≈0.344**; weekly 60/40 **+3.66%, p≈0.200**; frozen Core **+5.01%, p≈0.055**. These results come from a **separate supplemental analysis**, not the frozen release manifest, and are not adjusted for searching multiple variants. The alternative is **not a statistically validated alpha generator**.
 
 **Important architecture distinction:** the historical `C_v1`/`C_v2` modules include **B_v2 macro budgets** and a **126-session covariance-based 8% ex-ante volatility cap**. The Regime-Adaptive *Core* strategy reuses the **B/C idea of momentum-plus-agent agreement**, **not** those macro budgets or the 8% cap. It is not identical to standalone Level C.
 
@@ -108,7 +108,7 @@ python main.py --analysis regime-adaptive --output-dir exploratory_outputs
 python -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-The research commands do **not** overwrite frozen output. Optional research CSV export must not target `data/`, `reports/`, `src/`, `docs/`, `tests/` or `figures/`. Avoid committing `exploratory_outputs/` unless deliberately curating an appendix.
+The research commands do **not** overwrite frozen output. Optional research CSV export must not target `data/`, `reports/`, `src/`, `docs/`, `tests/` or `figures/`. Avoid committing `exploratory_outputs/` unless deliberately curating an appendix. For complete ZIP restoration and the distinction between Git source and the submission, consult [`docs/reproducibility_release_2026.md`](docs/reproducibility_release_2026.md).
 
 ## 5. Architecture: how B, C and the Core relate
 
@@ -168,7 +168,7 @@ The **official Core35/65 does not run standalone C**. The newer regime extension
 | `tests/` | Repository and exploratory regression checks |
 | `PACKAGE_MANIFEST.json` | Full **submission ZIP** file integrity index (rebuild when packaging) |
 
-The historical **47-file scientific freeze** and the **13-file release artifact index** must remain unchanged when editing ordinary documentation. `PACKAGE_MANIFEST.json` is a separate manifest of files **inside `project/`**: rebuild it after those project files are finalized. Then add and verify `presentation.pdf` or `.pptx` separately at the **outer ZIP root**. Do not conflate these integrity layers.
+The historical **47-file scientific freeze** and **13-file release artifact index** must remain unchanged when editing ordinary documentation. `PACKAGE_MANIFEST.json` is a separate checksum index for the final files **inside `project/`**: generate it only after these files, including any copies of slides/report placed inside the project root, are finalized. The submitted ZIP also requires `presentation.pdf` or `.pptx` at its **outer root**, beside `project/`. Do not conflate these integrity layers.
 
 ## 8. Integrity, limitations and submission
 
@@ -180,4 +180,4 @@ The historical **47-file scientific freeze** and the **13-file release artifact 
 
 **Submission requirement:** package a `group_9.zip` containing `project/` with reproducible scripts, data, models and outputs, and **`presentation.pdf` or `presentation.pptx` at the ZIP root**. Presentation is prepared last; the optional academic report can be packaged separately if the group chooses.
 
-See [`docs/research_design.md`](docs/research_design.md) for methods and [`docs/decision_log.md`](docs/decision_log.md) for the full decision trail.
+See [`docs/research_design.md`](docs/research_design.md) for methods, [`docs/decision_log.md`](docs/decision_log.md) for the decision trail and [`docs/reproducibility_release_2026.md`](docs/reproducibility_release_2026.md) for the submission-specific verification procedure.

@@ -2,7 +2,7 @@
 
 **Project:** ProjectAgentTrading26 · **Group:** 9
 **Course:** Data-Driven Models for Investment, LUISS Guido Carli
-**Updated:** 9 November 2026 · **Reference commit:** `5e2f2b0` (`integrazione-finale`)
+**Scientific documentation review:** 10 November 2026 · **Code reference:** `integrazione-finale`; archived freeze and OOS manifests are controlling
 
 ## 1. Research question and analytical scope
 
@@ -134,7 +134,7 @@ The simulator includes a short margin-buffer convention, but does not prove borr
 | SPY buy-and-hold | 13.116% | 0.799 | −23.424% |
 | 60/40 SPY–IEF | 7.388% | 0.694 | −19.840% |
 
-The Core candidate's annualized volatility was **11.566%**, compared with **17.294%** for SPY and **11.174%** for 60/40. Its lower volatility versus SPY does not rescue its weaker risk-adjusted performance. The official system **did not beat either final benchmark** on CAGR, Sharpe or maximum drawdown.
+The Core candidate's annualized volatility was **11.566%**, compared with **17.294%** for SPY and **11.174%** for 60/40. Its lower volatility versus SPY does not rescue its weaker risk-adjusted performance. The official system **did not beat either final benchmark** on CAGR, Sharpe or maximum drawdown. These returns measure a particular simulated period, not the expected future performance of any candidate.
 
 Observed trading diagnostics include **151 nonzero executed-trading sessions**, cumulative turnover **130.27**, transaction fees of **$3,883.12** and short-borrow cost of **$296.52**. These distinguish the final portfolio from a nearly frictionless buy-and-hold comparison.
 
@@ -144,7 +144,7 @@ Observed trading diagnostics include **151 nonzero executed-trading sessions**, 
 
 A pre-existing daily-return trajectory was split descriptively for **2022** and **2023–2026** without resetting holdings, changing weights or fitting any new models. For the archived Core candidate, the latter window returned **14.343% CAGR**, **1.234 Sharpe** and **−10.035% maximum drawdown**. Over the identical dates, SPY returned **22.381% CAGR** and 60/40 returned **14.061% CAGR**.
 
-This supports the conclusion that **sample/regime composition matters**, especially the weak 2022 performance. It does **not** show what would happen if RF/SVM and the Orchestrator had been retrained using 2022 data. The official 2022–2026 metrics remain controlling.
+The Core's archived 2022 subperiod had **−20.787% cumulative return** (annualized subperiod CAGR **−21.160%**); the figures use different denominators and must not be confused. This supports the conclusion that **sample/regime composition matters**, especially the weak 2022 performance. It does **not** show what would happen if RF/SVM and the Orchestrator had been retrained using 2022 data. The official 2022–2026 metrics remain controlling.
 
 ## 8. Post-freeze Regime-Adaptive SMA200 extension
 
@@ -173,7 +173,7 @@ The normal and defensive selectors maintain **independent hysteresis states**. T
 
 The defensive condition occurred on **83 of 626 development decisions** and **58 of 249 retrospective 2022–2026 decisions**. The dynamic extension improves selected 2022–2026 historical metrics but lowers development CAGR and Sharpe relative to the original. A simple SPY/SHY SMA200 switching policy provides a necessary explanatory benchmark; the more complex agent strategy has not shown a statistically reliable incremental advantage against it.
 
-Exploratory Newey–West five-lag daily regression-intercept tests for Regime-Adaptive excess returns give approximately **p=0.344 versus SPY, p=0.200 versus 60/40, and p=0.055 versus the original Core**. None reaches the 5% level; these unadjusted p-values do not account for trialing multiple strategies. **No statistically established alpha is claimed.** A retrospective improvement is not evidence of future implementable superiority.
+The **supplemental** Newey–West five-lag tests fit the adaptive strategy's daily returns on an intercept and one comparator's daily returns, then annualize the intercept by 252. Against SPY, 60/40 and original Core the estimates are respectively **+2.55%, +3.66%, +5.01%**, with **p=0.344, p=0.200, p=0.055**. None reaches 5%; the unadjusted tests do not correct for the several explored candidate rules. The separately stored `Group9_alpha_significance_analysis.csv` supports these diagnostics but is **not** a frozen-project artifact or an output of `main.py --analysis`. **No statistically established alpha is claimed.**
 
 ### Implementation
 
@@ -207,6 +207,6 @@ The order of evidentiary priority is:
 4. **Post-freeze research utilities:** `src/level_c_strategy.py`, `src/submission_runner.py`, `docs/regime_adaptive_exploratory_2026.md`.
 5. **Narrative:** this design document, `decision_log.md`, `README.md`, report and presentation; narrative never overrides actual artifacts.
 
-To inspect the registered experiment, use `python main.py` and `python main.py --release-action audit`. To reproduce the official backtest without tuning, use `python main.py --release-action replay`. To run temporal or adaptive summaries, use `python main.py --analysis temporal-robustness` and `python main.py --analysis regime-adaptive`. Research-mode output is not permitted to overwrite protected datasets or reports.
+To inspect the registered experiment, use `python main.py` and `python main.py --release-action audit`. The full archive and binaries are required; the Git checkout alone is insufficient. To reproduce the official backtest without tuning, use `python main.py --release-action replay`. To run temporal or adaptive summaries, use `python main.py --analysis temporal-robustness` and `python main.py --analysis regime-adaptive`. Research-mode output is not permitted to overwrite protected datasets or reports.
 
 **Conclusion.** The completed project demonstrates a traceable systematic trading workflow and a rigorously reported negative official OOS comparison. The follow-up Regime-Adaptive research is a plausible, implementable signal-construction extension with encouraging retrospective downside statistics, but not a validated source of independent statistically significant alpha.

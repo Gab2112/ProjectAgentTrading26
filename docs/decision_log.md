@@ -2,7 +2,7 @@
 
 **ProjectAgentTrading26 · Group 9**
 **Course:** LUISS Data-Driven Models for Investment
-**Consolidated:** 9 November 2026 · **Repository reference:** `integrazione-finale` @ `5e2f2b0`
+**Consolidated:** 9 November 2026 · **Scientific review:** 10 November 2026 · **Repository branch:** `integrazione-finale`
 
 ## Purpose and evidence standard
 
@@ -108,8 +108,8 @@ Use these labels consistently:
 ### D13 · Add the 2023–2026 temporal-robustness view
 
 - **Decision:** Report the same frozen portfolios for the historical **3 January 2023–9 October 2026** subset.
-- **Result:** Core **14.343% CAGR, 1.234 Sharpe, −10.035% drawdown**; SPY **22.381% CAGR**; 60/40 **14.061% CAGR**.
-- **Critical boundary:** This is **not new model training through 2022**; the NAV continues from the January 2022 starting portfolio, and the period was examined after the official OOS result was known.
+- **Result:** Core **14.343% CAGR, 1.234 Sharpe, −10.035% drawdown**; SPY **22.381% CAGR**; 60/40 **14.061% CAGR**. In 2022 the Core's **cumulative** return was **−20.787%** (subperiod CAGR **−21.160%**).
+- **Critical boundary:** This is **not new model training through 2022**; the NAV continues from the January 2022 starting portfolio, and the period was examined after the official OOS result was known. **No 2023-start replacement official OOS was adopted.**
 - **Use:** Regime-sensitivity interpretation and appendix/backup evidence, never a replacement official sample.
 - **Evidence:** `src/submission_runner.py`, `python main.py --analysis temporal-robustness`.
 
@@ -131,8 +131,8 @@ Use these labels consistently:
 
 ### D16 · Test whether adaptive performance demonstrates alpha
 
-- **Method:** Exploratory daily-return regressions with a **5-lag Newey–West/HAC** covariance estimator; annualized intercepts, zero assumed risk-free rate.
-- **Observed p-values:** Versus SPY **0.344**; 60/40 **0.200**; original Core **0.055**.
+- **Method:** Supplemental one-factor daily-return regressions: adaptive return = intercept + beta × comparator return + residual. The intercept is multiplied by 252; standard errors use **Newey–West/HAC with 5 lags**, zero assumed risk-free rate.
+- **Observed alpha estimates and p-values:** Versus SPY **+2.55% annualized, p=0.344**; 60/40 **+3.66%, p=0.200**; original Core **+5.01%, p=0.055**.
 - **Decision:** **Do not claim statistically significant alpha at the 5% level.** These are unadjusted diagnostic comparisons and do not control selection over multiple researched variants.
 - **Boundary:** Economic logic, historical improvement and statistical significance are different claims. A simple SPY/SHY SMA200 comparator is also relevant before attributing any effect specifically to the agents.
 - **Evidence:** Supplemental exploratory `Group9_alpha_significance_analysis.csv`; not part of the 47-file scientific freeze.
@@ -142,7 +142,7 @@ Use these labels consistently:
 - **Decision:** Keep the original registered 2022–2026 comparison controlling; add the temporal breakdown and SMA200 extension as explicitly labeled supporting research. Update the repository documentation first, then perform a non-destructive repository inventory and cleanup, and update the presentation **last**, followed by the optional academic report.
 - **Reason:** Preserve scientific provenance and prevent competing definitions of 'final result'.
 - **Release rule:** A `group_9.zip` submission must contain a complete `project/` and a presentation at the ZIP root; regenerate the `project/` distribution manifest for its own contents, then independently verify the presentation at the outer ZIP root. Do not mutate or rewrite the original 47-file freeze to reflect new documentation.
-- **Operational status:** The GitHub PR toward `main` was open at the reference commit; publication/merge are separate group decisions.
+- **Operational status:** Submission documentation, package generation and team approval/merge remain separate operations; do not infer their completion from this research log.
 
 ## 2. Artifact ownership and non-destructive editing policy
 
