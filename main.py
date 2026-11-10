@@ -1,26 +1,22 @@
-"""Entry point for the Regime-Aware Multi-Asset Allocation project.
+"""Group 9 reproducible systematic-trading research interface.
 
-Available levels:
-- A1: buy-and-hold and weekly-rebalanced benchmarks;
-- A2: volatility-constrained allocation;
-- B: macro-regime strategy, with independently frozen v1 and v2 variants.
+Default: safely display the already-frozen final OOS evaluation.
 
-All development runs are TRAINING ONLY. Validation and OOS stay blocked.
+Examples:
+    python main.py                                # final OOS results (read-only)
+    python main.py --release-action audit         # all available integrity checks
+    python main.py --release-action replay        # locked OOS replay in temporary copy
+    python main.py --release-action charts        # equity and drawdown charts
+    python main.py --level CORE                   # development Core-Satellite vs benchmarks
+    python main.py --level C                      # historical C_v1/C_v2 development only
+    python main.py --level B --b-version v2       # historical B development only
+    python main.py --level ALL                    # A1/A2/B/C/CORE development, no OOS
+    python main.py --analysis temporal-robustness  # read-only 2023+ archived NAV slice
+    python main.py --analysis regime-adaptive      # retrospective B/C + SMA200 extension
 
-Usage:
-    python main.py --level A1
-    python main.py --level A2
-    python main.py --level ALL             # A1 and A2 only
-    python main.py --level B               # legacy default: v1
-    python main.py --level B --b-version v1
-    python main.py --level B --b-version v2
-
-The Level B runner verifies existing frozen files before writing. If an
-existing artifact disagrees with the calculated result, execution fails
-rather than overwriting the artifact. Legacy root-level B metrics are left
-untouched; the authoritative outputs are stored in each version's folder.
+Historical config.yaml is frozen. release_config.yaml describes the immutable
+final candidate without rewriting pre-OOS model selection or parameters.
 """
-
 from __future__ import annotations
 
 import argparse
@@ -230,33 +226,109 @@ def run_pipeline(
     return metriche_per_livello
 
 
+def _run_core_development() -> None:
+    from src.release_pipeline import audit_release
+    from src.submission_validation import verify_signal_calendar
+    from src.core_satellite import run_core_satellite_training
+    audit_release(ROOT_DIR)
+    verify_signal_calendar(ROOT_DIR)
+    cfg = load_config(ROOT_DIR/'config.yaml')
+    validate_config(cfg)
+    result = run_core_satellite_training(cfg, ROOT_DIR)
+    view = result['summary'][['cagr', 'annualized_volatility',
+                              'sharpe_ratio', 'max_drawdown', 'trades']].copy()
+    for column in ('cagr', 'annualized_volatility', 'max_drawdown'):
+        view[column] *= 100.0
+    print('\n=== FROZEN CORE-SATELLITE DEVELOPMENT: 2010-2021 ===')
+    print(view.round(3).to_string())
+    print('Development is in-sample. No model training or OOS evaluation.')
+
+
 def main(argv: list[str] | None = None) -> None:
-    """Parse command line and launch a training-only pipeline."""
+    """Unified release interface. Never trains or retunes frozen models."""
     parser = argparse.ArgumentParser(
-        description="Multi-Asset pipeline: A1, A2 and frozen Level B variants."
+        description='Group 9: frozen Core-Satellite evaluation, replay and development diagnostics.'
     )
-    parser.add_argument(
-        "--level", type=str.upper, choices=("A1", "A2", "ALL", "B", "C"),
-        default=None, help="Level to execute (default: pipeline.active_level).",
-    )
-    parser.add_argument(
-        "--b-version", choices=B_VERSIONS, default=None,
-        help="Level B version: v1 or v2. Default v1 for backward compatibility.",
-    )
-    parser.add_argument(
-        "--config", type=Path, default=None,
-        help="Alternative YAML configuration, relative to the repository root.",
-    )
+    parser.add_argument('--level', type=str.upper,
+                        choices=('A1', 'A2', 'B', 'C', 'CORE', 'ALL'),
+                        help='Historical training level (CORE = final candidate development). '
+                             'ALL = all development comparisons only.')
+    parser.add_argument('--b-version', choices=B_VERSIONS, default=None,
+                        help='Select historical B_v1 or B_v2 (default: v2).')
+    parser.add_argument('--config', type=Path,
+                        help='Alternative configuration for A1/A2/B ONLY (in isolated run).')
+    parser.add_argument('--analysis',
+                        choices=('temporal-robustness', 'regime-adaptive'),
+                        help='Read-only/retrospective research; never replaces frozen OOS.')
+    parser.add_argument('--release-action',
+                        choices=('audit', 'frozen-results', 'replay', 'charts', 'verify-models'),
+                        help='Read-only archive functions, OOS reproducibility replay or plots.')
+    parser.add_argument('--core-development', action='store_true',
+                        help='Legacy alias for --level CORE; does not run final OOS.')
+    parser.add_argument('--output-dir', type=Path,
+                        help='Destination for charts or optional research CSV outputs.')
     args = parser.parse_args(argv)
-    try:
-        run_pipeline(
-            level=args.level,
-            config_path=args.config,
-            b_version=args.b_version,
-        )
-    except NotImplementedError as exc:
-        parser.exit(2, f"Livello non disponibile: {exc}\n")
+    if args.core_development and any([args.level, args.b_version, args.config,
+                                       args.release_action, args.output_dir]):
+        parser.error('--core-development is exclusive')
+    if args.release_action and any([args.level, args.b_version, args.config,
+                                    args.core_development]):
+        parser.error('Archive action cannot be combined with development flags')
+    if args.analysis and any([args.level, args.b_version, args.config,
+                              args.release_action, args.core_development]):
+        parser.error('--analysis is exclusive of release/development commands')
+    if args.output_dir is not None and args.release_action != 'charts' and not args.analysis:
+        parser.error('--output-dir requires --release-action charts or --analysis')
+    if args.b_version and args.level not in ('B', 'ALL'):
+        parser.error('--b-version requires --level B or ALL')
+    if args.config and args.level not in ('A1','A2','B'):
+        parser.error('Alternative YAML is available only for A1/A2/B')
+
+    from src.submission_validation import verify_release_contract
+    from src.release_pipeline import audit_release, show_frozen_results
+    verify_release_contract(ROOT_DIR)
+
+    if args.analysis:
+        from src.submission_runner import run_archived_research_analysis
+        audit_release(ROOT_DIR)
+        run_archived_research_analysis(args.analysis, output_dir=args.output_dir)
+        return
+    if args.release_action == 'audit':
+        audit_release(ROOT_DIR)
+        return
+    if args.release_action == 'frozen-results' or (not args.level and
+        not args.core_development and not args.release_action):
+        show_frozen_results(ROOT_DIR)
+        return
+    if args.release_action == 'verify-models':
+        audit_release(ROOT_DIR)
+        from src.orchestrator_loader import verify_all_orchestrators
+        print('PASS: correctly loaded', verify_all_orchestrators(ROOT_DIR),
+              'frozen GA ensembles, including asymmetric thresholds.')
+        return
+    if args.release_action == 'replay':
+        from src.oos_replay import reproduce_frozen_oos
+        reproduce_frozen_oos(ROOT_DIR)
+        return
+    if args.release_action == 'charts':
+        from src.final_charts import build_final_charts
+        for image in build_final_charts(ROOT_DIR, args.output_dir):
+            print('Saved:', image)
+        return
+    if args.core_development or args.level == 'CORE':
+        _run_core_development()
+        return
+    if args.level == 'ALL':
+        from src.submission_runner import run_development_in_copy
+        audit_release(ROOT_DIR)
+        run_development_in_copy('ALL')
+        _run_core_development()
+        return
+    from src.submission_runner import run_development_in_copy
+    audit_release(ROOT_DIR)
+    run_development_in_copy(args.level, b_version=args.b_version or 'v2',
+                            config_path=args.config)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

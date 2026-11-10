@@ -112,7 +112,10 @@ def load_macro_features(
     weekly = build_cluster_features(
         load_weekly_yields(config, root_dir), get_clustering_settings(config)
     )
-    return align_to_decision_dates(weekly[list(MACRO_FEATURE_COLUMNS)], decision_dates)
+    # One-week lag prevents Thursday decisions from using Friday macro releases.
+    return align_to_decision_dates(
+        weekly[list(MACRO_FEATURE_COLUMNS)].shift(1), decision_dates
+    )
 
 
 # =============================================================================

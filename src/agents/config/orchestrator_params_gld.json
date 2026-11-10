@@ -1,0 +1,57 @@
+{
+    "best_params": {
+        "weights": {
+            "SMA_EMA_Agent": 0.3189479105470694,
+            "ZScore_Agent": 0.2121622503404246,
+            "Macro_YieldCurve_Agent": 0.36910863045080644,
+            "RandomForest_Agent": 0.0,
+            "SVM_Agent": 0.09978120866169968
+        },
+        "alphas": {
+            "SMA_EMA_Agent": 2.136359777901512,
+            "ZScore_Agent": 0.10954947565499942,
+            "Macro_YieldCurve_Agent": 0.12348234360445554,
+            "RandomForest_Agent": 2.2661517474388226,
+            "SVM_Agent": 2.99115385944089
+        },
+        "threshold_long": 0.849516258123735,
+        "threshold_short": 0.20673611555868587,
+        "threshold": 0.5281261868412104,
+        "objective_score": 0.5875,
+        "sharpe_ratio": 0.6771,
+        "max_drawdown": 0.1107,
+        "cumulative_return": 0.8658,
+        "annualized_return": 0.0532,
+        "profit_factor": 1.5218,
+        "trades": 123
+    },
+    "in_sample_metrics": {
+        "weights": {
+            "SMA_EMA_Agent": 0.3189479105470694,
+            "ZScore_Agent": 0.2121622503404246,
+            "Macro_YieldCurve_Agent": 0.36910863045080644,
+            "RandomForest_Agent": 0.0,
+            "SVM_Agent": 0.09978120866169968
+        },
+        "alphas": {
+            "SMA_EMA_Agent": 2.136359777901512,
+            "ZScore_Agent": 0.10954947565499942,
+            "Macro_YieldCurve_Agent": 0.12348234360445554,
+            "RandomForest_Agent": 2.2661517474388226,
+            "SVM_Agent": 2.99115385944089
+        },
+        "threshold_long": 0.849516258123735,
+        "threshold_short": 0.20673611555868587,
+        "threshold": 0.5281261868412104,
+        "objective_score": 0.5875,
+        "sharpe_ratio": 0.6771,
+        "max_drawdown": 0.1107,
+        "cumulative_return": 0.8658,
+        "annualized_return": 0.0532,
+        "profit_factor": 1.5218,
+        "trades": 123
+    },
+    "objective_metric": "sharpe_mdd",
+    "max_train_year": 2021,
+    "annualization_factor": 52
+}

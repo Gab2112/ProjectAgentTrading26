@@ -1,0 +1,51 @@
+{
+    "target_asset": "SHY",
+    "price_col": "SHY_close",
+    "max_depth": 3,
+    "min_samples_leaf": 20,
+    "prob_threshold": 0.53,
+    "n_estimators": 100,
+    "frequency_count": 6,
+    "total_windows": 12,
+    "max_train_year": 2021,
+    "final_in_sample_metrics": {
+        "cumulative_return": 0.40339013926372,
+        "annualized_return": 0.020509707861840587,
+        "annualized_volatility": 0.009772834555182288,
+        "sharpe_ratio": 2.098644742836131,
+        "max_drawdown": 0.012387998318235671,
+        "profit_factor": 2.9734748633673753,
+        "calmar_ratio": 1.6556111273965388
+    },
+    "feature_importances": {
+        "SHY_momentum_63d": 0.1972,
+        "SHY_momentum_21d": 0.1385,
+        "curve_10y_2y": 0.1292,
+        "SHY_return_1w": 0.1243,
+        "cpi_yoy": 0.0877,
+        "treasury_10y_change_1w": 0.0691,
+        "treasury_2y_change_1w": 0.0678,
+        "breakeven_5y_change_1w": 0.067,
+        "curve_10y_2y_change_1w": 0.0638,
+        "vix_level": 0.0554
+    },
+    "trained_features": [
+        "curve_10y_2y",
+        "curve_10y_2y_change_1w",
+        "treasury_10y_change_1w",
+        "treasury_2y_change_1w",
+        "cpi_yoy",
+        "vix_level",
+        "breakeven_5y_change_1w",
+        "SHY_return_1w",
+        "SHY_momentum_21d",
+        "SHY_momentum_63d"
+    ],
+    "model_joblib_file": "random_forest_params_shy.joblib",
+    "training_provenance": {
+        "start_date": "2005-05-20",
+        "end_date": "2021-12-31",
+        "cutoff_year": 2021,
+        "calendar": "weekly_decision_dates.csv"
+    }
+}

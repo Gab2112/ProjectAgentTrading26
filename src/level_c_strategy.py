@@ -139,3 +139,95 @@ def build_level_c_v2_training(config: dict, root_dir: str | Path = ".") -> dict:
     result["b_v2_target_weights_same_dates"] = c_v1["b_v2_target_weights_same_dates"].copy()
     result["regimes"] = c_v1["regimes"].copy()
     return result
+
+
+# -----------------------------------------------------------------------------
+# Retrospective research extension (not the archived official OOS candidate).
+# -----------------------------------------------------------------------------
+
+def build_regime_adaptive_core_targets(
+    market_daily: pd.DataFrame,
+    signals_by_asset: dict[str, pd.DataFrame],
+    start: str | pd.Timestamp,
+    end: str | pd.Timestamp,
+    *,
+    core_weight: float = 0.35,
+) -> dict[str, pd.DataFrame | pd.Series]:
+    """Compare frozen Core targets with a B/C-gated conditional allocation.
+
+    Normal regime (SPY close >= its past-200-session SMA): original Core.
+    Defensive regime: only positive 21- AND 63-session price momentum and
+    a +1 agent direction qualify for the satellite; the same original
+    ranking/hysteresis rule then selects among qualifying ETFs.
+
+    Both candidate selectors carry their own hysteresis state across dates;
+    the regime switch chooses from those two independently constructed
+    target series. This is a *retrospective* research convention, not the
+    original frozen strategy or a newly independent OOS evaluation.
+    """
+    import numpy as np
+
+    from src.agent_backtest import generate_dynamic_growth_matrix
+    from src.core_satellite import (
+        SATELLITE_ORDER,
+        build_core_satellite_targets,
+    )
+    from src.time_split import build_weekly_decision_dates
+
+    boundary = pd.Timestamp(end)
+    if not 0.0 <= core_weight <= 1.0:
+        raise ValueError('core_weight must be in [0, 1]')
+    if set(signals_by_asset) != set(ASSETS):
+        raise ValueError('Four ETF agent signal inputs are required')
+
+    # Explicitly exclude observations after the requested endpoint.
+    market = market_daily.loc[:boundary].copy()
+    original = build_core_satellite_targets(
+        market, signals_by_asset, start, end, core_weight=core_weight
+    )
+    decisions = original.index
+    weekly = build_weekly_decision_dates(market).index
+    closing_prices = market[[f'{asset}_close' for asset in ASSETS]].astype(float)
+    closing_prices.columns = list(ASSETS)
+    closing_prices = closing_prices.loc[:decisions[-1]]
+
+    sma200 = closing_prices['SPY'].rolling(200, min_periods=200).mean()
+    stress = closing_prices['SPY'].loc[decisions].lt(sma200.loc[decisions])
+    if sma200.loc[decisions].isna().any() or stress.isna().any():
+        raise ValueError('At least 200 historical trading closes required')
+    stress.name = 'SPY_below_SMA200'
+
+    trend = build_trend_signal_panel(closing_prices, decisions)
+    filtered_signals: dict[str, pd.DataFrame] = {}
+    for asset in SATELLITE_ORDER:
+        frame = signals_by_asset[asset].loc[decisions].copy()
+        eligible = trend[asset].eq(1) & frame['signal'].eq(1)
+        frame.loc[~eligible, 'signal'] = 0
+        filtered_signals[asset] = frame
+
+    weekly_close = market.loc[weekly, [f'{asset}_close' for asset in ASSETS]]
+    selected = generate_dynamic_growth_matrix(
+        filtered_signals,
+        df_features=weekly_close,
+        default_vol=0.10,
+        min_confidence=0.35,
+        hysteresis_buffer=0.015,
+    )
+    defensive = selected.reindex(index=decisions, columns=list(ASSETS)).astype(float)
+    defensive *= 1.0 - core_weight
+    defensive['SPY'] += core_weight
+
+    adaptive = original.copy()
+    adaptive.loc[stress] = defensive.loc[stress]
+    for name, weights in {'original': original, 'defensive': defensive,
+                          'adaptive': adaptive}.items():
+        values = weights.to_numpy(dtype=float)
+        if (not np.isfinite(values).all()
+                or (np.abs(values).sum(axis=1) > 1.0 + 1e-10).any()):
+            raise ValueError(f'{name}: invalid target gross exposure')
+    return {
+        'original': original,
+        'defensive_long_flat': defensive,
+        'regime_adaptive': adaptive,
+        'stress': stress,
+    }

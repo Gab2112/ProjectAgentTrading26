@@ -1,5 +1,5 @@
 {
-    "sma_window": 80,
+    "sma_window": 20,
     "ema_window": 5,
     "dead_band": 0.0,
     "price_col": "IEF_close"
