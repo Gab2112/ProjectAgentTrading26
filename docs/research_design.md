@@ -1,149 +1,212 @@
-# Disegno della ricerca: Regime-Aware Multi-Asset Allocation
+# Research Design and Validation Protocol
 
-> **Aggiornamento 4 novembre 2026:** la descrizione A/B sottostante documenta lo stato della ricerca al 28 ottobre. L'integrazione C_v1/C_v2, il confronto tra nove portafogli e l'analisi di sensibilità sono descritti in [Level C: consenso momentum–agenti AI](level_c_research.md). I risultati del Level C rimangono in-sample.
+**Project:** ProjectAgentTrading26 · **Group:** 9
+**Course:** Data-Driven Models for Investment, LUISS Guido Carli
+**Updated:** 9 November 2026 · **Reference commit:** `5e2f2b0` (`integrazione-finale`)
 
-**Progetto:** ProjectAgentTrading26 | LUISS, *Data-Driven Models for Investment*\
-**Stato al 28 ottobre 2026:** A1, A2 e B implementati e consolidati localmente; 123 test unitari superati dopo il refactoring; B_v2 congelata dopo la selezione sul training; validation 2017–2021 esaminata successivamente; test finale dal 2022 non eseguito per questo sistema Multi-Asset.\
-**Archivio della ricerca precedente:** [`treasury_research_review.md`](treasury_research_review.md) documenta lo studio su SHY/IEF/TLT. Le sue regole e i suoi risultati non descrivono la strategia Multi-Asset attuale, basata su SPY/IEF/GLD/SHY.
+## 1. Research question and analytical scope
 
-## 1. Obiettivo e ipotesi di ricerca
+**Question.** Can a systematic multi-asset investment strategy combining ETF prices, macroeconomic indicators, quantitative agents and constrained portfolio construction deliver superior **net risk-adjusted** outcomes versus simple investable benchmarks?
 
-**Domanda principale:** l'aggiunta progressiva di controllo del rischio, regimi macro-finanziari e modelli predittivi può migliorare il rendimento netto corretto per il rischio e la protezione dai drawdown rispetto a semplici portafogli multi-asset?
+The project investigates both **forecast/decision quality** (do systematic signals help?) and **portfolio engineering** (do those signals lead to economically meaningful exposures after execution and costs?). A positive standalone return is not evidence of incremental alpha. Relative CAGR, volatility, Sharpe, drawdown, benchmark exposure, turnover and practical costs all matter.
 
-La ricerca procede per livelli incrementali. I confronti devono mantenere, per quanto possibile, gli stessi dati di mercato, calendari di negoziazione e costi:
+The research maintains a distinction between:
 
-- **H1 / A2:** il controllo della volatilità stimata aggiunge valore rispetto a un portafoglio Equal Weight con ribilanciamento settimanale.
-- **H2 / B:** condizionare l'allocazione ai regimi economici aggiunge valore rispetto a controlli del rischio più semplici e a budget di allocazione fissi.
-- **H3 / C:** il forecasting produce un beneficio economico incrementale rispetto a B, non soltanto un errore di previsione inferiore.
-- **H4 / C, condizionata alla disponibilità dei dati:** notizie e sentiment con timestamp storici verificabili aggiungono valore rispetto alle previsioni prive di informazioni testuali.
+- **Hypothesis and development:** ideas, model fitting, strategy comparisons and candidate selection using the pre-2022 period.
+- **Official registered evaluation:** a frozen Core35–Satellite65 candidate assessed in 2022–2026, without changing the candidate afterward.
+- **Subsequent explanatory research:** temporal subsamples and the Regime-Adaptive extension, reported as retrospective evidence and not substituted for the official result.
 
-Queste sono **ipotesi da verificare, non risultati dimostrati**. In particolare, nel training B_v2 non supera A2 né per Sharpe né per CAGR. Un drawdown minore, preso isolatamente, non dimostra la presenza di alpha o una performance corretta per il rischio superiore.
+This file defines the research design; `decision_log.md` records key decisions and `core_satellite_final_2026.md` contains the longer frozen evaluation description.
 
-## 2. Dati e protocollo temporale
+## 2. Economic hypotheses
 
-**Universo investibile:** SPY (azioni statunitensi), IEF (Treasury USA a 7–10 anni), GLD (oro) e SHY (Treasury USA a 1–3 anni). Gli input comprendono CSV giornalieri locali con prezzi OHLC rettificati e osservazioni FRED originali; non si applica un riempimento artificiale dei prezzi mancanti. Un nuovo download o una revisione delle rettifiche del provider può modificare i risultati e richiede un nuovo controllo dei dati.
+| Hypothesis | Mechanism | Observable prediction | Main falsifier |
+|---|---|---|---|
+| H1: cross-asset signals | Rates, inflation, equity risk and safe-haven demand can influence relative ETF returns | Allocations conditional on macro and price features improve out-of-sample risk-adjusted results | Passive SPY/IEF or SPY dominates after risk and costs |
+| H2: agent consensus | Diversifying technical, macro and ML opinions may screen out some inconsistent trades | Momentum/agent agreement improves the net distribution of returns and/or drawdowns | No uplift relative to simpler momentum-only or passive rules |
+| H3: Core–Satellite construction | A stable equity core raises participation while an active sleeve changes exposure | Better return/downside trade-off than standalone, low-exposure B/C systems | Satellite detracts from SPY participation or adds adverse short exposure |
+| H4: conditional defensive filter *(later extension)* | Trend breaks may identify periods when negative or inconsistent signals should be restricted | A causal SMA200-triggered Long/Flat gate improves behavior across regimes | Effect limited to the inspected years; little benefit beyond simple SMA200 switching |
 
-| Segmento | Periodo | Utilizzo |
+**H4 is exploratory, not part of the original frozen candidate specification.** The SMA200 rule uses only data available at each historical decision but was assessed on historical outcomes already known during subsequent research. These are separate methodological points: temporal signal causality does not establish independence of model selection.
+
+## 3. Research lineage: what each level actually does
+
+### 3.1 Treasury origin and diversification pivot
+
+Early research tested duration timing among SHY, IEF and TLT, including historical signals based on changes in the 30-year Treasury yield. Weak later validation relative to a duration buy-and-hold alternative motivated a pivot away from concentrating exclusively on Treasury-duration forecasts.
+
+The selected multi-asset universe is **SPY** (US large-cap equities), **IEF** (intermediate Treasuries), **GLD** (gold) and **SHY** (short Treasuries). Historical TLT input may remain in raw-data archives but does **not** become a fifth instrument in the final Core strategy.
+
+### 3.2 A: transparent benchmarks and volatility control
+
+- **A1:** static investable allocations such as SPY buy-and-hold, 60% SPY/40% IEF and equal-weight baselines.
+- **A2:** risk-constrained allocation with a covariance lookback of **126 sessions** and ex-ante volatility target **8%** in the relevant development experiments.
+
+A1/A2 establish whether complexity adds value against basic portfolio construction. The A2 risk limit is **not automatically inherited** by subsequent standalone or Core portfolios.
+
+### 3.3 B: macro budgets and directional trend
+
+- **B_v1:** a signed/long-short exploratory macro and trend framework.
+- **B_v2:** macro-regime budgets with a trend-based **Long/Flat** interpretation; the underlying momentum uses returns over **21 and 63 daily sessions**.
+
+The regime research used interest rates, curve slopes, inflation and market-stress data. Historical FRED release vintages are **not fully certified point-in-time**; calendar alignment and deliberate lags do not eliminate all vintage risks. Development-only configuration includes experimental clustering code, not a claim that clustering is active in the final strategy.
+
+### 3.4 Agent ensemble and GA Orchestrator
+
+The agent ensemble includes **EMA/SMA, Z-Score, macro yield-curve, Random Forest and Support Vector Machine** families. RF/SVM are fitted in a chronological research design; SVM research includes four-week forward classification and rolling out-of-fold procedures. A frozen **genetic-algorithm Orchestrator** aggregates agent information into an ETF-level signal **−1, 0, +1** and a **confidence** value on weekly decision dates.
+
+Important distinction: chronological or out-of-fold model-level forecasts do **not** make the *final GA-selected ensemble* independent of its development-period optimization. **FinBERT was not included** in the frozen final ensemble; timestamped historical sentiment availability was not sufficiently established.
+
+### 3.5 C: B + Orchestrator, not just another agent
+
+The **historical standalone Level C** combines B's market structure with the agent outputs. Its relevant inputs are per-ETF agent direction/confidence, the B_v2 momentum panel, B_v2 macro budget panel and historical covariance data.
+
+- **C_v1:** allow an ETF to be **Long** when the B trend is positive and the Orchestrator is Long with positive confidence. Otherwise **Flat**. Scale the B macro budget by those gates and apply the historical **126-session covariance / 8% ex-ante volatility cap**.
+- **C_v2:** require sign agreement for **Long** or **Short** between B momentum and the Orchestrator; disagreement produces **Flat**. Retain the B budget basis and the historical signed risk cap.
+
+The C development study is not the archived 2022–2026 official candidate. C results computed over development are not independent after Orchestrator selection.
+
+### 3.6 Final selected candidate: Core35–Satellite65
+
+The **Core35–Satellite65** finalist reuses the **frozen Orchestrator directly**, not the full C_v1/C_v2 budget-and-risk stack.
+
+For each weekly decision date:
+
+1. Begin with a nominal **+35% SPY Core**.
+2. Read each eligible ETF's frozen signal and confidence.
+3. Exclude a neutral signal or a confidence value below **0.35**.
+4. Use direction × confidence divided by the volatility input; frozen signals do not contain volatility columns, so all ETFs use the common **0.10 fallback** in the archived candidate.
+5. Apply the original SPY preference/short blocking based on a separate **30-week SMA**, and **1.5% asset-switch hysteresis**.
+6. Place a nominal **±65% Satellite** in the chosen ETF; if no signal qualifies, leave the Satellite unallocated. The SPY Core is still present.
+
+Target ETF weights are therefore:
+
+\[
+w_{i,t}=0.35\,\mathbf{1}\{i=\mathrm{SPY}\}+0.65\,s_{i,t},
+\]
+
+where \(s_{i,t}\in\{-1,0,+1\}\) has at most one nonzero ETF. A −65% SPY Satellite offsets the +35% Core to create **−30% net SPY**, not a perpetual minimum-long equity position.
+
+The absence of ETF-specific realized-volatility inputs is a known selector limitation. Avoid describing this frozen ranking as cross-asset volatility parity.
+
+## 4. Datasets, dates and information availability
+
+| Window | Operational meaning |
+|---|---|
+| Historical ETF and macro collection from ~2004/2005 | Rolling-indicator history, supervised-model training inputs and regime features |
+| Matched portfolio development: 2010–2021 | In-sample development comparison of selected portfolios |
+| Fitting/selection cutoff: **31 December 2021** | Frozen model, GA and candidate policy boundary |
+| Final evaluation: **7 January 2022–9 October 2026** | 1,193 daily observations; 249 weekly decision dates; 2026 ending before year-end |
+| 3 January 2023–9 October 2026 | Descriptive slice of the same previously evaluated OOS NAVs, **not** new retraining or a fresh test |
+
+Price data use adjusted ETF Open/Close to account for distributions and corporate actions. Source collection historically used Yahoo Finance and FRED, with local raw and processed CSV snapshots in the distribution. Decisions are generated using the observation set available by the weekly decision close; orders trade at the **next available trading Open**, not at the observed close.
+
+**Unresolved information risk:** historical macro series may be revised, and their observation dates need not equal publication times. The archive explicitly records `macro_point_in_time_verified: false`. Do not claim definitive vintage-safe macro information or absence of every form of leakage.
+
+## 5. Backtesting, benchmark and cost policy
+
+All official comparisons share a daily position/cash/NAV accounting engine, with portfolios differing only in their target-weight and rebalancing rules.
+
+| Element | Registered setting |
+|---|---|
+| Asset universe | SPY, IEF, GLD, SHY |
+| Decision frequency | Weekly close |
+| Execution | Next available trading Open |
+| Portfolio accounting | Daily position, cash, borrowing and NAV updates |
+| Initial capital | $100,000 |
+| Commission | 2 bps of traded notional |
+| Slippage | 1 bp of traded notional |
+| Borrowing cost | 1% annualized on short notional |
+| Cash yield | 0% assumed |
+| Risk-free rate for Sharpe | 0% assumed |
+| Annualization | 252 trading sessions |
+| Benchmarks | SPY buy-and-hold; 60% SPY/40% IEF rebalanced weekly |
+
+The simulator includes a short margin-buffer convention, but does not prove borrow availability, executable limit-order prices, taxable results or impact costs at scale. Target gross weight is at most 1.0; realized gross exposure can drift around rebalances.
+
+## 6. Official results and registered interpretation
+
+**Final, archived 2022–2026 comparison:**
+
+| Portfolio | CAGR | Sharpe | Max drawdown |
+|---|---:|---:|---:|
+| **Core35–Satellite65** | **5.872%** | **0.551** | **−26.543%** |
+| SPY buy-and-hold | 13.116% | 0.799 | −23.424% |
+| 60/40 SPY–IEF | 7.388% | 0.694 | −19.840% |
+
+The Core candidate's annualized volatility was **11.566%**, compared with **17.294%** for SPY and **11.174%** for 60/40. Its lower volatility versus SPY does not rescue its weaker risk-adjusted performance. The official system **did not beat either final benchmark** on CAGR, Sharpe or maximum drawdown.
+
+Observed trading diagnostics include **151 nonzero executed-trading sessions**, cumulative turnover **130.27**, transaction fees of **$3,883.12** and short-borrow cost of **$296.52**. These distinguish the final portfolio from a nearly frictionless buy-and-hold comparison.
+
+**Development comparison, 2010–2021:** Core CAGR **12.064%**, Sharpe **0.929**, maximum drawdown **−18.291%**. These results are development-period evidence and are not independently validated merely because their sample ends before the official OOS window.
+
+## 7. Post-freeze temporal robustness
+
+A pre-existing daily-return trajectory was split descriptively for **2022** and **2023–2026** without resetting holdings, changing weights or fitting any new models. For the archived Core candidate, the latter window returned **14.343% CAGR**, **1.234 Sharpe** and **−10.035% maximum drawdown**. Over the identical dates, SPY returned **22.381% CAGR** and 60/40 returned **14.061% CAGR**.
+
+This supports the conclusion that **sample/regime composition matters**, especially the weak 2022 performance. It does **not** show what would happen if RF/SVM and the Orchestrator had been retrained using 2022 data. The official 2022–2026 metrics remain controlling.
+
+## 8. Post-freeze Regime-Adaptive SMA200 extension
+
+### Decision-time rule
+
+At each weekly close \(t\), compute the adjusted SPY closing-price average over the **preceding 200 trading observations including \(t\)** and define:
+
+\[
+D_t=\mathbf{1}\left\{P_{\mathrm{SPY},t}<\frac{1}{200}\sum_{j=0}^{199}P_{\mathrm{SPY},t-j}\right\}.
+\]
+
+- **Normal regime, \(D_t=0\):** use the registered original Core35–Satellite65 target portfolio.
+- **Defensive regime, \(D_t=1\):** for each candidate ETF, require a positive **21-day and 63-day momentum** signal **and** Orchestrator direction **+1**. Only eligible signals can enter the existing confidence-based satellite ranking. If no ETF passes, the Satellite is Flat and the +35% SPY Core remains.
+
+The normal and defensive selectors maintain **independent hysteresis states**. The daily SMA200 regime is observed at the weekly decision close; execution stays at the next Open. The original 35/65 sizing, 0.35 confidence cutoff, 0.015 hysteresis and uniform 0.10 volatility fallback remain in effect.
+
+**This is a C-inspired *signal gate*, not the full C risk allocator.** It omits C's B_v2 macro budget vector and its 8% ex-ante covariance cap. It also differs from the Core's original 30-week SPY SMA rule.
+
+### Quantitative evidence and interpretation
+
+| Candidate | Development 2010–2021 CAGR / Sharpe | 2022–2026 CAGR / Sharpe / MDD |
 |---|---|---|
-| Warm-up | Date disponibili prima del 20 maggio 2005 | Solo calcolo degli indicatori rolling |
-| **Training** | **20 maggio 2005 – 31 dicembre 2016** (ultima seduta: 30 dicembre) | Costruzione dei modelli, ablation study e selezione di B_v2 |
-| **Validation** | **1° gennaio 2017 – 31 dicembre 2021** | Diagnostica una tantum su B_v2 **già esaminata**; nessuna modifica successiva a B_v2 |
-| **Test finale (OOS)** | **Dal 1° gennaio 2022** | Riservato al sistema integrato; nessuna valutazione B Multi-Asset effettuata |
+| Official Core35–Satellite65 | 12.064% / 0.929 | 5.872% / 0.551 / −26.543% |
+| Regime-Adaptive SMA200 | **10.599% / 0.889** | **9.805% / 0.912 / −12.802%** |
+| B/C-inspired Long/Flat always on | 8.928% / 0.909 | 11.280% / 1.166 / −8.506% |
 
-La pipeline ordinaria `main.py` per A1/A2/B valuta **soltanto il training**, con `evaluation.evaluate_oos: false` e `validation.development_only: true`. La validation di B_v2 è stata effettuata tramite uno **script diagnostico separato e limitato esplicitamente al 2021**; non significa che la pipeline principale includa automaticamente la validation. Il periodo dal 2022 era già stato discusso durante la precedente ricerca Treasury: non va quindi presentato come totalmente sconosciuto ai ricercatori, sebbene non sia stato valutato per questa strategia Multi-Asset.
+The defensive condition occurred on **83 of 626 development decisions** and **58 of 249 retrospective 2022–2026 decisions**. The dynamic extension improves selected 2022–2026 historical metrics but lowers development CAGR and Sharpe relative to the original. A simple SPY/SHY SMA200 switching policy provides a necessary explanatory benchmark; the more complex agent strategy has not shown a statistically reliable incremental advantage against it.
 
-**Regola informativa:** il target settimanale viene generato dopo il Close dell'ultima seduta della settimana; l'ordine è eseguito soltanto al primo Open disponibile, mai al Close che ha prodotto il segnale. Indicatori rolling e stime di volatilità utilizzano osservazioni non successive alla decisione. L'allineamento per data delle osservazioni FRED **non certifica l'orario storico di pubblicazione né la vintage del dato**. La verifica *point-in-time* rimane aperta per B e per i futuri modelli C.
+Exploratory Newey–West five-lag daily regression-intercept tests for Regime-Adaptive excess returns give approximately **p=0.344 versus SPY, p=0.200 versus 60/40, and p=0.055 versus the original Core**. None reaches the 5% level; these unadjusted p-values do not account for trialing multiple strategies. **No statistically established alpha is claimed.** A retrospective improvement is not evidence of future implementable superiority.
 
-## 3. Negoziazione, contabilità e metriche
+### Implementation
 
-Il simulatore mantiene quantità detenute e liquidità, ribilancia soltanto alle aperture programmate e valorizza il NAV giornalmente al Close. Le ipotesi di base sono: **capitale iniziale di 100.000 USD**, **2 bps di commissioni + 1 bp di slippage** sul nozionale negoziato, liquidità non remunerata e esposizione lorda complessiva non superiore al 100%. Prezzi Open rettificati, costi costanti in bps e gestione semplificata delle garanzie e del prestito titoli per gli Short sono assunzioni del modello, non esecuzioni realistiche garantite da un broker.
+- Research function: `src/level_c_strategy.py` (`build_regime_adaptive_core_targets`).
+- Daily simulation and tabulation: `src/submission_runner.py`.
+- Command interface: `main.py --analysis regime-adaptive`.
+- Safety and reproducibility checks: `tests/test_exploratory_analysis.py`.
 
-Le metriche derivano dai rendimenti giornalieri netti del NAV, annualizzati su **252 sedute**, con tasso risk-free **posto a zero a fini diagnostici**. Il CAGR è calcolato come `(NAV_final / NAV_initial) ** (252 / sessions) - 1`; la volatilità annualizzata è la deviazione standard campionaria dei rendimenti giornalieri moltiplicata per `sqrt(252)`. Il maximum drawdown è misurato rispetto al precedente massimo del NAV, includendo il capitale iniziale.
+The research extension was introduced after the official candidate was frozen. Neither official model binaries, historical Core source nor archived OOS NAVs were modified.
 
-**A1:** quattro benchmark: SPY Buy & Hold; SPY 60%/IEF 40% con ribilanciamento settimanale; 25% per ciascun ETF con ribilanciamento settimanale; Equal Weight Buy & Hold. Nei portafogli Buy & Hold i pesi iniziali non vengono ripristinati periodicamente.
+## 9. Methodological threats and mitigations
 
-**A2:** portafoglio Long-only, sempre interamente investito. Utilizza la covarianza campionaria annualizzata delle ultime **126 sedute**: se la volatilità prevista del portafoglio Equal Weight è al massimo **8%**, mantiene il 25% per ETF; altrimenti minimizza la distanza quadratica dall'Equal Weight imponendo pesi non negativi, somma pari a uno e volatilità stimata non superiore all'8%, mediante CVXPY/CLARABEL. Se il vincolo di volatilità è irrealizzabile, utilizza il portafoglio a varianza minima con gli stessi vincoli Long-only e di pieno investimento. L'8% riguarda la volatilità **stimata**, non quella effettivamente realizzata.
+| Threat | Current treatment | Residual caveat |
+|---|---|---|
+| Look-ahead in execution | Weekly close determines following Open order | Macro publication/vintage status not fully certified |
+| Supervised-label leakage | Chronological RF/SVM fitting, embargo/gap where applicable | Verify each feature and label timestamp separately |
+| Model selection / data snooping | Pre-2022 scientific freeze; development/OOS separation | Post-freeze variants are exploratory rather than independent holdouts |
+| Survivorship / investability | Long-lived, historically tradable ETFs and adjusted prices | Universe represents a small surviving ETF set, not a full contemporaneous security universe |
+| Unrealistic costs | Common fee/slippage/borrow settings | Market impact and borrow availability are not independently demonstrated |
+| Non-stationarity | Development vs final holdout and regime slices | One fixed historical episode cannot establish stability |
+| Apparent alpha | Risk-adjusted benchmark comparisons, HAC diagnostics | p-values do not imply selection-adjusted discovery; alpha not significant |
+| Reproducibility | Scientific 47-file freeze, 13-file release index, exact NAV replay | Git source without untracked binaries/data is not a complete release |
 
-## 4. Level B: regimi deterministici e segnali
+## 10. Reproduction and source-of-truth hierarchy
 
-### 4.1 Identificazione dei regimi economici
+The order of evidentiary priority is:
 
-Il classificatore deterministico utilizza **VIXCLS** (stress di mercato) e **T10YIE** (inflazione implicita a 10 anni, *breakeven inflation*). Ciascuna variabile è classificata come alta o bassa rispetto alla propria **mediana rolling delle 52 settimane precedenti**, ritardata per escludere l'osservazione corrente dalla soglia. Nelle etichette, il primo termine riguarda il VIX e il secondo il breakeven.
+1. **Archived final NAV/metrics:** `reports/oos_final_2022_2026/*.csv` and `evaluation_provenance.json`.
+2. **Frozen scientific provenance:** `reports/development_freeze_2021.json`, `reports/oos_input_audit.json` and `reports/oos_signals/inference_provenance.json`.
+3. **Original frozen code and config:** `src/core_satellite.py`, `src/agent_backtest.py`, `src/execution_engine.py`, `config.yaml`, with `release_config.yaml` as a descriptive contract.
+4. **Post-freeze research utilities:** `src/level_c_strategy.py`, `src/submission_runner.py`, `docs/regime_adaptive_exploratory_2026.md`.
+5. **Narrative:** this design document, `decision_log.md`, `README.md`, report and presentation; narrative never overrides actual artifacts.
 
-| Regime | Budget SPY | IEF | GLD | SHY |
-|---|---:|---:|---:|---:|
-| `low_low` | 25% | 30% | 20% | 25% |
-| `low_high` | 25% | 20% | 30% | 25% |
-| `high_low` | 15% | 30% | 20% | 35% |
-| `high_high` | 15% | 20% | 30% | 35% |
+To inspect the registered experiment, use `python main.py` and `python main.py --release-action audit`. To reproduce the official backtest without tuning, use `python main.py --release-action replay`. To run temporal or adaptive summaries, use `python main.py --analysis temporal-robustness` and `python main.py --analysis regime-adaptive`. Research-mode output is not permitted to overwrite protected datasets or reports.
 
-Questi budget sono **ipotesi di allocazione fissate per la ricerca**, non pesi ottimali dimostrati né rendimenti attesi stimati. La media semplice dei quattro stati è `(20%, 25%, 25%, 30%)` per SPY/IEF/GLD/SHY.
-
-### 4.2 B_v1: baseline Long/Short conservata
-
-Per ciascun ETF e a ogni decisione settimanale: **Long +1** se il momentum a 21 e 63 sedute è positivo in entrambi gli orizzonti; **Short −1** se entrambi sono negativi; **Flat 0** negli altri casi. Un filtro macro aggiuntivo impedisce posizioni Long su SPY nei regimi di VIX elevato e su IEF nei regimi di breakeven elevato. I pesi obiettivo con segno sono il prodotto del budget di regime per il segnale. Una riduzione proporzionale basata sulla covarianza a 126 sedute limita la volatilità annua stimata del portafoglio all'**8%**, senza aumentare l'esposizione quando il rischio stimato è inferiore.
-
-Il backtester include controlli sulle garanzie e sui margini Short, un costo di prestito titoli ipotizzato all'**1% annuo**, interessi sulla liquidità pari a zero e i normali costi di negoziazione. B_v1 è conservata per **riproducibilità**, non perché i suoi risultati nel training giustifichino il mantenimento delle posizioni Short.
-
-### 4.3 B_v2: candidata Long/Flat congelata
-
-B_v2 mantiene gli stessi quattro regimi macro e relativi budget, ma utilizza il **solo momentum**, eliminando le posizioni Short e il filtro macro direzionale aggiuntivo:
-
-- `signal_i(t) = 1` soltanto quando i momentum a **21 e 63 sedute** sono entrambi strettamente positivi; altrimenti il segnale vale `0`.
-- Peso Long/Flat iniziale: `raw_weight_i(t) = regime_budget_i(t) * signal_i(t)`.
-- Il limite di volatilità stimata, calcolato su **126 sedute**, si applica **dopo** aver eliminato i pesi negativi, quindi al portafoglio Long/Flat effettivo.
-- I pesi non vengono mai aumentati per sfruttare la capacità di rischio inutilizzata; l'esposizione investita complessiva non supera 1 e la parte residua rimane in **liquidità non remunerata**.
-
-Si tratta di una strategia **Long/Flat, non market-neutral**. L'utilizzo di quattro regimi macro predefiniti non costituisce di per sé un modello di forecasting. B_v2 è stata selezionata attraverso analisi sul training e congelata **prima** di esaminare le metriche della validation 2017–2021.
-
-## 5. Evidenze sul training e selezione della candidata
-
-**Training osservato:** 20 maggio 2005 – 30 dicembre 2016, al netto dei costi modellati, NAV iniziale di 100.000 USD.
-
-| Strategia | CAGR | Volatilità | Sharpe | Maximum drawdown |
-|---|---:|---:|---:|---:|
-| SPY Buy & Hold | 7,77% | 19,68% | 0,479 | −55,19% |
-| 60/40 settimanale | 7,13% | 10,88% | 0,688 | −32,00% |
-| Equal Weight settimanale | 6,54% | 6,99% | 0,942 | −15,69% |
-| Equal Weight Buy & Hold | 6,16% | 8,75% | 0,727 | −17,63% |
-| **A2: Volatility Control** | **6,24%** | **6,41%** | **0,977** | **−14,28%** |
-| B_v1: regime Long/Short | 0,24% | 5,55% | 0,071 | −17,55% |
-| **B_v2: regime Long/Flat** | **2,64%** | **4,17%** | **0,646** | **−7,01%** |
-
-Il training comprende **607 decisioni settimanali**. B_v1 esegue **604 ribilanciamenti** (NAV finale **102.826,95 USD**); B_v2 ne esegue **591** (NAV finale **135.371,33 USD**). L'esposizione media target di B_v2 è **54,18%**: una quota rilevante di liquidità senza interessi riduce il rischio osservato, ma limita anche il rendimento e rende necessario un confronto corretto per esposizione.
-
-**Diagnostiche e ablation study (B6.1–B6.6), esclusivamente sul training:**
-
-1. L'attribuzione del P&L mostra circa **+31.900 USD** dalle posizioni Long e **−20.300 USD** dalle posizioni Short, prima dei costi. Dopo circa **6.580 USD** di costi di negoziazione e **2.170 USD** di interessi sul prestito titoli, il NAV di B_v1 aumenta di soli **2.830 USD**.
-2. L'eliminazione degli Short migliora notevolmente lo Sharpe nel training. Anche la rimozione del filtro macro direzionale separato migliora il risultato Long/Flat nella configurazione esaminata. Sono **confronti osservati sul training**, non verifiche indipendenti.
-3. I budget macro condizionati ai regimi migliorano modestamente i risultati rispetto a budget fissi. Con il limite di volatilità effettivamente usato in B_v2, lo Sharpe è **0,6464**, contro **0,6094** per i budget fissi medi della politica e **0,5955** per il 25% fisso per ETF. Il vantaggio di **+0,037** rispetto ai budget medi è contenuto; differenze di esposizione media e costi impediscono di attribuirlo interamente, in senso causale, al timing dei regimi.
-4. In B_v2 il limite di rischio è ricalcolato **dopo** la conversione dei segnali Long/Short in Long/Flat: non equivale a porre semplicemente a zero i pesi Short finali di B_v1.
-
-**Decisione:** conservare B_v1 come baseline negativa e verificabile; selezionare e congelare B_v2 come candidata più semplice per il Level B. Né uno Sharpe positivo né un drawdown inferiore dimostrano superiorità economica incrementale rispetto ad A2. Restano necessari confronti a parità di rischio/esposizione e una quantificazione dell'incertezza statistica.
-
-## 6. Validation già esaminata: 2017–2021
-
-Dopo il congelamento della versione selezionata sul training, uno script diagnostico separato ha esteso B_v2 fino al **31 dicembre 2021**, senza cambiarne i parametri. Il replay ha verificato la **corrispondenza esatta dei pesi target del training** con quelli congelati, la corrispondenza del NAV del training, l'invarianza causale del prefisso fino al 2019 e l'assenza di sovrascritture degli artefatti congelati. I risultati riferiti **soltanto alla validation** sono:
-
-| Sedute | Rendimento cumulato | CAGR | Volatilità annua | Sharpe | Maximum drawdown |
-|---:|---:|---:|---:|---:|---:|
-| **1.259** | **+8,919%** | **1,725%** | **3,373%** | **0,5239** | **−4,696%** |
-
-Il valore di **108.919 USD** indica la crescita normalizzata di 100.000 USD all'inizio della validation, **non** un riavvio del NAV originario del portafoglio. Il replay è stato continuo e ha mantenuto le posizioni già detenute; nella validation risultano **256 esecuzioni**. I dati della validation sono ormai **stati esaminati**. Le regole di B_v2 non sono state modificate in seguito, ma i futuri sviluppi di clustering e ML non potranno presentare lo stesso campione come completamente inesplorato per l'intero sistema integrato.
-
-L'audit locale è salvato in `data/results/B/heldout_diagnostic/bv2_through_2021-12-31.json`, percorso escluso da Git. Il test di validation **non** certifica le vintage FRED *point-in-time* né elimina gli eventuali bias del provider dei dati. **Non è stata eseguita alcuna valutazione Multi-Asset dal 2022 in poi.**
-
-## 7. Riproducibilità, interfacce e limiti aperti
-
-**Comandi principali**, dalla radice del repository:
-
-```bash
-python3 -m pip install -r requirements.txt
-python3 -m unittest discover -s tests -p 'test_*.py' -v
-python3 main.py --level ALL
-python3 main.py --level B --b-version v1
-python3 main.py --level B --b-version v2
-python3 scripts/holdout_diagnostic_bv2.py --through 2021-12-31
-```
-
-`main.py --level B` utilizza v1 come default per compatibilità con il codice precedente. Entrambe le versioni B sono state riprodotte senza sovrascrivere gli output congelati (B6.8); l'interfaccia dei regimi ha riprodotto i budget esistenti e superato test con etichette sintetiche di clustering (B6.9). La suite locale di 123 test è stata superata dopo il consolidamento A/B del 28 ottobre 2026. I test e i backtest dovranno comunque essere rieseguiti sul codice risultante dall'integrazione in `main`: la verifica del branch locale non sostituisce la verifica successiva al merge.
-
-**Moduli principali (aggiornato il 4 novembre 2026):** `src/utils.py` (universo unico `ASSETS`, config), `src/data_loader.py` (tutte le letture di file, anche per gli agenti), `src/features.py` (tutte le feature), `src/time_split.py` (periodi e calendario delle decisioni), `src/portfolio.py` (A1, A2 e limite di volatilità di B), `src/execution_engine.py` (ex `longshort_backtester.py`), `src/evaluator.py` (tutte le metriche), `src/regime_allocator.py` e `src/regime_strategy.py` (livello B, incluso `run_level_b`), `src/regime_clustering.py` (regimi GMM), `src/level_c_allocator.py` e `src/level_c_strategy.py` (livello C, v1 e v2), `src/run_*_comparison.py` (confronti sul training), `src/agents/` (solo logica dei modelli). Il paragrafo seguente descrive lo stato del 28 ottobre ed è superato.
-
-**Moduli principali (consolidamento del 28 ottobre, superato):** `src/data_transformation.py` contiene anche l'API `load_dataset`; `src/macro_availability.py` realizza l'allineamento delle osservazioni macro, le feature e la classificazione deterministica dei regimi. `src/regime_allocator.py` comprende la validazione delle etichette di regime, il contratto esplicito cluster-budget, i segnali momentum, i filtri e i vincoli di volatilità. `src/regime_strategy.py` compone B_v1 e B_v2; `src/longshort_backtester.py` esegue la simulazione giornaliera con contabilità autofinanziante, anche per Long/Flat. `src/portfolio.py` contiene A1/A2 e l'ottimizzatore CVXPY; `src/backtester.py` coordina il percorso A; `src/evaluator.py` calcola le metriche e `src/time_split.py` gestisce i confini temporali. `main.py` seleziona le versioni. I vecchi moduli `multiasset_allocator.py`, `macro_features.py`, `regime_signals.py`, `regime_contract.py` e `data_loader.py` sono stati assorbiti nei moduli indicati e non devono essere importati.
-
-**Interfaccia per il clustering:** una serie temporale di etichette deve essere allineata alle date di decisione e ai confini del periodo; è necessaria una politica di associazione **esplicita e non anticipativa** fra etichette e budget. `cluster_0` non equivale automaticamente a `low_low`. L'interfaccia è stata testata, ma **non** addestra i cluster, non ne certifica la stabilità e non valida la politica di associazione appresa.
-
-**Questioni aperte:**
-
-- Orari di pubblicazione e revisioni storiche FRED **non certificati point-in-time**: l'allineamento alla data di osservazione è soltanto una proxy.
-- Costi di transazione, prezzi di esecuzione rettificati, finanziamento degli Short, garanzie e **rendimento della liquidità pari a zero** sono semplificazioni.
-- La selezione del modello e gli ablation study dipendono dai risultati del **training**; una sola validation non dimostra significatività statistica o alpha investibile.
-- A2 e B_v2 presentano esposizioni lorde molto diverse: mancano confronti a rischio/esposizione comparabili, sensibilità agli interessi sul cash e quantificazione dell'incertezza.
-- Il **test finale dal 2022** va conservato per il sistema integrato, dopo aver definito e congelato le regole di clustering, forecasting ed eventuali agenti.
-
-## 8. Prossime fasi della ricerca
-
-1. **Stabilizzare e pubblicare l'infrastruttura comune:** aggiornare README, Research Design e Decision Log esistenti; proteggere gli output congelati; eseguire test di regressione e di invarianti; integrare il lavoro con il `main` remoto più recente senza sovrascrivere i contributi dei colleghi.
-2. **Clustering:** fornire una nuova serie di regimi tramite il contratto `validate_regime_series` / `build_regime_budget_panel` in `src/regime_allocator.py`, mantenendo invariati momentum, riduzione del rischio e backtester; misurare se il nuovo classificatore aggiunge valore rispetto ai regimi deterministici e ai budget fissi.
-3. **Forecasting e agenti:** definire **prima dell'addestramento** variabile target, orizzonte, benchmark e protocollo walk-forward. Valutare separatamente capacità predittiva e risultati economici netti. Le notizie storiche richiedono timestamp verificabili. Il test finale dal 2022 è destinato alla valutazione conclusiva, non allo sviluppo.
+**Conclusion.** The completed project demonstrates a traceable systematic trading workflow and a rigorously reported negative official OOS comparison. The follow-up Regime-Adaptive research is a plausible, implementable signal-construction extension with encouraging retrospective downside statistics, but not a validated source of independent statistically significant alpha.
