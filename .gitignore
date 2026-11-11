@@ -34,9 +34,8 @@ data/processed/
 data/signals/
 data/results/
 
-# I modelli binari generati richiedono una politica dedicata agli artefatti.
-# Non escludere tutti i JSON: alcuni parametri storici sono tracciati in Git.
-src/agents/config/*.joblib
 
 # Generated final charts, excluded from Git
 outputs/
+
+agents_presentation_guide.md
