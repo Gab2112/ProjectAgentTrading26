@@ -10,7 +10,7 @@ from pathlib import Path
 import pandas as pd
 import yaml
 
-from src.agent_backtest import generate_dynamic_growth_matrix
+from src.frozen_satellite_selector import generate_dynamic_growth_matrix
 from src.data_loader import load_dataset, load_daily_market_data
 from src.time_split import build_weekly_decision_dates
 from src.utils import ASSETS, ROOT_DIR, load_config

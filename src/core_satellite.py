@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.agent_backtest import generate_dynamic_growth_matrix
+from src.frozen_satellite_selector import generate_dynamic_growth_matrix
 from src.data_loader import load_dataset
 from src.evaluator import calculate_metrics
 from src.execution_engine import simulate_longshort_daily

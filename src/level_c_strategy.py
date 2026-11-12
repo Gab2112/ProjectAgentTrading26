@@ -167,7 +167,7 @@ def build_regime_adaptive_core_targets(
     """
     import numpy as np
 
-    from src.agent_backtest import generate_dynamic_growth_matrix
+    from src.frozen_satellite_selector import generate_dynamic_growth_matrix
     from src.core_satellite import (
         SATELLITE_ORDER,
         build_core_satellite_targets,
