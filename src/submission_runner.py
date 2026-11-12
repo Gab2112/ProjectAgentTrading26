@@ -163,7 +163,6 @@ def calculate_regime_adaptive_research(root_dir: Path = ROOT_DIR):
     """
     import numpy as np
     import pandas as pd
-    from src.core_satellite import build_core_satellite_targets
     from src.data_loader import load_daily_market_data
     from src.evaluator import calculate_metrics
     from src.execution_engine import simulate_longshort_daily

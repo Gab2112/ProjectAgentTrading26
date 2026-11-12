@@ -27,7 +27,7 @@ import json
 import warnings
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 # Risoluzione robusta dei percorsi
 CURRENT_DIR = Path(__file__).resolve().parent
@@ -47,13 +47,11 @@ from src.agents.EMA_EMW_agent import SMAEMAAgent, SMAEMAOptimizer, WalkForwardTr
 from src.agents.ZScore_agent import ZScoreAgent, ZScoreOptimizer, ZScoreWalkForwardTrainer
 from src.agents.macro_yield_curve_agent import MacroYieldCurveAgent
 from src.agents.random_forest_agent import (
-    RandomForestAgent,
     RandomForestOptimizer,
     RandomForestWalkForwardTrainer,
 )
 from src.agents.SVM_agent import SVMWalkForwardTrainer
 from src.agents.orchestrator_agent import (
-    OrchestratorAgent,
     OrchestratorOptimizer,
 )
 from src.data_loader import load_agent_macro_data

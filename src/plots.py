@@ -14,7 +14,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 # Configurazione directory di cache per Matplotlib per prevenire warning su ambienti con permessi limitati
 os.environ.setdefault("MPLCONFIGDIR", tempfile.gettempdir())
@@ -29,7 +29,6 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
 import numpy as np
 import pandas as pd
-import seaborn as sns
 import yaml
 
 # Risoluzione percorsi di progetto
@@ -192,7 +191,6 @@ def load_all_signals_for_asset(
     signals_dir: Optional[Union[str, Path]] = None,
 ) -> Dict[str, pd.DataFrame]:
     """Carica tutti i segnali disponibili per un determinato asset dalla cartella data/signals/."""
-    asset_upper = asset.upper()
     asset_lower = asset.lower()
     sig_path = Path(signals_dir) if signals_dir else (PROJECT_ROOT / "data" / "signals")
 

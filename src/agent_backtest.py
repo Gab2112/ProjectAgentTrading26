@@ -255,7 +255,6 @@ def generate_orchestrator_signals(
 
 def run_comparison_3vs4_assets_is():
     all_assets = ["SPY", "IEF", "GLD", "SHY"]
-    assets_3 = ["SPY", "IEF", "GLD"]
     assets_4 = ["SPY", "IEF", "GLD", "SHY"]
 
     # Range temporale esplicito per l'In-Sample (Train)
