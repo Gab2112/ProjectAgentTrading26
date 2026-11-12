@@ -1,3 +1,11 @@
+"""Sentiment agent based on the FinBERT transformer (ProsusAI/finbert).
+
+The module downloads financial headlines (public RSS feeds, an open-source
+HuggingFace dataset and an asset-specific historical calendar), classifies
+them with FinBERT and aggregates the results into weekly signals {-1, 0, 1}
+with a confidence in [0, 1]. Sentiment is inverted for the defensive assets
+(IEF, SHY, GLD). The agent is optional and requires torch and transformers.
+"""
 import html
 import json
 import re
@@ -10,7 +18,7 @@ import pandas as pd
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-# Risoluzione robusta dei percorsi
+# Robust path resolution.
 CURRENT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = CURRENT_DIR.parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -23,10 +31,10 @@ from src.data_loader import load_agent_market_data
 
 
 # =====================================================================
-# 1. ACQUISIZIONE E DOWNLOAD AUTOMATICO DA INTERNET PER ASSET
+# 1. AUTOMATIC NEWS ACQUISITION BY ASSET
 # =====================================================================
 def clean_headline_text(text: str) -> str:
-    """Rimuove entità HTML, tag XML, link URL e spazi multipli dal testo."""
+    """Remove HTML entities, XML tags, URLs and repeated whitespace from the text."""
     if not isinstance(text, str):
         return ""
     text = html.unescape(text)
@@ -37,7 +45,7 @@ def clean_headline_text(text: str) -> str:
 
 
 def fetch_rss_headlines(feed_url: str, source_name: str, category: str, timeout: int = 10) -> List[Dict[str, str]]:
-    """Scarica e parsa le notizie da un feed RSS XML pubblico."""
+    """Download and parse the headlines of a public XML RSS feed."""
     headlines = []
     try:
         req = urllib.request.Request(
@@ -81,7 +89,8 @@ def fetch_rss_headlines(feed_url: str, source_name: str, category: str, timeout:
 
 
 def fetch_huggingface_financial_news(limit: int = 200, timeout: int = 10) -> List[Dict[str, str]]:
-    """Scarica dataset di sentiment finanziario open-source direttamente da HuggingFace Datasets API."""
+    """Download an open-source financial sentiment dataset through the HuggingFace Datasets API.
+    """
     headlines = []
     url = f"https://datasets-server.huggingface.co/rows?dataset=zeroshot/twitter-financial-news-sentiment&config=default&split=train&offset=0&limit={limit}"
     try:
@@ -111,9 +120,9 @@ def fetch_huggingface_financial_news(limit: int = 200, timeout: int = 10) -> Lis
 
 
 def build_asset_specific_historical_calendar(target_asset: str) -> List[Dict[str, str]]:
-    """
-    Fornisce un catalogo storico dettagliato e mirato in base all'asset richiesto
-    (SPY, GLD, IEF, SHY) per coprire efficacemente il backtesting.
+    """Return a curated historical catalogue of headlines for the requested asset.
+
+    Covers SPY, GLD, IEF and SHY so that backtests have adequate coverage.
     """
     asset = target_asset.upper()
 
@@ -192,6 +201,7 @@ def download_news_dataset(
         target_asset: str = "SPY",
         limit_per_source: int = 150,
 ) -> pd.DataFrame:
+    """Build the news dataset for one asset from all sources and save it to CSV."""
     if save_path is None:
         save_path = PROJECT_ROOT / "data" / "raw" / "news" / f"financial_news_{target_asset.lower()}.csv"
     else:
@@ -221,9 +231,11 @@ def download_news_dataset(
 
 
 # =====================================================================
-# 2. AGENTE FINBERT SENTIMENT ANALYSIS
+# 2. FINBERT SENTIMENT AGENT
 # =====================================================================
 class FinBERTAgent(BaseAgent):
+    """Sentiment agent that turns financial headlines into trading signals with FinBERT.
+    """
     def __init__(
             self,
             model_name: str = "ProsusAI/finbert",
@@ -240,7 +252,7 @@ class FinBERTAgent(BaseAgent):
         self.text_col = text_col
         self.target_asset = target_asset.upper() if target_asset else "SPY"
 
-        # Inversione sentiment: True per GLD, IEF, SHY; False per SPY
+        # Sentiment inversion: True for GLD, IEF and SHY; False for SPY.
         if invert_sentiment is not None:
             self.invert_sentiment = bool(invert_sentiment)
         else:
@@ -261,15 +273,23 @@ class FinBERTAgent(BaseAgent):
         self.neu_idx = norm_label2id.get("neutral", 2)
 
     def download_news(self, save_path: Optional[Union[str, Path]] = None, limit_per_source: int = 150) -> pd.DataFrame:
+        """Download the news dataset for the agent's target asset."""
         return download_news_dataset(save_path=save_path, target_asset=self.target_asset,
                                      limit_per_source=limit_per_source)
 
     def predict(self, df: pd.DataFrame, batch_size: int = 32) -> pd.Series:
-        """Implementazione del metodo astratto richiesto da BaseAgent."""
+        """Return the discrete signals (implementation of the BaseAgent abstract method).
+        """
         signals, _ = self.predict_with_confidence(df, batch_size=batch_size)
         return signals
 
     def predict_with_confidence(self, df: pd.DataFrame, batch_size: int = 32) -> Tuple[pd.Series, pd.Series]:
+        """Classify each headline and return its signal and confidence.
+
+        A headline produces a signal only when the winning class (positive or
+        negative) has a probability of at least ``confidence_threshold``; the sign
+        is inverted for the defensive assets.
+        """
         if self.text_col not in df.columns:
             signals = pd.Series(0, index=df.index, dtype=int)
             conf = pd.Series(0.0, index=df.index, dtype=float)
@@ -318,6 +338,12 @@ class FinBERTAgent(BaseAgent):
 
     def generate_sentiment_signals(self, news_df: pd.DataFrame,
                                    calendar_index: Optional[pd.DatetimeIndex] = None) -> pd.DataFrame:
+        """Aggregate headline sentiment into weekly (W-FRI) signals.
+
+        A week is long when its mean conviction is at least 0.20 and short when it
+        is at most -0.20; otherwise it is flat. If a calendar is supplied, the
+        weekly signals are reindexed to it, with missing weeks set to flat.
+        """
         if calendar_index is None:
             try:
                 calendar_index = load_agent_market_data().index
@@ -364,7 +390,7 @@ class FinBERTAgent(BaseAgent):
 
 
 # =====================================================================
-# 3. ESECUZIONE MULTI-ASSET (SPY, GLD, IEF, SHY)
+# 3. MULTI-ASSET EXECUTION (SPY, GLD, IEF, SHY)
 # =====================================================================
 if __name__ == "__main__":
     assets_to_process = ["SPY", "GLD", "IEF", "SHY"]

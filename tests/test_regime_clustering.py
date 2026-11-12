@@ -1,18 +1,18 @@
-"""Test del clustering dei regimi (preparazione Level B).
+"""Tests of the regime clustering (Level B preparation).
 
-I test usano soltanto dati sintetici. Non leggono dati di mercato reali e
-non consultano i risultati della validation o dell'OOS.
+The tests use synthetic data only. They do not read real market data and do
+not consult validation or OOS results.
 
-Invarianti controllati:
-- le variabili usano solo informazioni passate;
-- il modello viene allenato solo sul training: i dati successivi non
-  cambiano i cluster assegnati alle settimane di training;
-- probabilità valide, etichette ordinate in modo stabile;
-- la quota di settimane "non riconosciute" nel training rispetta il quantile;
-- la diagnostica del rischio usa solo finestre interne al training;
-- le date di decisione (anche di giovedì) sono associate alla propria settimana.
+Invariants checked:
+- the variables use past information only;
+- the model is fitted on the training period only: later data does not
+  change the clusters assigned to training weeks;
+- probabilities are valid and labels are ordered in a stable way;
+- the share of "unrecognised" weeks in the training period respects the quantile;
+- the risk diagnostics use only windows within the training period;
+- decision dates (including Thursdays) are mapped to their own week.
 
-Esecuzione dalla radice del repository:
+Run from the repository root:
     python3 -m unittest discover -s tests -p 'test_*.py' -v
 """
 
@@ -54,7 +54,7 @@ def make_settings() -> dict:
 
 
 def make_weekly_yields(seed: int = 0) -> pd.DataFrame:
-    """Rendimenti sintetici settimanali (W-FRI) dal 2004 al 2021."""
+    """Synthetic weekly (W-FRI) yields from 2004 to 2021."""
     rng = np.random.default_rng(seed)
     dates = pd.date_range("2004-01-02", "2021-12-31", freq="W-FRI")
     y2 = 2.0 + np.cumsum(rng.normal(0, 0.08, len(dates)))
@@ -71,7 +71,7 @@ class TestClusterFeatures(unittest.TestCase):
         yields = make_weekly_yields()
         cutoff = pd.Timestamp("2012-06-29")
         changed = yields.copy()
-        changed.loc[changed.index > cutoff] += 5.0  # futuro modificato
+        changed.loc[changed.index > cutoff] += 5.0  # modified future
 
         original = build_cluster_features(yields, make_settings())
         modified = build_cluster_features(changed, make_settings())
@@ -84,8 +84,8 @@ class TestClusterFeatures(unittest.TestCase):
 
     def test_thursday_decision_maps_to_its_week(self):
         features = make_features()
-        friday = pd.Timestamp("2015-04-03")       # Venerdì Santo: borsa chiusa
-        thursday = pd.Timestamp("2015-04-02")     # decisione effettiva
+        friday = pd.Timestamp("2015-04-03")       # Good Friday: market closed
+        thursday = pd.Timestamp("2015-04-02")     # actual decision
         aligned = align_to_decision_dates(features, pd.DatetimeIndex([thursday]))
         pd.testing.assert_series_equal(
             aligned.iloc[0], features.loc[friday], check_names=False

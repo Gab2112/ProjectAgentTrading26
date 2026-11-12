@@ -1,14 +1,12 @@
-"""
-base_agent.py
+"""Abstract base class for all trading agents of ProjectAgentTrading26.
 
-Classe base astratta per tutti gli agenti di trading del framework ProjectAgentTrading26.
-Definisce l'interfaccia standard e condivisa per:
-- Inferenza e generazione segnali: predict() e generate_signals()
-- Convenzione dei segnali: 1 (BUY/LONG), -1 (SELL/SHORT), 0 (HOLD/FLAT)
-- Accesso ai dati tramite src/data_loader.py (load_data)
-- Risoluzione automatica delle colonne di prezzo per asset specifici
-- Serializzazione e caricamento parametri: load_params(), save_params()
-- Formattazione output uniforme (numeric [-1, 0, 1] o string ['SELL', 'HOLD', 'BUY'])
+It defines the shared standard interface for:
+- inference and signal generation: ``predict()`` and ``generate_signals()``;
+- the signal convention: 1 (BUY/LONG), -1 (SELL/SHORT), 0 (HOLD/FLAT);
+- data access through ``src/data_loader.py`` (``load_data``);
+- automatic resolution of asset-specific price columns;
+- parameter serialisation: ``load_params()``, ``save_params()``;
+- uniform output formatting (numeric [-1, 0, 1] or string ['SELL', 'HOLD', 'BUY']).
 """
 
 from abc import ABC, abstractmethod
@@ -23,10 +21,9 @@ from src.utils import ASSETS
 
 
 class BaseAgent(ABC):
-    """
-    Classe base astratta per tutti gli agenti di trading.
+    """Abstract base class for all trading agents.
 
-    Tutti gli agenti derivati devono implementare il metodo astratto:
+    Every derived agent must implement the abstract method:
         predict(df: pd.DataFrame) -> pd.Series
     """
 
@@ -37,7 +34,7 @@ class BaseAgent(ABC):
         name: str = "BaseAgent",
         target_asset: Optional[str] = None,
         price_col: Optional[str] = None,
-        output_format: str = "numeric",  # 'numeric' (-1, 0, 1) o 'string' ('SELL', 'HOLD', 'BUY')
+        output_format: str = "numeric",  # 'numeric' (-1, 0, 1) or 'string' ('SELL', 'HOLD', 'BUY')
     ):
         self.name = name
         self.target_asset = target_asset.upper() if target_asset else None
@@ -47,31 +44,28 @@ class BaseAgent(ABC):
 
     @abstractmethod
     def predict(self, df: pd.DataFrame) -> pd.Series:
-        """
-        Calcola e restituisce la serie dei segnali operativi allineata all'indice del DataFrame.
+        """Compute the trading signals aligned with the DataFrame index.
 
-        Parametri:
-            df (pd.DataFrame): DataFrame contenente i dati storici (prezzi, feature o testi).
+        Args:
+            df (pd.DataFrame): Historical data (prices, features or text).
 
-        Ritorna:
-            pd.Series: Serie temporale con i segnali generati:
-                       -1 (SELL/SHORT), 0 (HOLD/FLAT), 1 (BUY/LONG)
-                       oppure le corrispondenti stringhe se output_format='string'.
+        Returns:
+            pd.Series: Time series of signals: -1 (SELL/SHORT), 0 (HOLD/FLAT),
+            1 (BUY/LONG), or the corresponding strings if ``output_format='string'``.
         """
         pass
 
     def generate_signals(self, df: pd.DataFrame) -> pd.Series:
-        """
-        Alias intuitivo per il metodo predict().
-        Garantisce coerenza con le convenzioni di signal_generation della pipeline.
+        """Alias of ``predict()``, consistent with the pipeline signal-generation conventions.
         """
         return self.predict(df)
 
     def predict_with_confidence(self, df: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
-        """
-        Calcola sia i segnali operativi discreti {-1, 0, 1} sia la stima di confidenza / probabilità [0.0, 1.0].
-        Di default assegna confidenza 1.0 ai segnali attivi (-1, 1) e 0.0 a HOLD (0).
-        Le classi derivate possono specializzare il calcolo con modelli probabilistici o metriche continue.
+        """Compute both the discrete signals {-1, 0, 1} and a confidence estimate in [0.0, 1.0].
+
+        By default, active signals (-1, 1) receive a confidence of 1.0 and HOLD (0)
+        receives 0.0. Derived classes can refine the computation with probabilistic
+        models or continuous metrics.
         """
         signals = self.predict(df)
         confidence = pd.Series(np.where(signals != 0, 1.0, 0.0), index=df.index, dtype=float)
@@ -83,19 +77,20 @@ class BaseAgent(ABC):
         price_col: Optional[str] = None,
         target_asset: Optional[str] = None,
     ) -> str:
-        """
-        Risolve in modo intelligente e tollerante la colonna dei prezzi nel DataFrame.
-        Supporta sia DataFrame con colonne generiche ('close', 'Close') sia
-        DataFrame multi-asset con prefisso ('SPY_close', 'IEF_close', ecc.).
+        """Resolve the price column of the DataFrame in a tolerant way.
+
+        Supports both DataFrames with generic columns (``'close'``, ``'Close'``)
+        and multi-asset DataFrames with prefixed columns (``'SPY_close'``,
+        ``'IEF_close'``, etc.).
         """
         candidate_col = price_col or self.price_col
         asset = (target_asset or self.target_asset or "").upper()
 
-        # 1. Se il candidato è già esattamente presente
+        # 1. The candidate is already present as is.
         if candidate_col and candidate_col in df.columns:
             return candidate_col
 
-        # 2. Se è specificato un asset target, cerca la combinazione f"{asset}_close"
+        # 2. If a target asset is specified, look for f"{asset}_close".
         if asset:
             for suffix in ["_close", "_Close", "_CLOSE"]:
                 prefixed = f"{asset}{suffix}"
@@ -106,12 +101,12 @@ class BaseAgent(ABC):
                 if prefixed in df.columns:
                     return prefixed
 
-        # 3. Controllo colonne generiche 'close' o 'Close'
+        # 3. Check the generic 'close' or 'Close' columns.
         for col_name in ["close", "Close", "Adj Close", "adj_close"]:
             if col_name in df.columns:
                 return col_name
 
-        # 4. Se df ha una sola colonna che finisce per '_close'
+        # 4. The DataFrame has a single column ending in '_close'.
         close_like = [c for c in df.columns if str(c).lower().endswith("_close")]
         if len(close_like) == 1:
             return close_like[0]
@@ -123,7 +118,7 @@ class BaseAgent(ABC):
         )
 
     # =====================================================================
-    # CARICAMENTO DATI (delegato a src/data_loader.py)
+    # DATA LOADING (delegated to src/data_loader.py)
     # =====================================================================
 
 
@@ -136,9 +131,9 @@ class BaseAgent(ABC):
         end_date: Optional[Union[str, pd.Timestamp]] = None,
         root_dir: Optional[Union[str, Path]] = None,
     ) -> pd.DataFrame:
-        """
-        Metodo di istanza per caricare direttamente i dati preparati per l'agente.
-        Se target_asset è configurato nell'agente, adatta automaticamente le colonne.
+        """Load the data prepared for the agent.
+
+        If ``target_asset`` is set on the agent, the columns are adapted automatically.
         """
         target = (asset or self.target_asset or "").upper()
         df = load_agent_dataset(
@@ -154,14 +149,13 @@ class BaseAgent(ABC):
         return df
 
     # =====================================================================
-    # GESTIONE PARAMETRI E SERIALIZZAZIONE
+    # PARAMETER MANAGEMENT AND SERIALISATION
     # =====================================================================
     def load_params(self, filepath: Union[str, Path]) -> "BaseAgent":
-        """
-        Carica i parametri ottimali da un file JSON e aggiorna lo stato dell'agente.
+        """Load optimal parameters from a JSON file and update the agent state.
 
-        Parametri:
-            filepath: Percorso del file JSON contenente i parametri.
+        Args:
+            filepath: Path of the JSON file containing the parameters.
         """
         path = Path(filepath)
         if not path.exists():
@@ -175,11 +169,10 @@ class BaseAgent(ABC):
         return self
 
     def save_params(self, filepath: Union[str, Path]) -> None:
-        """
-        Salva i parametri attuali dell'agente in un file JSON.
+        """Save the current agent parameters to a JSON file.
 
-        Parametri:
-            filepath: Percorso di destinazione del file JSON.
+        Args:
+            filepath: Destination path of the JSON file.
         """
         path = Path(filepath)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -187,9 +180,7 @@ class BaseAgent(ABC):
             json.dump(self.params, f, indent=4)
 
     def _apply_params(self, params: Dict[str, Any]) -> None:
-        """
-        Hook opzionale: aggiorna gli attributi specifici dell'agente derivato
-        a partire dal dizionario dei parametri caricato.
+        """Optional hook: update the derived agent attributes from the loaded parameter dictionary.
         """
         if "target_asset" in params:
             self.target_asset = str(params["target_asset"]).upper()
@@ -197,15 +188,15 @@ class BaseAgent(ABC):
             self.price_col = str(params["price_col"])
 
     def _format_signals(self, signals: pd.Series) -> pd.Series:
-        """
-        Normalizza e valida la serie dei segnali:
-        - Sostituisce eventuali NaN con 0 (HOLD/FLAT)
-        - Converte in interi {-1, 0, 1}
-        - Mappa nei valori stringa se output_format == 'string'
+        """Normalise and validate the signal series.
+
+        - Replaces NaN values with 0 (HOLD/FLAT).
+        - Converts the values to integers {-1, 0, 1}.
+        - Maps them to strings if ``output_format == 'string'``.
         """
         formatted = signals.fillna(0).astype(int)
 
-        # Controllo di conformità sui valori ammessi dal progetto (-1, 0, 1)
+        # Check that only the values allowed by the project (-1, 0, 1) are present.
         valid_values = {-1, 0, 1}
         observed = set(formatted.unique())
         if not observed.issubset(valid_values):
@@ -226,24 +217,23 @@ class BaseAgent(ABC):
 
 
 # =====================================================================
-# FUNZIONI DI UTILITÀ PER METRICHE DI PERFORMANCE E STABILITÀ
+# PERFORMANCE AND STABILITY METRIC UTILITIES
 # =====================================================================
 def calculate_performance_metrics(
     returns: pd.Series,
     annualization_factor: int = 52,
     risk_free_rate: float = 0.0,
 ) -> Dict[str, float]:
-    """
-    Calcola le metriche complete di performance e rischio/stabilità per una serie di rendimenti periodici.
+    """Compute performance and risk/stability metrics for a series of periodic returns.
 
-    Parametri:
-        returns: Serie di rendimenti periodici (settimanali).
-        annualization_factor: Fattore di annualizzazione (default 52 per frequenza settimanale).
-        risk_free_rate: Tasso privo di rischio annualizzato (default 0.0).
+    Args:
+        returns: Periodic (weekly) returns.
+        annualization_factor: Annualisation factor (default 52 for weekly data).
+        risk_free_rate: Annualised risk-free rate (default 0.0).
 
-    Ritorna:
-        Dizionario con metriche: cumulative_return, annualized_return, annualized_volatility,
-        sharpe_ratio, max_drawdown, profit_factor, calmar_ratio.
+    Returns:
+        Dictionary with cumulative_return, annualized_return, annualized_volatility,
+        sharpe_ratio, max_drawdown, profit_factor and calmar_ratio.
     """
     clean_ret = returns.fillna(0.0)
     n = len(clean_ret)
@@ -301,16 +291,15 @@ def compute_objective_score(
     metrics: Dict[str, float],
     metric_type: str = "sharpe_mdd",
 ) -> float:
-    """
-    Calcola lo score di ottimizzazione bilanciando rendimento e stabilità/rischio.
+    """Compute the optimisation score, balancing return against stability and risk.
 
-    Opzioni supportate:
-    - 'sharpe_mdd' (default): Sharpe ratio penalizzato per il Maximum Drawdown.
-        Premia strategie con curve di equity regolari e perdite massime contenute.
-        Score = Sharpe * (1 - MDD) se Sharpe >= 0, altrimenti Sharpe * (1 + MDD).
-    - 'sharpe': Sharpe ratio annualizzato puro.
-    - 'calmar': Calmar ratio (rendimento annualizzato / max drawdown).
-    - 'return': Rendimento cumulato puro (non include penalità sul rischio).
+    Supported options:
+    - ``'sharpe_mdd'`` (default): Sharpe ratio penalised by the maximum drawdown,
+      rewarding smooth equity curves with limited maximum losses.
+      Score = Sharpe * (1 - MDD) if Sharpe >= 0, otherwise Sharpe * (1 + MDD).
+    - ``'sharpe'``: plain annualised Sharpe ratio.
+    - ``'calmar'``: Calmar ratio (annualised return / maximum drawdown).
+    - ``'return'``: plain cumulative return, with no risk penalty.
     """
     sharpe = metrics["sharpe_ratio"]
     mdd = metrics["max_drawdown"]

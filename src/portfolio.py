@@ -1,25 +1,25 @@
-"""Costruzione dei pesi target per le strategie Multi-Asset.
+"""Target-weight construction for the multi-asset strategies.
 
-Questo modulo sostituisce la precedente logica Treasury basata sui segnali
-SHY/IEF/TLT e su ``duration_score``.
+This module replaces the earlier Treasury logic based on SHY/IEF/TLT
+signals and on ``duration_score``.
 
-Livelli supportati:
-- A1: portafogli statici e a ribilanciamento settimanale definiti nel YAML;
-- A2: controllo della volatilita' mediante ottimizzazione CVXPY;
-- B: limite di volatilita' per pesi con segno (``apply_volatility_cap_panel``).
+Supported levels:
+- A1: static and weekly-rebalanced portfolios defined in the YAML file;
+- A2: volatility control through CVXPY optimisation;
+- B: volatility cap for signed weights (``apply_volatility_cap_panel``).
 
-Responsabilita':
-1. leggere il pannello giornaliero prodotto da ``data_transformation.py``;
-2. selezionare le date di decisione effettive, dopo la chiusura di mercato;
-3. generare i pesi target senza utilizzare informazioni future;
-4. salvare pesi, diagnostiche e riepiloghi separati per strategia.
+Responsibilities:
+1. read the daily panel produced by ``data_transformation.py``;
+2. select the actual decision dates, after the market close;
+3. generate target weights without using future information;
+4. save weights, diagnostics and summaries separately for each strategy.
 
-Non esegue operazioni: il backtester dovra' applicare i pesi alla prima
-apertura successiva. Non calcola rendimenti o metriche di performance.
-Durante questa fase genera segnali solo nel periodo di TRAINING.
+No trades are executed here: the backtester applies the weights at the
+next available open. Returns and performance metrics are not computed.
+In this phase signals are generated only for the TRAINING period.
 
-Interfaccia principale: ``run_portfolio(config, root_dir, level=None)``.
-Restituisce un dizionario ``nome_strategia -> DataFrame dei pesi target``.
+Main interface: ``run_portfolio(config, root_dir, level=None)``.
+Returns a dictionary ``strategy_name -> DataFrame of target weights``.
 """
 
 from pathlib import Path
@@ -36,7 +36,7 @@ REQUIRED_PRICE_FIELDS = ("open", "close")
 
 
 def _validate_universe(config: dict) -> list[str]:
-    """Controlla che A1/A2 utilizzino i quattro ETF e i vincoli concordati."""
+    """Check that A1/A2 use the four ETFs and the agreed constraints."""
     tickers = get_tickers(config)
 
     if len(tickers) != 4 or set(tickers) != set(ASSETS):
@@ -64,7 +64,7 @@ def _validate_universe(config: dict) -> list[str]:
 
 
 def _validate_time_index(data: pd.DataFrame, name: str) -> None:
-    """Esclude date ambigue, duplicate o non ordinate."""
+    """Reject ambiguous, duplicated or unsorted dates."""
     if not isinstance(data.index, pd.DatetimeIndex):
         raise TypeError(f"{name}: l'indice deve contenere date.")
     if data.index.hasnans or data.index.tz is not None:
@@ -77,14 +77,14 @@ def load_portfolio_inputs(
     config: dict,
     root_dir: Path,
 ) -> tuple[pd.DataFrame, pd.DatetimeIndex]:
-    """Legge i prezzi rettificati e il calendario delle decisioni settimanali.
+    """Read adjusted prices and the weekly decision calendar.
 
-    I dati antecedenti all'inizio del training restano disponibili soltanto
-    per il calcolo delle finestre storiche, per esempio la covarianza A2.
-    Le osservazioni di validation/OOS non vengono usate per creare i pesi.
+    Data preceding the start of training remains available only to compute
+    look-back windows, for example the A2 covariance. Validation and OOS
+    observations are never used to build weights.
 
-    La validita' economica dei prezzi rettificati dipende dall'audit
-    precedente di acquisizione e trasformazione dei dati.
+    The economic validity of adjusted prices depends on the preceding audit
+    of data acquisition and transformation.
     """
     root_dir = Path(root_dir)
     tickers = _validate_universe(config)
@@ -115,7 +115,7 @@ def load_portfolio_inputs(
             "market_daily.csv: mancano le colonne " + ", ".join(missing)
         )
 
-    # Usa solo le colonne necessarie, senza inventare valori per sedute mancanti.
+    # Use only the required columns, without inventing values for missing sessions.
     daily = daily.loc[:, expected_columns].copy()
     for column in expected_columns:
         daily[column] = pd.to_numeric(daily[column], errors="raise")
@@ -126,7 +126,7 @@ def load_portfolio_inputs(
     if "decision_date" not in decisions_frame.columns:
         raise KeyError("weekly_decision_dates.csv: manca 'decision_date'.")
 
-    # L'indice e la colonna riportano la stessa seduta effettiva.
+    # The index and the column refer to the same actual trading session.
     decision_values = pd.to_datetime(
         decisions_frame["decision_date"], errors="raise"
     )
@@ -135,8 +135,8 @@ def load_portfolio_inputs(
     ).all():
         raise ValueError("Date di decisione incoerenti nel file settimanale.")
 
-    # Non basta disattivare l'OOS nel config: restringiamo anche esplicitamente
-    # gli input al training, senza accedere alle osservazioni successive.
+    # Disabling OOS in the configuration is not enough: inputs are also explicitly
+    # restricted to the training period, without accessing later observations.
     daily = restrict_to_allowed_period(daily, config)
     daily = daily.loc[daily.index <= train_end].copy()
     decisions = decisions_frame.index[
@@ -152,9 +152,9 @@ def load_portfolio_inputs(
     if not decisions.isin(daily.index).all():
         raise ValueError("Una decisione non corrisponde a una seduta di mercato.")
 
-    # Nel backtest ogni decisione sara' applicata alla seduta successiva.
-    # Una decisione dell'ultima seduta di training potra' essere scartata
-    # dal backtester, evitando operazioni nella validation.
+    # In the backtest, each decision is applied at the following session.
+    # A decision taken on the last training session may therefore be discarded
+    # by the backtester, avoiding trades inside the validation period.
     return daily, decisions
 
 
@@ -163,7 +163,7 @@ def _validated_weights(
     tickers: list[str],
     strategy_name: str,
 ) -> pd.Series:
-    """Verifica i pesi iniziali di un benchmark A1."""
+    """Validate the initial weights of an A1 benchmark."""
     if not isinstance(allocations, dict):
         raise TypeError(f"{strategy_name}: 'weights' deve essere un dizionario.")
 
@@ -199,11 +199,11 @@ def build_a1_weights(
     decision_dates: pd.DatetimeIndex,
     tickers: list[str],
 ) -> dict[str, pd.DataFrame]:
-    """Genera i pesi A1 senza previsioni o informazioni macroeconomiche.
+    """Generate A1 weights without forecasts or macroeconomic information.
 
-    ``rebalance: weekly`` produce un target a ogni decisione settimanale.
-    ``rebalance: none`` produce un solo ordine iniziale (buy-and-hold):
-    i pesi effettivi potranno poi variare naturalmente con i prezzi.
+    ``rebalance: weekly`` produces a target at every weekly decision.
+    ``rebalance: none`` produces a single initial order (buy-and-hold):
+    the effective weights then drift naturally with prices.
     """
     benchmark_config = config.get("benchmarks", {})
     if not isinstance(benchmark_config, dict) or not benchmark_config:
@@ -224,7 +224,7 @@ def build_a1_weights(
         if not isinstance(settings, dict):
             raise TypeError(f"Benchmark A1 '{name}': impostazioni non valide.")
 
-        # Accetta entrambe le denominazioni emerse durante la migrazione.
+        # Accept both naming conventions used in the configuration.
         allocations = settings.get("weights", settings.get("target_weights"))
         weight_vector = _validated_weights(allocations, tickers, name)
         rebalance = settings.get("rebalance")
@@ -249,10 +249,10 @@ def build_a1_weights(
 
 
 def _get_a2_parameters(config: dict) -> tuple[int, float]:
-    """Legge A2 e verifica che i parametri coincidano con l'allocatore attuale.
+    """Read the A2 settings and check that they match the current allocator.
 
-    Evita che una modifica silenziosa al YAML dia l'impressione di aver
-    modificato un vincolo che ``multiasset_allocator.py`` non supporta.
+    This prevents a silent change in the YAML file from suggesting that a
+    constraint unsupported by the allocator has been modified.
     """
     settings = config.get("strategies", {}).get("A2", {})
     if not isinstance(settings, dict):
@@ -291,9 +291,9 @@ def _get_a2_parameters(config: dict) -> tuple[int, float]:
         settings.get("reference_benchmark", "equal_weight"),
     )
 
-    # L'allocatore corrente parte sempre da pesi 25/25/25/25.
-    # Una variazione del riferimento nel YAML deve essere segnalata,
-    # non ignorata durante il calcolo.
+    # The current allocator always starts from 25/25/25/25 weights.
+    # A change of the reference weights in the YAML file must be reported,
+    # not silently ignored during the computation.
     benchmarks = config.get("benchmarks", {})
     if reference not in benchmarks:
         raise ValueError(f"A2: benchmark di riferimento non trovato: {reference}")
@@ -343,7 +343,7 @@ def _valida_rendimenti(
     finestra: int,
     volatilita_massima: float,
 ) -> pd.DataFrame:
-    """Controlla gli input senza modificare il DataFrame originale."""
+    """Validate the inputs without modifying the original DataFrame."""
     if not isinstance(rendimenti, pd.DataFrame):
         raise TypeError("I rendimenti devono essere un DataFrame pandas.")
 
@@ -387,8 +387,8 @@ def _valida_rendimenti(
     if not set(ASSETS).issubset(rendimenti.columns):
         raise ValueError("Mancano uno o più ETF richiesti: SPY, IEF, GLD, SHY.")
 
-    # La selezione avviene dopo il controllo delle date: nessuna risistemazione
-    # automatica dell'ordine o riempimento di valori mancanti.
+    # Columns are selected after the date checks: no automatic reordering
+    # and no filling of missing values.
     dati = rendimenti.loc[:, list(ASSETS)].tail(finestra).copy()
 
     try:
@@ -403,7 +403,7 @@ def _valida_rendimenti(
 
 
 def _verifica_soluzione(pesi: np.ndarray) -> np.ndarray:
-    """Valida i pesi restituiti dal risolutore, senza alterarli."""
+    """Validate the weights returned by the solver without altering them."""
     if pesi is None:
         raise RuntimeError("Il risolutore non ha restituito alcuna soluzione.")
 
@@ -421,8 +421,8 @@ def _verifica_soluzione(pesi: np.ndarray) -> np.ndarray:
     ):
         raise RuntimeError("La soluzione viola i vincoli sui pesi.")
 
-    # Non normalizziamo automaticamente: correggere una soluzione errata
-    # nasconderebbe problemi di convergenza del risolutore.
+    # Weights are not normalised automatically: correcting a wrong solution
+    # would hide solver convergence problems.
     return valori
 
 
@@ -431,17 +431,17 @@ def calcola_pesi_a2(
     finestra: int = 126,
     volatilita_massima: float = 0.08,
 ) -> tuple[pd.Series, dict]:
-    """Restituisce i pesi target A2 e le diagnostiche dell'ottimizzazione.
+    """Return the A2 target weights and the optimisation diagnostics.
 
-    I rendimenti devono essere giornalieri e disponibili alla decisione.
-    La funzione usa solo le ultime ``finestra`` osservazioni ricevute.
+    Returns must be daily and available at the decision date. Only the last
+    ``finestra`` observations received are used.
 
-    La volatilità stimata è ``sqrt(w.T @ Sigma @ w)``, con Sigma annualizzata.
-    Se Equal Weight rispetta il limite, i suoi pesi rimangono invariati.
-    Altrimenti si minimizza ``||w - w_EW||^2`` rispettando i vincoli.
+    Estimated volatility is ``sqrt(w.T @ Sigma @ w)``, with Sigma annualised.
+    If the equal-weight portfolio satisfies the limit, its weights are kept.
+    Otherwise ``||w - w_EW||^2`` is minimised subject to the constraints.
 
-    La diagnostica ``limite_rispettato`` può essere False esclusivamente
-    quando il vincolo è non fattibile e si ricorre alla varianza minima.
+    The ``limite_rispettato`` diagnostic can be False only when the constraint
+    is infeasible and the minimum-variance portfolio is used instead.
     """
     # A1 does not need the optional convex optimizer dependency.
     try:
@@ -452,8 +452,8 @@ def calcola_pesi_a2(
     dati = _valida_rendimenti(rendimenti, finestra, volatilita_massima)
     limite = float(volatilita_massima)
 
-    # La definizione della covarianza resta identica alla ricerca iniziale:
-    # campionaria, usando 126 sedute e 252 giornate di negoziazione annue.
+    # The covariance definition is identical to the initial research:
+    # sample covariance over 126 sessions, annualised with 252 trading days.
     cov = dati.cov().to_numpy(dtype=float) * SEDUTE_ANNUALI
     cov = (cov + cov.T) / 2.0
     if not np.isfinite(cov).all():
@@ -462,7 +462,7 @@ def calcola_pesi_a2(
     riferimento = np.full(len(ASSETS), 1.0 / len(ASSETS))
 
     def volatilita(pesi: np.ndarray) -> float:
-        """Calcola la volatilità annualizzata della combinazione di pesi."""
+        """Compute the annualised volatility of the weight combination."""
         varianza = float(pesi @ cov @ pesi)
         return float(np.sqrt(max(varianza, 0.0)))
 
@@ -479,8 +479,8 @@ def calcola_pesi_a2(
             },
         )
 
-    # La fattorizzazione PSD trasforma il vincolo di varianza in un vincolo
-    # di norma, adatto a un problema convesso risolto da CLARABEL.
+    # The PSD factorisation turns the variance constraint into a norm
+    # constraint, suitable for a convex problem solved with CLARABEL.
     autovalori, autovettori = np.linalg.eigh(cov)
     if autovalori.min() < -1e-10:
         raise ValueError("La matrice di covarianza non è semidefinita positiva.")
@@ -491,7 +491,7 @@ def calcola_pesi_a2(
     w = cp.Variable(len(ASSETS))
     vincoli_base = [cp.sum(w) == 1, w >= 0]
 
-    # La riscalatura in punti percentuali riduce i problemi numerici.
+    # Rescaling to percentage points reduces numerical issues.
     rischio = cp.norm(100.0 * (fattore @ w), 2)
     problema = cp.Problem(
         cp.Minimize(cp.sum_squares(w - riferimento)),
@@ -507,8 +507,8 @@ def calcola_pesi_a2(
         pesi = _verifica_soluzione(w.value)
         stato = "ottimizzato"
     elif problema.status in ("infeasible", "infeasible_inaccurate"):
-        # Quando nessun portafoglio completamente investito rispetta l'8%,
-        # scegliamo il minimo rischio ottenibile con gli stessi vincoli.
+        # When no fully invested portfolio satisfies the 8% limit,
+        # the minimum risk achievable under the same constraints is selected.
         minimo = cp.Problem(
             cp.Minimize(cp.sum_squares(100.0 * (fattore @ w))),
             vincoli_base,
@@ -532,8 +532,8 @@ def calcola_pesi_a2(
     vol_finale = volatilita(pesi)
     limite_rispettato = vol_finale <= limite + TOLLERANZA_VOLATILITA
 
-    # La varianza minima può superare il limite se il vincolo è impossibile;
-    # una soluzione della prima ottimizzazione, invece, non può violarlo.
+    # Minimum variance may exceed the limit when the constraint is infeasible;
+    # a solution of the first optimisation, instead, cannot violate it.
     if stato == "ottimizzato" and not limite_rispettato:
         raise RuntimeError("La soluzione viola il limite di volatilità.")
 
@@ -554,11 +554,10 @@ def build_a2_weights(
     config: dict,
     tickers: list[str],
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Calcola i target A2 usando solo rendimenti osservati entro ogni decisione.
+    """Compute A2 targets using only returns observed up to each decision.
 
-    Il calcolo include il rendimento della seduta di decisione soltanto
-    dopo la sua chiusura. Nessuna informazione successiva alla data corrente
-    viene trasmessa all'ottimizzatore.
+    The return of the decision session is included only after its close.
+    No information later than the current date reaches the optimiser.
     """
     # The A2 optimizer is defined below; CVXPY loads only when needed.
 
@@ -611,8 +610,8 @@ def build_a2_weights(
     return weights_frame, diagnostics_frame
 
 
-# Limite di volatilita' per pesi con segno (livello B): solo riduzione
-# proporzionale, senza ottimizzazione e senza cambiare la direzione dei segnali.
+# Volatility cap for signed weights (Level B): proportional scaling only,
+# with no optimisation and no change in signal direction.
 
 def apply_signed_volatility_cap(
     weights: pd.Series,
@@ -741,7 +740,8 @@ def apply_volatility_cap_panel(
 
 
 def build_portfolio_summary(weights: pd.DataFrame) -> pd.DataFrame:
-    """Riepiloga i pesi TARGET, senza confonderli con quelli effettivi."""
+    """Summarise the TARGET weights, keeping them distinct from the effective weights.
+    """
     if weights.empty:
         raise ValueError("Impossibile riepilogare un portafoglio senza decisioni.")
 
@@ -765,14 +765,13 @@ def run_portfolio(
     root_dir: Path,
     level: str | None = None,
 ) -> dict[str, pd.DataFrame]:
-    """Esegue la costruzione dei target del livello A1 oppure A2.
+    """Build the targets for Level A1 or A2.
 
-    Salva ogni strategia in una cartella distinta:
-        data/signals/A1/<nome>/target_weights.csv
+    Each strategy is saved in a separate folder:
+        data/signals/A1/<name>/target_weights.csv
         data/signals/A2/volatility_control/target_weights.csv
 
-    In questo stadio la validation non viene elaborata e l'OOS e' bloccato.
-    B e C non vengono eseguiti finche' non saranno realmente implementati.
+    At this stage validation is not processed and OOS is locked.
     """
     selected_level = str(
         level or config.get("pipeline", {}).get("active_level", "A1")
@@ -806,7 +805,7 @@ def run_portfolio(
         output = signals_root / name
         output.mkdir(parents=True, exist_ok=True)
 
-        # Nomi distinti impediscono che una strategia sovrascriva un'altra.
+        # Distinct names prevent one strategy from overwriting another.
         weights.to_csv(output / "target_weights.csv", index_label="Date")
         build_portfolio_summary(weights).to_csv(
             output / "target_summary.csv", index=False

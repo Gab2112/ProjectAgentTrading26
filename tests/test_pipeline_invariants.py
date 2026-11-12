@@ -1,20 +1,20 @@
-"""Test economici e operativi della pipeline Multi-Asset, Fase A (A1/A2).
+"""Economic and operational tests of the multi-asset pipeline, Phase A (A1/A2).
 
-La suite non legge prezzi storici reali, validation reale o OOS reale:
-usa solamente configurazioni e dati di mercato sintetici. Il solo
-``config.yaml`` del progetto puo' essere letto per verificarne i vincoli.
+The suite does not read real historical prices or real validation/OOS data:
+it uses only synthetic configurations and market data. Only the project's
+``config.yaml`` may be read, to check its constraints.
 
-Sono separati:
-- invarianti dei benchmark A1 e dell'allocazione A2;
-- esecuzione al prossimo Open, quantita', NAV, turnover e costi;
-- correttezza delle metriche giornaliere;
-- integrazione tra portfolio, backtester ed evaluator;
-- isolamento del training rispetto a validation e OOS.
+The tests cover separately:
+- the invariants of the A1 benchmarks and of the A2 allocation;
+- execution at the next open, quantities, NAV, turnover and costs;
+- the correctness of the daily metrics;
+- the integration of portfolio, backtester and evaluator;
+- the isolation of the training period from validation and OOS.
 
-I test numerici A2 richiedono CVXPY/CLARABEL. Se non installati, solo quei
-casi sono saltati; i test della pipeline e del backtester restano eseguibili.
+The A2 numerical tests require CVXPY/CLARABEL. If they are not installed,
+only those cases are skipped; the pipeline and backtester tests still run.
 
-Esecuzione dalla radice del repository:
+Run from the repository root:
     python3 -m unittest discover -s tests -p 'test_*.py' -v
 """
 
@@ -57,7 +57,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def make_config() -> dict:
-    """Restituisce una configurazione sintetica coerente con la Fase A."""
+    """Return a synthetic configuration consistent with Phase A."""
     equal = {ticker: 0.25 for ticker in ASSETS}
     return {
         "universe": {
@@ -145,7 +145,8 @@ def make_config() -> dict:
 
 
 def make_synthetic_market() -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Genera Open/Close coerenti e decisioni settimanali, senza Internet."""
+    """Generate consistent Open/Close prices and weekly decisions, without Internet access.
+    """
     dates = pd.bdate_range("2019-10-01", "2020-08-31", name="Date")
     rng = np.random.default_rng(47)
     innovations = rng.normal(0, 1, size=(len(dates), 4))
@@ -167,7 +168,7 @@ def make_synthetic_market() -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def write_processed_data(root: Path, panel: pd.DataFrame, decisions: pd.DataFrame) -> None:
-    """Scrive soltanto i due CSV sintetici richiesti da portfolio.py."""
+    """Write only the two synthetic CSV files required by portfolio.py."""
     destination = root / "data" / "processed"
     destination.mkdir(parents=True, exist_ok=True)
     panel.to_csv(destination / "market_daily.csv", index_label="Date")
@@ -175,7 +176,7 @@ def write_processed_data(root: Path, panel: pd.DataFrame, decisions: pd.DataFram
 
 
 def fake_a2_allocator(captured: list[pd.DataFrame] | None = None):
-    """Sostituisce esclusivamente il risolutore nei test di integrazione."""
+    """Replace only the solver in the integration tests."""
     module = types.ModuleType("mocked_a2_allocator")
 
     def calculate(returns, finestra=126, volatilita_massima=0.08):
@@ -197,7 +198,7 @@ def fake_a2_allocator(captured: list[pd.DataFrame] | None = None):
 
 
 class TestProjectConfiguration(unittest.TestCase):
-    """Impedisce che il file YAML locale torni ai parametri Treasury."""
+    """Prevent the local YAML file from reverting to the Treasury parameters."""
 
     def test_local_yaml_describes_the_agreed_phase_a(self):
         path = PROJECT_ROOT / "config.yaml"
@@ -240,7 +241,7 @@ class TestProjectConfiguration(unittest.TestCase):
 
 
 class TestA1TargetWeights(unittest.TestCase):
-    """Pesi long-only, buy-and-hold reale e ribilanciamento settimanale."""
+    """Long-only weights, genuine buy-and-hold and weekly rebalancing."""
 
     def setUp(self):
         self.config = make_config()
@@ -309,7 +310,7 @@ class TestA1TargetWeights(unittest.TestCase):
 
 
 class TestA2Causality(unittest.TestCase):
-    """La finestra dell'ottimizzatore termina alla chiusura della decisione."""
+    """The optimiser window ends at the decision close."""
 
     def setUp(self):
         self.config = make_config()
@@ -341,7 +342,7 @@ class TestA2Causality(unittest.TestCase):
         first_run = []
         second_run = []
         altered = self.panel.copy(deep=True)
-        # La variazione inizia dopo la prima chiusura decisionale.
+        # The change starts after the first decision close.
         altered.loc[altered.index > self.decisions[0], "SPY_close"] *= 1.05
         with patch("src.portfolio.calcola_pesi_a2", fake_a2_allocator(first_run).calcola_pesi_a2):
             build_a2_weights(self.panel, self.decisions, self.config, list(ASSETS))
@@ -360,7 +361,7 @@ class TestA2Causality(unittest.TestCase):
 
 @unittest.skipUnless(HAS_CVXPY, "CVXPY non installato: test numerici A2 da eseguire sul Mac.")
 class TestA2NumericalAllocator(unittest.TestCase):
-    """Verifica il vero risolutore CVXPY/CLARABEL su rendimenti sintetici."""
+    """Test the actual CVXPY/CLARABEL solver on synthetic returns."""
 
     @staticmethod
     def returns(volatilities: list[float], *, seed: int = 8) -> pd.DataFrame:
@@ -440,7 +441,7 @@ class TestA2NumericalAllocator(unittest.TestCase):
 
 
 def make_toy_prices() -> tuple[pd.DataFrame, pd.DataFrame, pd.DatetimeIndex]:
-    """Crea cinque sedute con un solo movimento noto di SPY."""
+    """Create five sessions with a single known SPY move."""
     dates = pd.bdate_range("2020-06-01", periods=5, name="Date")
     opens = pd.DataFrame(100.0, index=dates, columns=ASSETS)
     closes = opens.copy()
@@ -451,7 +452,7 @@ def make_toy_prices() -> tuple[pd.DataFrame, pd.DataFrame, pd.DatetimeIndex]:
 
 
 class TestDailyBacktester(unittest.TestCase):
-    """Contabilita' puntuale senza ribilanciamento giornaliero implicito."""
+    """Exact accounting without implicit daily rebalancing."""
 
     def setUp(self):
         self.opens, self.closes, self.dates = make_toy_prices()
@@ -502,7 +503,7 @@ class TestDailyBacktester(unittest.TestCase):
         self.assertFalse(bool(output.loc[day2, "operazione_eseguita"]))
         self.assertEqual(output.loc[day2, "costo_transazione"], 0)
         self.assertEqual(output.loc[day2, "turnover"], 0)
-        # Le quantita' SPY restano uguali, anche se il suo peso cambia.
+        # SPY quantities stay the same, even though its weight changes.
         qty1 = output.loc[day1, "SPY_peso_effettivo"] * output.loc[day1, "nav"] / 100
         qty2 = output.loc[day2, "SPY_peso_effettivo"] * output.loc[day2, "nav"] / 120
         self.assertAlmostEqual(qty1, qty2, places=10)
@@ -580,7 +581,7 @@ class TestDailyBacktester(unittest.TestCase):
 
 
 class TestEvaluationMetrics(unittest.TestCase):
-    """Rendimenti composti, rischio, Sharpe e Sortino di un campione noto."""
+    """Compounded returns, risk, Sharpe and Sortino ratios on a known sample."""
 
     def test_metrics_match_independent_formulas(self):
         values = np.array([0.10, -0.05, 0.02, -0.01, 0.03, -0.02])
@@ -624,7 +625,7 @@ class TestEvaluationMetrics(unittest.TestCase):
 
 
 class TestCSVDataLoader(unittest.TestCase):
-    """Conserva i test utili del vecchio progetto sui CSV di input."""
+    """Tests on the input CSV files retained from the earlier project."""
 
     @staticmethod
     def read(csv_text: str, *, strict: bool = True) -> pd.DataFrame:
@@ -660,7 +661,7 @@ class TestCSVDataLoader(unittest.TestCase):
 
 
 class TestPipelineIntegration(unittest.TestCase):
-    """A1 e A2 usano gli stessi prezzi sintetici e scrivono output distinti."""
+    """A1 and A2 use the same synthetic prices and write separate outputs."""
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

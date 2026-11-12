@@ -1,16 +1,15 @@
-"""Test temporali della ricerca Multi-Asset, Fase A.
+"""Time-split tests of the multi-asset research, Phase A.
 
-I test usano soltanto date e valori sintetici. Non leggono dati di
-mercato reali e non consultano i risultati della validation o dell'OOS.
+The tests use synthetic dates and values only. They do not read real market data.
 
-Invarianti controllati:
-- training e validation hanno confini espliciti e non sovrapposti;
-- le osservazioni di warm-up possono precedere il training;
-- con development_only=true l'OOS e' bloccato anche se evaluate_oos=true;
-- gli split non modificano il dataset di partenza;
-- date ambigue, duplicate o non ordinate vengono rifiutate.
+Invariants checked:
+- training and validation have explicit, non-overlapping boundaries;
+- warm-up observations may precede the training period;
+- with development_only=true the OOS period stays locked even if evaluate_oos=true;
+- the splits do not modify the original dataset;
+- ambiguous, duplicated or unsorted dates are rejected.
 
-Esecuzione dalla radice del repository:
+Run from the repository root:
     python3 -m unittest discover -s tests -p 'test_*.py' -v
 """
 
@@ -29,7 +28,7 @@ from src.time_split import (
 
 
 def make_config() -> dict:
-    """Definisce il calendario sintetico con OOS bloccato."""
+    """Define the synthetic calendar with a locked OOS period."""
     return {
         "validation": {
             "train_start": "2016-12-28",
@@ -44,23 +43,23 @@ def make_config() -> dict:
 
 
 def make_dataset() -> pd.DataFrame:
-    """Costruisce periodi sintetici, incluso il riscaldamento pre-training."""
+    """Build synthetic periods, including the pre-training warm-up."""
     dates = pd.to_datetime(
         [
-            "2016-12-27",  # Warm-up: non e' una valutazione.
-            "2016-12-28",  # Primo giorno di training.
-            "2016-12-30",  # Training, prima del confine inclusivo.
+            "2016-12-27",  # Warm-up: not part of the evaluation.
+            "2016-12-28",  # First training day.
+            "2016-12-30",  # Training, before the inclusive boundary.
             "2017-01-02",  # Validation.
-            "2021-12-31",  # Ultimo giorno di validation.
-            "2022-01-03",  # OOS sintetico: normalmente nascosto.
-            "2022-01-04",  # OOS sintetico: normalmente nascosto.
+            "2021-12-31",  # Last validation day.
+            "2022-01-03",  # Synthetic OOS: normally hidden.
+            "2022-01-04",  # Synthetic OOS: normally hidden.
         ]
     )
     return pd.DataFrame({"value": [1, 2, 3, 4, 5, 6, 7]}, index=dates)
 
 
 class TestTimeBoundaries(unittest.TestCase):
-    """Controlli sui parametri cronologici e sulle date limite."""
+    """Checks on the chronological parameters and boundary dates."""
 
     def setUp(self) -> None:
         self.config = make_config()
@@ -129,7 +128,7 @@ class TestTimeBoundaries(unittest.TestCase):
 
 
 class TestOOSAuthorization(unittest.TestCase):
-    """L'OOS resta bloccato finche' la ricerca e' in sviluppo."""
+    """The OOS period stays locked while the research is in development."""
 
     def setUp(self) -> None:
         self.config = make_config()
@@ -179,7 +178,7 @@ class TestOOSAuthorization(unittest.TestCase):
 
 
 class TestTimePartitions(unittest.TestCase):
-    """Isolamento delle osservazioni in ciascun intervallo cronologico."""
+    """Isolation of the observations within each chronological interval."""
 
     def setUp(self) -> None:
         self.config = make_config()

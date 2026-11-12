@@ -1,14 +1,14 @@
-"""Logica di regime del livello B (sperimentale).
+"""Level B regime logic (experimental).
 
-Contiene:
-- classificazione dei regimi macro (``classify_macro_regimes``);
-- budget e pesi per regime (``REGIME_WEIGHTS``, ``build_regime_weight_panel``);
-- segnali di trend e filtro macro (``build_trend_signal_panel``,
+Contents:
+- macro regime classification (``classify_macro_regimes``);
+- regime budgets and weights (``REGIME_WEIGHTS``, ``build_regime_weight_panel``);
+- trend signals and macro filter (``build_trend_signal_panel``,
   ``apply_macro_regime_filter``);
-- validazione delle etichette di regime esterne (es. clustering).
+- validation of external regime labels (e.g. from clustering).
 
-Il limite di volatilita' sta in ``src/portfolio.py``; le feature macro in
-``src/features.py``.
+The volatility cap is implemented in ``src/portfolio.py`` and the macro
+features in ``src/features.py``.
 """
 
 from collections.abc import Mapping
@@ -124,10 +124,10 @@ def remaining_allocation_weight(
     *,
     long_only: bool,
 ) -> pd.Series:
-    """Return post-cap idle allocation; for Long-only, this is cash weight.
+    """Return the idle allocation after the cap; for long-only portfolios this is the cash weight.
 
-    With short positions, the remainder is *unused gross risk budget*, not
-    accounting cash (short-sale proceeds and collateral are separate).
+    With short positions, the remainder is the *unused gross risk budget*, not
+    accounting cash (short-sale proceeds and collateral are tracked separately).
     """
     if not isinstance(target_weights, pd.DataFrame) or target_weights.empty:
         raise ValueError("Expected nonempty target weights")
@@ -155,9 +155,9 @@ def validate_regime_series(
     train_start: pd.Timestamp,
     train_end: pd.Timestamp,
 ) -> pd.Series:
-    """Validate one known-at-decision regime label for every training decision.
+    """Validate one regime label, known at decision time, for every training decision.
 
-    Labels must be nonempty strings; e.g. 'low_low' or 'cluster_0'.
+    Labels must be non-empty strings, e.g. ``'low_low'`` or ``'cluster_0'``.
     Matching dates enforce alignment, not point-in-time data provenance.
     """
     if not isinstance(regimes, pd.Series):
@@ -218,11 +218,11 @@ def build_regime_budget_panel(
     train_end: pd.Timestamp,
     budget_policy: Mapping[str, Mapping[str, float]],
 ) -> pd.DataFrame:
-    """Map dated regime labels to nonnegative, fully allocated *risk budgets*.
+    """Map dated regime labels to non-negative, fully allocated *risk budgets*.
 
-    'budget_policy' is explicit and fixed before any held-out evaluation.
-    It is NOT inferred from labels or future portfolio returns.
-    The downstream trend signals can subsequently leave some budget in cash.
+    ``budget_policy`` is explicit and fixed before any held-out evaluation.
+    It is NOT inferred from labels or from future portfolio returns.
+    Downstream trend signals may subsequently leave part of the budget in cash.
     """
     validated = validate_regime_series(
         regimes, decision_dates, train_start, train_end
@@ -392,7 +392,7 @@ def classify_macro_regimes(
     min_history: int = 52,
     window_weeks: int | None = None,
 ) -> pd.DataFrame:
-    """Experimental classifier. Not PIT-certified."""
+    """Experimental macro regime classifier. Not point-in-time certified."""
 
     required = {"vix_level", "breakeven_10y"}
     if not required.issubset(features.columns):

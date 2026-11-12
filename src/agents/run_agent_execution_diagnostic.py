@@ -24,6 +24,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def main() -> None:
+    """Run the execution diagnostic on the stored orchestrator signals and print the results.
+    """
     with (ROOT / "config.yaml").open("r", encoding="utf-8") as handle:
         config = yaml.safe_load(handle)
 

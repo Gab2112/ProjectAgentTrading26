@@ -1,10 +1,7 @@
-"""
-test_agents_multiasset.py
+"""Unit tests for agent data loading (src/data_loader.py) and for the individual
+agents on the four-asset basket (SPY, IEF, GLD, SHY).
 
-Suite di unit test per la verifica del caricamento dati degli agenti (src/data_loader.py)
-e del corretto funzionamento dei singoli agenti sul paniere a 4 asset (SPY, IEF, GLD, SHY).
-
-Esecuzione:
+Run with:
     python -m unittest tests/test_agents_multiasset.py
 """
 
@@ -32,7 +29,7 @@ from src.agents.orchestrator_agent import OrchestratorAgent, OrchestratorOptimiz
 
 
 class TestAgentDataLoading(unittest.TestCase):
-    """Test per le funzionalità di caricamento e normalizzazione dati in BaseAgent."""
+    """Tests for data loading and normalisation in BaseAgent."""
 
     def test_load_market_data_default(self):
         df = load_agent_market_data(frequency="weekly")
@@ -40,7 +37,7 @@ class TestAgentDataLoading(unittest.TestCase):
         self.assertIsInstance(df.index, pd.DatetimeIndex)
         self.assertTrue(df.index.is_monotonic_increasing)
 
-        # Verifica presenza di tutti i 4 asset
+        # All four assets must be present.
         for asset in ASSETS:
             self.assertIn(f"{asset}_close", df.columns)
             self.assertIn(f"{asset}_open", df.columns)
@@ -54,7 +51,7 @@ class TestAgentDataLoading(unittest.TestCase):
         self.assertGreaterEqual(df.index.min(), pd.Timestamp("2006-01-01"))
         self.assertLessEqual(df.index.max(), pd.Timestamp("2010-12-31"))
 
-        # Solo SPY e GLD
+        # Only SPY and GLD.
         for c in df.columns:
             self.assertTrue(c.startswith("SPY_") or c.startswith("GLD_"))
         self.assertIn("SPY_close", df.columns)
@@ -70,7 +67,7 @@ class TestAgentDataLoading(unittest.TestCase):
 
     def test_load_complete_dataset(self):
         complete = load_agent_dataset(include_macro=True)
-        # Contiene sia prezzi che macro
+        # Contains both prices and macro data.
         for asset in ASSETS:
             self.assertIn(f"{asset}_close", complete.columns)
         self.assertIn("curve_10y_2y", complete.columns)
@@ -97,7 +94,8 @@ class TestAgentDataLoading(unittest.TestCase):
 
 
 class TestIndividualAgentsMultiAsset(unittest.TestCase):
-    """Test di inferenza e compatibilità multi-asset per SMA, ZScore e Macro."""
+    """Multi-asset inference and compatibility tests for the SMA, Z-Score and Macro agents.
+    """
 
     @classmethod
     def setUpClass(cls):
@@ -113,7 +111,7 @@ class TestIndividualAgentsMultiAsset(unittest.TestCase):
             self.assertTrue(set(signals.unique()).issubset({-1, 0, 1}))
             self.assertTrue((conf >= 0.0).all() and (conf <= 1.0).all())
 
-            # Test caricamento dati diretto da istanza
+            # Data loading directly from an agent instance.
             inst_df = agent.load_data()
             inst_signals = agent.predict(inst_df)
             pd.testing.assert_series_equal(signals, inst_signals)
@@ -215,18 +213,18 @@ class TestIndividualAgentsMultiAsset(unittest.TestCase):
             self.assertTrue((multi[f"{asset}_confidence"] >= 0.0).all() and (multi[f"{asset}_confidence"] <= 1.0).all())
 
     def test_orchestrator_combine_and_optimize_arbitrary_k_signals(self):
-        """Verifica che l'Orchestratore supporti un numero qualsiasi K di segnali/agenti in input."""
+        """Check that the Orchestrator supports any number K of input signals/agents."""
         from src.agents.orchestrator_agent import OrchestratorOptimizer
 
         dates = self.df.index[:100]
-        # Genera segnali per 5 agenti arbitrari
+        # Generate signals for 5 arbitrary agents.
         custom_signals = {}
         for i in range(1, 6):
             s = pd.Series(np.random.choice([-1, 0, 1], size=len(dates)), index=dates)
             c = pd.Series(np.random.uniform(0.5, 1.0, size=len(dates)), index=dates)
             custom_signals[f"Agent_{i}"] = pd.DataFrame({"signal": s, "confidence": c}, index=dates)
 
-        # 1. Test combine con K=5
+        # 1. combine with K=5.
         orch = OrchestratorAgent()
         res = orch.combine(custom_signals)
         self.assertEqual(len(res), len(dates))
@@ -234,7 +232,7 @@ class TestIndividualAgentsMultiAsset(unittest.TestCase):
         self.assertIn("confidence", res.columns)
         self.assertTrue(set(res["signal"].unique()).issubset({-1, 0, 1}))
 
-        # 2. Test ottimizzazione con K=5
+        # 2. Optimisation with K=5.
         ret = pd.Series(np.random.normal(0.001, 0.02, size=len(dates)), index=dates)
         opt = OrchestratorOptimizer(max_train_year=2021)
         best_orch, df_summary = opt.optimize(custom_signals, ret, asset_name="TEST_K5")
@@ -243,7 +241,7 @@ class TestIndividualAgentsMultiAsset(unittest.TestCase):
         self.assertGreater(len(df_summary), 100)
 
     def test_orchestrator_register_agent(self):
-        """Verifica la registrazione dinamica di nuovi agenti personalizzati."""
+        """Check the dynamic registration of new custom agents."""
         orch = OrchestratorAgent(include_rf=False, include_svm=False)
 
         class DummyAgent(BaseAgent):

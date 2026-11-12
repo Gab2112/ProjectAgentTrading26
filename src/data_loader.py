@@ -1,14 +1,14 @@
-"""Caricamento dei dati del progetto Multi-Asset.
+"""Data loading for the multi-asset project.
 
-Unico punto di lettura dei file:
-- ``load_dataset``: lettore generico (CSV, TSV, Excel, Parquet, Feather, JSON)
-  con controlli rigorosi sull'indice temporale;
-- prezzi giornalieri degli ETF (``load_daily_market_data``);
-- rendimenti Treasury settimanali per il clustering (``load_weekly_yields``);
-- dataset di mercato + macro usato dagli agenti (``load_agent_*``).
+Single entry point for reading files:
+- ``load_dataset``: generic reader (CSV, TSV, Excel, Parquet, Feather, JSON)
+  with strict checks on the time index;
+- daily ETF prices (``load_daily_market_data``);
+- weekly Treasury yields for regime clustering (``load_weekly_yields``);
+- the market and macro dataset used by the agents (``load_agent_*``).
 
-Questo modulo legge e allinea i dati, ma NON costruisce feature di modello:
-le feature stanno in ``src/features.py``.
+This module reads and aligns data but does NOT build model features:
+features are defined in ``src/features.py``.
 """
 
 from pathlib import Path
@@ -30,10 +30,10 @@ def load_dataset(
     strict: bool = True,
     **read_options,
 ) -> pd.DataFrame:
-    """Load a dataset with the same checks as the former data_loader.py.
+    """Load a tabular dataset with strict checks on its date index.
 
-    Supports CSV, TSV, TXT, Excel, Parquet, Feather and JSON. Enforces
-    the original strict/permissive date-index rules, without reader classes.
+    Supports CSV, TSV, TXT, Excel, Parquet, Feather and JSON files and applies
+    either strict or permissive date-index validation.
     """
     path = Path(path)
     extension = path.suffix.lower()
@@ -111,7 +111,7 @@ def load_dataset(
 
 
 def read_csv_with_date_index(path: Path) -> pd.DataFrame:
-    """Legge un CSV tramite il loader condiviso, con verifica rigorosa delle date."""
+    """Read a CSV through the shared loader with strict date validation."""
     df = load_dataset(path, strict=True)
     if df.empty:
         raise ValueError(f"Empty dataset: {path}")
@@ -121,7 +121,7 @@ def read_csv_with_date_index(path: Path) -> pd.DataFrame:
 
 
 def coerce_numeric(df: pd.DataFrame) -> pd.DataFrame:
-    """Converte le colonne in valori numerici; i valori mancanti restano NaN."""
+    """Convert columns to numeric values; missing values remain NaN."""
     result = df.copy()
     for col in result.columns:
         result[col] = pd.to_numeric(result[col], errors="coerce")
@@ -129,7 +129,7 @@ def coerce_numeric(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def read_etf_prices(path: Path, ticker: str) -> pd.DataFrame:
-    """Verifica la presenza e la validità dei prezzi giornalieri Open/Close."""
+    """Check that daily Open/Close prices are present and valid."""
     df = read_csv_with_date_index(path)
     missing = [column for column in REQUIRED_MARKET_COLUMNS if column not in df]
     if missing:
@@ -150,17 +150,16 @@ def load_daily_market_data(
     config: dict,
     root_dir: Path,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Restituisce i prezzi giornalieri allineati e un controllo di copertura.
+    """Return aligned daily prices together with a coverage report.
 
-    Considera soltanto il periodo in cui tutti gli ETF sono negoziati.
-    Le differenze nelle date di quotazione iniziale non vengono quindi
-    interpretate erroneamente come dati mancanti. Le eventuali sedute
-    isolate assenti per un ETF nel periodo comune vengono escluse per TUTTI
-    gli ETF e registrate nel report di qualità. I prezzi negoziabili
-    non vengono mai riempiti in avanti (forward fill).
+    Only the period in which all ETFs are traded is considered, so that
+    different listing dates are not mistaken for missing data. Isolated
+    sessions missing for one ETF within the common period are dropped for
+    ALL ETFs and recorded in the quality report. Tradable prices are never
+    forward-filled.
 
-    Colonne in uscita: SPY_open, SPY_close, IEF_open, IEF_close, ...
-    L'indice contiene date effettive di negoziazione, non etichette W-FRI.
+    Output columns: SPY_open, SPY_close, IEF_open, IEF_close, ...
+    The index contains actual trading dates, not W-FRI labels.
     """
     tickers = get_tickers(config)
     if not tickers or len(set(tickers)) != len(tickers):
@@ -223,13 +222,11 @@ def load_daily_market_data(
 
 
 def load_weekly_yields(config: dict, root_dir: Path) -> pd.DataFrame:
-    """
-    Carica i rendimenti Treasury giornalieri (FRED) e li porta a frequenza
-    settimanale, prendendo l'ultimo valore disponibile della settimana.
+    """Load daily Treasury yields (FRED) and resample them to weekly frequency.
 
-    I rendimenti giornalieri del Treasury sono pubblicati a fine giornata:
-    il valore del giorno di decisione è noto prima dell'esecuzione,
-    che avviene all'apertura della seduta successiva.
+    The last available value of each week is used. Daily Treasury yields are
+    published at the end of the day, so the value observed on the decision
+    date is known before execution at the next session's open.
     """
     rates = config["data"]["rates"]
     series = {
@@ -250,7 +247,7 @@ def load_weekly_yields(config: dict, root_dir: Path) -> pd.DataFrame:
 
 
 # =============================================================================
-# Dati per gli agenti (mercato settimanale + macro FRED derivate)
+# Agent data (weekly market data and derived FRED macro series)
 # =============================================================================
 
 def load_agent_market_data(
@@ -261,24 +258,25 @@ def load_agent_market_data(
     end_date: Optional[Union[str, pd.Timestamp]] = None,
     root_dir: Optional[Union[str, Path]] = None,
 ) -> pd.DataFrame:
-    """
-    Carica i dati di mercato storici per gli asset del paniere (default: SPY, IEF, GLD, SHY).
+    """Load historical market data for the basket assets (default: SPY, IEF, GLD, SHY).
 
-    Parametri:
-        frequency: 'weekly' (default) o 'daily'.
-        source: Percorso opzionale a un file CSV specifico o alias ('master_weekly', 'market_daily').
-        assets: Lista di ticker da selezionare (es. ['SPY', 'GLD']). Se None, carica tutti gli asset disponibili.
-        start_date: Data minima (inclusa), es. '2005-05-20'.
-        end_date: Data massima (inclusa).
-        root_dir: Directory radice del progetto (risolta automaticamente se non fornita).
+    Args:
+        frequency: ``'weekly'`` (default) or ``'daily'``.
+        source: Optional path to a specific CSV file, or an alias
+            (``'master_weekly'``, ``'market_daily'``).
+        assets: Tickers to select (e.g. ``['SPY', 'GLD']``). If None, all
+            available assets are loaded.
+        start_date: Earliest date (inclusive), e.g. ``'2005-05-20'``.
+        end_date: Latest date (inclusive).
+        root_dir: Project root directory, resolved automatically if omitted.
 
-    Ritorna:
-        pd.DataFrame: DataFrame indicizzato per Data con i prezzi storici.
+    Returns:
+        pd.DataFrame: Date-indexed DataFrame of historical prices.
     """
     root = get_project_root(root_dir)
     processed_dir = root / "data" / "processed"
 
-    # Risoluzione del percorso sorgente
+    # Resolve the source path.
     if source is not None and Path(source).is_file():
         csv_path = Path(source)
     elif frequency == "daily" or str(source).lower() == "market_daily":
@@ -301,13 +299,13 @@ def load_agent_market_data(
         df.index = pd.to_datetime(df.index)
     df = df.sort_index()
 
-    # Filtraggio temporale
+    # Apply the date filter.
     if start_date is not None:
         df = df[df.index >= pd.Timestamp(start_date)]
     if end_date is not None:
         df = df[df.index <= pd.Timestamp(end_date)]
 
-    # Filtraggio per asset specifici
+    # Keep only the requested assets.
     if assets is not None:
         req_assets = [a.upper() for a in assets]
         matched_cols = []
@@ -316,7 +314,7 @@ def load_agent_market_data(
             if any(col_upper.startswith(f"{a}_") or col_upper == a for a in req_assets):
                 matched_cols.append(col)
             elif not any(col_upper.startswith(f"{x}_") for x in ASSETS):
-                matched_cols.append(col)  # preserva feature non associate ad asset specifici
+                matched_cols.append(col)  # keep features that are not tied to a specific asset
         if matched_cols:
             df = df[matched_cols]
 
@@ -329,9 +327,9 @@ def load_agent_macro_data(
     end_date: Optional[Union[str, pd.Timestamp]] = None,
     root_dir: Optional[Union[str, Path]] = None,
 ) -> pd.DataFrame:
-    """
-    Carica e sintetizza le serie storiche macroeconomiche FRED (tassi, curve spreads, inflazione, VIX).
-    Allinea causalmente le osservazioni sulle date fornite (evitando lookahead bias).
+    """Load and summarise FRED macroeconomic series (rates, curve spreads, inflation, VIX).
+
+    Observations are aligned causally to the supplied dates, avoiding look-ahead bias.
     """
     root = get_project_root(root_dir)
     macro_dir = root / "data" / "raw" / "macro"
@@ -351,7 +349,7 @@ def load_agent_macro_data(
         except Exception:
             continue
 
-    # Costruzione DataFrame giornaliero dei tassi e indicatori base
+    # Build the daily DataFrame of rates and base indicators.
     aligned_series = {}
     for name, s in macro_series.items():
         s = s.dropna().sort_index().copy()
@@ -371,9 +369,9 @@ def load_agent_macro_data(
 
     calc_df = build_agent_macro_features(daily_macro, macro_series, config)
 
-    # Allineamento con decision_dates (se fornite) o restituzione giornaliera
+    # Align to decision_dates when provided; otherwise return daily data.
     if decision_dates is not None:
-        # Allineamento causale merge_asof backwards
+        # Causal alignment with a backward merge_asof.
         dec_df = pd.DataFrame({"Date": decision_dates}).sort_values("Date")
         calc_clean = calc_df.dropna(how="all").reset_index().rename(columns={"index": "Date"})
         aligned = pd.merge_asof(dec_df, calc_clean, on="Date", direction="backward").set_index("Date")
@@ -398,10 +396,11 @@ def load_agent_dataset(
     root_dir: Optional[Union[str, Path]] = None,
     save_features_weekly_csv: bool = False,
 ) -> pd.DataFrame:
-    """
-    Carica il dataset completo congiunto di mercato (SPY, IEF, GLD, SHY) e feature macro allineate.
-    Se save_features_weekly_csv=True o se data/processed/features_weekly.csv non esiste,
-    può salvare una copia per compatibilità retroattiva con i moduli preesistenti.
+    """Load the joint market dataset (SPY, IEF, GLD, SHY) with aligned macro features.
+
+    If ``save_features_weekly_csv=True`` or ``data/processed/features_weekly.csv``
+    does not exist, a copy can be saved for backward compatibility with
+    existing modules.
     """
     market_df = load_agent_market_data(
         frequency=frequency,
@@ -439,16 +438,16 @@ def prepare_asset_data(
     asset: str,
     price_col: str = "close",
 ) -> pd.DataFrame:
-    """
-    Estrae dal DataFrame multi-asset una vista standardizzata per un singolo asset (es. 'SPY'):
-    - Crea colonne canoniche: 'open', 'high', 'low', 'close', 'volume'
-    - Mantiene le colonne originarie con prefisso ('SPY_close', ecc.)
-    - Mantiene tutte le colonne di feature globali o macro (es. 'curve_10y_2y', 'vix_level')
+    """Extract a standardised single-asset view (e.g. ``'SPY'``) from the multi-asset DataFrame.
+
+    - Creates the canonical columns ``'open'``, ``'high'``, ``'low'``, ``'close'``, ``'volume'``.
+    - Keeps the original prefixed columns (``'SPY_close'``, etc.).
+    - Keeps every global or macro feature column (e.g. ``'curve_10y_2y'``, ``'vix_level'``).
     """
     asset_u = asset.upper()
     out_df = df.copy()
 
-    # Mappatura campi standard OHLCV
+    # Map the standard OHLCV fields.
     for standard_name in ["open", "high", "low", "close", "volume"]:
         source_col = f"{asset_u}_{standard_name}"
         if source_col in out_df.columns:
@@ -456,7 +455,7 @@ def prepare_asset_data(
         elif f"{asset.lower()}_{standard_name}" in out_df.columns:
             out_df[standard_name] = out_df[f"{asset.lower()}_{standard_name}"]
 
-    # Mappatura campi di rendimento e momentum canonici
+    # Map the canonical return and momentum fields.
     for metric_name in ["return_1w", "momentum_21d", "momentum_63d"]:
         source_col = f"{asset_u}_{metric_name}"
         if source_col in out_df.columns:

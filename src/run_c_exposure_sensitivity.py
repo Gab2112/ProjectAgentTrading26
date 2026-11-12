@@ -216,6 +216,7 @@ def save_sensitivity(result: dict, config: dict, root_dir: str | Path = ".") -> 
 
 
 def main() -> None:
+    """Command-line entry point: print the sensitivity table and optionally save it."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--save", action="store_true", help="Save diagnostic metrics (ignored folder)")
     args = parser.parse_args()

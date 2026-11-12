@@ -17,6 +17,12 @@ from src.utils import ASSETS, ROOT_DIR, load_config
 
 
 def verify_release_contract(root: Path = ROOT_DIR) -> dict:
+    """Check that the release configuration matches the frozen development contract.
+
+    Compares ``release_config.yaml`` with ``config.yaml`` and the development
+    freeze record, and verifies that the satellite selector source still
+    contains the frozen policy rules.
+    """
     root = Path(root)
     spec = yaml.safe_load((root / 'release_config.yaml').read_text())
     old = load_config(root / 'config.yaml')
@@ -60,6 +66,12 @@ def verify_release_contract(root: Path = ROOT_DIR) -> dict:
 
 
 def verify_signal_calendar(root: Path = ROOT_DIR, *, oos: bool = False) -> int:
+    """Check that the orchestrator signal files share a valid weekly decision calendar.
+
+    With ``oos=False`` the development signals in ``data/signals`` are checked;
+    with ``oos=True`` the archived out-of-sample signals in ``reports/oos_signals``.
+    Returns the number of verified decision dates.
+    """
     root = Path(root)
     original = load_config(root/'config.yaml')
     if oos:

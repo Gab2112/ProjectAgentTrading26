@@ -1,20 +1,18 @@
-"""
-macro_yield_curve_agent.py
+"""Macroeconomic agent based on the term structure of interest rates (yield curve) and on inflation.
 
-Agente Macroeconomico basato sulla Struttura a Termine dei Tassi (Yield Curve) e sull'Inflazione.
-Eredita da BaseAgent per garantire piena conformità all'architettura standard del progetto.
+The agent inherits from BaseAgent to comply with the standard project architecture.
 
-Razionale Economico:
-Nel mercato obbligazionario (Treasuries), i prezzi e i rendimenti non dipendono da dinamiche
-aziendali, ma dalle aspettative su politica monetaria, ciclo economico e inflazione.
-Questo agente analizza:
-1. Pendenza della Curva (Spread 10Y - 2Y e 10Y - 3M): Inversione vs Curva Ripida.
-2. I 4 Regimi di Variazione di Curva:
-   - Bull Flattening: tassi in discesa guidati dal decennale -> Long TLT (+1)
-   - Bull Steepening: tassi a breve in rapida discesa (tagli Fed) -> Long Duration / TLT (+1)
-   - Bear Flattening: tassi a breve in salita per stretta monetaria -> Short TLT (-1), Long SHY (+1)
-   - Bear Steepening: tassi a lungo in salita per inflazione/premio al rischio -> Short TLT (-1)
-3. Dinamica dell'Inflazione (CPI YoY o Breakeven): accelerazione inflazionistica penalizza la duration.
+Economic rationale:
+Treasury prices and yields do not depend on corporate fundamentals but on
+expectations about monetary policy, the business cycle and inflation.
+The agent analyses:
+1. Curve slope (10Y-2Y and 10Y-3M spreads): inverted versus steep curve.
+2. The four curve-change regimes:
+   - Bull flattening: falling rates led by the 10-year yield -> long TLT (+1)
+   - Bull steepening: rapidly falling short-term rates (Fed cuts) -> long duration / TLT (+1)
+   - Bear flattening: rising short-term rates due to monetary tightening -> short TLT (-1), long SHY (+1)
+   - Bear steepening: rising long-term rates due to inflation or term premium -> short TLT (-1)
+3. Inflation dynamics (CPI YoY or breakeven): accelerating inflation penalises duration.
 """
 
 from typing import Any, Dict, Optional
@@ -26,10 +24,10 @@ from src.data_loader import load_agent_macro_data
 
 
 class MacroYieldCurveAgent(BaseAgent):
-    """
-    Agente Quantitativo Macro & Yield Curve:
-    - Analizza la combinazione di slope di curva, variazione dei tassi e inflazione.
-    - Genera uno score macro continuo e produce segnali direzionali discreti {-1, 0, 1}.
+    """Quantitative macro and yield-curve agent.
+
+    - Combines curve slope, rate changes and inflation.
+    - Produces a continuous macro score and discrete directional signals {-1, 0, 1}.
     """
 
     def __init__(
@@ -41,7 +39,7 @@ class MacroYieldCurveAgent(BaseAgent):
         rate_window: int = 4,
         score_threshold: float = 0.5,
         target_asset: Optional[str] = "IEF",
-        output_format: str = "numeric",  # 'numeric' (-1, 0, 1) o 'string' ('SELL', 'HOLD', 'BUY')
+        output_format: str = "numeric",  # 'numeric' (-1, 0, 1) or 'string' ('SELL', 'HOLD', 'BUY')
     ):
         super().__init__(
             name="MacroYieldCurveAgent",
@@ -67,7 +65,7 @@ class MacroYieldCurveAgent(BaseAgent):
         }
 
     def _apply_params(self, params: Dict[str, Any]) -> None:
-        """Aggiorna i parametri dell'agente dopo il caricamento da JSON."""
+        """Update the agent parameters after loading them from JSON."""
         if "slope_col" in params:
             self.slope_col = str(params["slope_col"])
         if "rate_change_col" in params:
@@ -84,15 +82,16 @@ class MacroYieldCurveAgent(BaseAgent):
             self.target_asset = str(params["target_asset"])
 
     def calculate_macro_score(self, df: pd.DataFrame) -> pd.Series:
-        """
-        Costruisce uno score macro standardizzato a partire da pendenza, tassi e inflazione.
+        """Build a standardised macro score from curve slope, rates and inflation.
 
-        Ritorna:
-            pd.Series con lo score continuo:
-            - Valori positivi elevati: quadro favorevole a discesa dei rendimenti e TLT (Long Duration).
-            - Valori negativi elevati: quadro ostile alla duration, tassi in salita o inflazione alta.
+        Returns:
+            pd.Series with the continuous score:
+            - large positive values: environment favourable to falling yields and
+              long duration (TLT);
+            - large negative values: environment hostile to duration, with rising
+              rates or high inflation.
         """
-        # Verifica ed eventuale arricchimento con colonne macro tramite BaseAgent
+        # Check the input and, if needed, enrich it with macro columns through BaseAgent.
         if self.slope_col not in df.columns or self.rate_change_col not in df.columns:
             try:
                 macro_df = load_agent_macro_data(decision_dates=df.index)
@@ -111,45 +110,45 @@ class MacroYieldCurveAgent(BaseAgent):
         slope = df[self.slope_col].astype(float)
         rate_change = df[self.rate_change_col].astype(float)
 
-        # 1. Componente Variazione Tassi (Smoothing a finestra mobile)
-        # Se i tassi a 10 anni scendono (rate_change < 0), i prezzi dei bond salgono -> Score POSITIVO
+        # 1. Rate-change component (rolling-window smoothing).
+        # If 10-year rates fall (rate_change < 0), bond prices rise -> POSITIVE score.
         smoothed_rate_change = rate_change.rolling(window=self.rate_window, min_periods=1).mean()
-        # Normalizzazione con deviazione standard rolling per rendere lo score adimensionale
+        # Normalise by the rolling standard deviation to make the score dimensionless.
         rate_change_std = rate_change.rolling(window=26, min_periods=4).std().replace(0, np.nan)
         rate_component = -1.0 * (smoothed_rate_change / rate_change_std).fillna(0.0)
 
-        # 2. Componente Pendenza di Curva e Variazione dello Slope (Steepening vs Flattening)
+        # 2. Curve slope and slope-change component (steepening versus flattening).
         delta_slope = slope.diff(self.slope_window).fillna(0.0)
         slope_std = delta_slope.rolling(window=26, min_periods=4).std().replace(0, np.nan)
         normalized_delta_slope = (delta_slope / slope_std).fillna(0.0)
 
-        # Logica dei Regimi di Curva:
-        # Se rate_component > 0 (tassi in calo):
-        #   - delta_slope < 0 (Bull Flattening): premio massimo alla duration lunga TLT
-        #   - delta_slope >= 0 (Bull Steepening): positivo per la duration
-        # Se rate_component < 0 (tassi in salita):
-        #   - delta_slope < 0 (Bear Flattening): stretta Fed, molto negativo per duration
-        #   - delta_slope >= 0 (Bear Steepening): premio a lungo termine sale, penalizzante
+        # Curve regime logic:
+        # If rate_component > 0 (falling rates):
+        # - delta_slope < 0 (bull flattening): maximum reward for long duration (TLT)
+        # - delta_slope >= 0 (bull steepening): positive for duration
+        # If rate_component < 0 (rising rates):
+        # - delta_slope < 0 (bear flattening): Fed tightening, strongly negative for duration
+        # - delta_slope >= 0 (bear steepening): rising term premium, negative for duration
         curve_component = np.where(
             rate_component > 0,
             1.0 + 0.5 * np.sign(-normalized_delta_slope),  # Bull regime
             -1.0 - 0.5 * np.sign(normalized_delta_slope),  # Bear regime
         )
 
-        # Inversione di curva: se lo slope assoluto è invertito (< 0), c'è una spinta favorevole alla duration
+        # Curve inversion: an inverted slope (< 0) adds a tailwind for duration.
         inversion_bonus = np.where(slope < 0, 0.5, 0.0)
 
-        # 3. Componente Inflazione (se disponibile nel DataFrame)
+        # 3. Inflation component (if available in the DataFrame).
         inflation_component = 0.0
         if self.inflation_col in df.columns:
             inf = df[self.inflation_col].dropna().astype(float)
             if len(inf) > 0:
-                # Variazione a 13 settimane (1 trimestre) dell'inflazione
+                # 13-week (one-quarter) change in inflation.
                 inf_delta = df[self.inflation_col].diff(13).fillna(0.0)
-                # Inflazione in calo -> positivo (+0.5); inflazione in salita -> negativo (-0.5)
+                # Falling inflation -> positive (+0.5); rising inflation -> negative (-0.5).
                 inflation_component = np.where(inf_delta < 0, 0.5, np.where(inf_delta > 0, -0.5, 0.0))
 
-        # Combinazione ponderata dello score totale
+        # Weighted combination of the total score.
         total_score = (
             0.50 * rate_component
             + 0.35 * pd.Series(curve_component, index=df.index)
@@ -160,12 +159,11 @@ class MacroYieldCurveAgent(BaseAgent):
         return total_score
 
     def predict(self, df: pd.DataFrame) -> pd.Series:
-        """
-        Calcola i segnali operativi discreti {-1, 0, 1} per l'asset target (default IEF o configurato).
+        """Compute the discrete signals {-1, 0, 1} for the target asset (IEF by default, or as configured).
 
         - Score >= +score_threshold -> BUY (+1)
         - Score <= -score_threshold -> SELL (-1)
-        - Altrimenti                -> HOLD (0)
+        - otherwise                 -> HOLD (0)
         """
         multi = self.predict_multi_asset(df, assets=[self.target_asset])
         sig_col = f"{self.target_asset}_signal"
@@ -187,9 +185,9 @@ class MacroYieldCurveAgent(BaseAgent):
         df: pd.DataFrame,
         assets: Optional[Any] = None,
     ) -> pd.DataFrame:
-        """
-        Genera i segnali per tutti gli asset specificati (default: SPY, IEF, GLD, SHY).
-        Supporta e preserva piena compatibilità con l'universo originario (SHY, IEF, TLT).
+        """Generate signals for every requested asset (default: SPY, IEF, GLD, SHY).
+
+        Full compatibility with the original universe (SHY, IEF, TLT) is preserved.
         """
         score = self.calculate_macro_score(df)
         multi = pd.DataFrame(index=df.index)
@@ -207,24 +205,24 @@ class MacroYieldCurveAgent(BaseAgent):
             multi[sig_col] = 0
 
             if asset == "IEF":
-                # Intermediate duration: Long su discesa tassi/bull, Short su stretta forte, Flat/Long neutrale
+                # Intermediate duration: long when rates fall (bull), short on strong tightening, otherwise flat.
                 multi.loc[bull_mask, sig_col] = 1
                 multi.loc[bear_mask, sig_col] = -1
                 multi.loc[neutral_mask, sig_col] = 1
             elif asset == "SHY":
-                # Short duration / cash proxy: Long su salita tassi (rifugio), 0 su bull
+                # Short duration / cash proxy: long when rates rise (safe haven), flat in bull regimes.
                 multi.loc[bear_mask, sig_col] = 1
                 multi.loc[bull_mask, sig_col] = 0
             elif asset == "TLT":
-                # Long duration (legacy): massima sensibilità a tassi in calo
+                # Long duration (historical universe): maximum sensitivity to falling rates.
                 multi.loc[bull_mask, sig_col] = 1
                 multi.loc[bear_mask, sig_col] = -1
             elif asset == "SPY":
-                # Azionario USA: favorito da condizioni accomodanti con curva positiva, cauto/flat su inversione di curva
+                # US equities: favoured by accommodative conditions with a positive curve, cautious on curve inversion.
                 multi.loc[bull_mask & (slope >= 0), sig_col] = 1
                 multi.loc[bear_mask | (slope < 0), sig_col] = 0
             elif asset == "GLD":
-                # Oro: bene rifugio anti-inflazione e protezione da tassi reali negativi
+                # Gold: inflation hedge and protection against negative real rates.
                 multi.loc[bull_mask | (score > 0), sig_col] = 1
                 multi.loc[bear_mask, sig_col] = 0
 

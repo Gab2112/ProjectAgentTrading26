@@ -14,7 +14,7 @@ from src.time_split import build_weekly_decision_dates
 from src.utils import ASSETS, ROOT_DIR, load_config
 
 
-# Preserve Gabriele's original tie-breaking order.
+# Tie-breaking order of the original satellite selector.
 SATELLITE_ORDER = ("SHY", "IEF", "GLD", "SPY")
 
 
@@ -125,7 +125,8 @@ def build_core_satellite_targets(
 
 
 def run_core_satellite_training(config, root_dir=ROOT_DIR):
-    """Matched development-only comparison with SPY and 60/40."""
+    """Development-only comparison of Core-Satellite with SPY and a 60/40 portfolio on matched dates.
+    """
 
     start, end = _guard_training(config)
 

@@ -1,21 +1,20 @@
-"""
-train.py
+"""Training and parameter tuning for all the quantitative agents of ProjectAgentTrading.
 
-Script di training e tuning dei parametri per tutti gli agenti quantitativi di ProjectAgentTrading:
-- Agenti Statistici:
-  - SMAEMAAgent (Trend-Following con griglia estesa)
-  - ZScoreAgent (Breakout/Momentum & Mean-Reversion con griglia estesa)
-- Agente Machine Learning:
-  - RandomForestAgent (Pattern non lineari, interazioni macro e feature price-lagged)
+- Statistical agents:
+  - SMAEMAAgent (trend following, extended grid)
+  - ZScoreAgent (breakout/momentum and mean reversion, extended grid)
+- Machine-learning agents:
+  - RandomForestAgent (non-linear patterns, macro interactions and lagged price features)
   - SVMAgent (Support Vector Classifier)
-- Agente Macro:
-  - MacroYieldCurveAgent (Inversione e pendenza della curva dei rendimenti, regimi macro)
-- Agente Sentiment:
-  - FinBERTAgent (Lettura segnali di sentiment)
-- Agente Orchestratore:
-  - OrchestratorAgent (Ensemble quantitativo con pesi sul simplesso, boost di consenso e penalizzazione conflitto)
+- Macro agent:
+  - MacroYieldCurveAgent (yield-curve inversion and slope, macro regimes)
+- Sentiment agent:
+  - FinBERTAgent (sentiment signals)
+- Orchestrator:
+  - OrchestratorAgent (quantitative ensemble with simplex-constrained weights)
 
-Training e tuning limitati al periodo configurato in config.yaml con protocollo Walk-Forward.
+Training and tuning are restricted to the period configured in config.yaml
+and follow a walk-forward protocol.
 """
 
 import argparse
@@ -29,7 +28,7 @@ import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# Risoluzione robusta dei percorsi
+# Robust path resolution.
 CURRENT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = CURRENT_DIR
 while PROJECT_ROOT != PROJECT_ROOT.parent and not (PROJECT_ROOT / "config.yaml").exists():
@@ -58,7 +57,7 @@ from src.data_loader import load_agent_macro_data
 from src.evaluator import calculate_performance_metrics, compute_objective_score
 from src.utils import ASSETS
 
-# Soppressione dei warning di parallelismo joblib/sklearn
+# Suppress joblib/scikit-learn parallelism warnings.
 warnings.filterwarnings("ignore", category=UserWarning, module="sklearn.utils.parallel")
 warnings.filterwarnings("ignore", category=UserWarning, module="joblib")
 
@@ -68,7 +67,7 @@ def save_training_provenance(
         training_df: pd.DataFrame,
         cutoff_year: int,
 ) -> None:
-    """Registra il periodo temporale utilizzato per il training."""
+    """Record the time period used for training."""
 
     with config_path.open("r", encoding="utf-8") as f:
         params = json.load(f)
@@ -85,7 +84,7 @@ def save_training_provenance(
 
 
 # =====================================================================
-# PIPELINE DI TRAINING PER SINGOLO ASSET
+# SINGLE-ASSET TRAINING PIPELINE
 # =====================================================================
 def train_single_asset(
         asset: str,
@@ -101,9 +100,7 @@ def train_single_asset(
         orch_method: str = "ga",
         warmup_df: Optional[pd.DataFrame] = None,
 ) -> Dict[str, Any]:
-    """
-    Esegue il training Walk-Forward completo per un asset specifico ('SPY', 'IEF', 'GLD', 'SHY').
-    """
+    """Run the full walk-forward training for one asset ('SPY', 'IEF', 'GLD', 'SHY')."""
     if not isinstance(df.index, pd.DatetimeIndex) or df.empty:
         raise ValueError("Il training richiede un DatetimeIndex non vuoto.")
 
@@ -141,11 +138,11 @@ def train_single_asset(
     print("#" * 84)
 
     # -----------------------------------------------------------------
-    # 1. OTTIMIZZAZIONE SMA/EMA (Trend-Following - Griglia Ampliata)
+    # 1. SMA/EMA OPTIMISATION (trend following, extended grid)
     # -----------------------------------------------------------------
     print(f"\n[{asset_upper}] >>> Walk-Forward: SMA/EMA Agent (Griglia Iperparametri Ampliata)...")
 
-    # Griglia estesa per SMA/EMA
+    # Extended grid for SMA/EMA.
     sma_windows_candidates = [5, 8, 10, 12, 15, 20, 30, 40, 50, 100]
     ema_windows_candidates = [3, 5, 8, 10, 12, 15, 20, 26, 30, 35]
 
@@ -157,7 +154,7 @@ def train_single_asset(
             ema_windows=ema_windows_candidates
         )
     except TypeError:
-        # Fallback se la firma della classe gestisce i candidati internamente
+        # Fallback when the class signature handles the candidates internally.
         sma_opt = SMAEMAOptimizer(price_col=price_col, objective_metric=objective_metric)
         if hasattr(sma_opt, 'sma_windows'):
             sma_opt.sma_windows = sma_windows_candidates
@@ -186,11 +183,11 @@ def train_single_asset(
     )
 
     # -----------------------------------------------------------------
-    # 2. OTTIMIZZAZIONE Z-SCORE (Momentum / Mean-Reversion - Griglia Ampliata)
+    # 2. Z-SCORE OPTIMISATION (momentum / mean reversion, extended grid)
     # -----------------------------------------------------------------
     print(f"\n[{asset_upper}] >>> Walk-Forward: Z-Score Agent (Griglia Iperparametri Ampliata)...")
 
-    # Griglia estesa per Z-Score
+    # Extended grid for the Z-score agent.
     zs_windows_candidates = [10, 15, 20, 30, 40, 50, 60, 90]
     zs_thresholds_candidates = [0.8, 1.0, 1.2, 1.5, 1.8, 2.0, 2.2, 2.5]
     zs_modes_candidates = ["both", "momentum", "mean_reversion"]
@@ -205,7 +202,7 @@ def train_single_asset(
             modes=zs_modes_candidates
         )
     except TypeError:
-        # Fallback se la firma della classe gestisce i candidati internamente
+        # Fallback when the class signature handles the candidates internally.
         zs_opt = ZScoreOptimizer(price_col=price_col, exit_threshold=0.0, objective_metric=objective_metric)
         if hasattr(zs_opt, 'windows'):
             zs_opt.windows = zs_windows_candidates
@@ -242,7 +239,7 @@ def train_single_asset(
     )
 
     # -----------------------------------------------------------------
-    # 3. ISTANZIAZIONE E SALVATAGGIO SEGNALI STATISTICI
+    # 3. INSTANTIATION AND STORAGE OF THE STATISTICAL SIGNALS
     # -----------------------------------------------------------------
     sma_agent = SMAEMAAgent(price_col=price_col, target_asset=asset_upper)
     sma_agent.load_params(sma_config_file)
@@ -265,7 +262,7 @@ def train_single_asset(
     print(f"[{asset_upper}] Segnali Z-Score salvati in: {zs_csv}")
 
     # -----------------------------------------------------------------
-    # 4. AGENTE MACHINE LEARNING RANDOM FOREST
+    # 4. RANDOM FOREST MACHINE-LEARNING AGENT
     # -----------------------------------------------------------------
     rf_res = None
     df_rf = None
@@ -300,7 +297,7 @@ def train_single_asset(
         print(f"[{asset_upper}] Random Forest escluso dal training.")
 
     # -----------------------------------------------------------------
-    # 5. AGENTE MACHINE LEARNING SVM (Support Vector Classifier)
+    # 5. SVM MACHINE-LEARNING AGENT (Support Vector Classifier)
     # -----------------------------------------------------------------
     svm_res = None
     df_svm = None
@@ -321,7 +318,7 @@ def train_single_asset(
         print(f"[{asset_upper}] SVM escluso dal training.")
 
     # -----------------------------------------------------------------
-    # 6. AGENTE MACRO YIELD CURVE
+    # 6. MACRO YIELD-CURVE AGENT
     # -----------------------------------------------------------------
     macro_agent = MacroYieldCurveAgent(target_asset=asset_upper)
     macro_multi = macro_agent.predict_multi_asset(df, assets=[asset_upper])
@@ -345,7 +342,7 @@ def train_single_asset(
         raise ValueError("Nessuna settimana OOF comune disponibile.")
 
     # -----------------------------------------------------------------
-    # 6. BIS. AGENTE FINBERT SENTIMENT
+    # 6b. FINBERT SENTIMENT AGENT
     # -----------------------------------------------------------------
     finbert_csv = signals_dir / f"signals_sentiment_{asset_lower}.csv"
     df_finbert = None
@@ -360,7 +357,7 @@ def train_single_asset(
             f"\n[{asset_upper}] [WARN] File segnali FinBERT non trovato ({finbert_csv}). L'agente FinBERT verrà escluso dall'ensemble.")
 
     # -----------------------------------------------------------------
-    # 7. AGENTE ORCHESTRATORE
+    # 7. ORCHESTRATOR AGENT
     # -----------------------------------------------------------------
     orch_res = None
     df_orch = None
@@ -415,7 +412,7 @@ def train_single_asset(
         orch_res = orch_opt.best_params
 
     # -----------------------------------------------------------------
-    # 8. TABELLA COMPARATIVA PERFORMANCE IN-SAMPLE
+    # 8. IN-SAMPLE PERFORMANCE COMPARISON TABLE
     # -----------------------------------------------------------------
     train_mask = df.index.isin(oof_index)
     ret_asset = df[price_col].astype(float).pct_change().fillna(0.0)
@@ -489,7 +486,7 @@ def train_single_asset(
 
 
 # =====================================================================
-# MAIN PIPELINE MULTI-ASSET
+# MULTI-ASSET MAIN PIPELINE
 # =====================================================================
 def run_all_assets(
         assets: Optional[List[str]] = None,
@@ -500,9 +497,7 @@ def run_all_assets(
         train_orchestrator: bool = True,
         orch_method: str = "ga",
 ) -> Dict[str, Dict[str, Any]]:
-    """
-    Esegue il workflow completo di training su tutti gli asset specificati
-    (default: universe a 4 asset SPY, IEF, GLD, SHY).
+    """Run the full training workflow on the requested assets (default: SPY, IEF, GLD, SHY).
     """
     with (PROJECT_ROOT / "config.yaml").open("r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
@@ -581,7 +576,7 @@ def run_all_assets(
         all_results[asset.upper()] = res
 
     # -----------------------------------------------------------------
-    # RIEPILOGO FINALE GENERALE
+    # FINAL SUMMARY
     # -----------------------------------------------------------------
     print("\n" + "=" * 112)
     print("                              RIEPILOGO FINALE CONFIGURAZIONI & PARAMETRI")
@@ -624,7 +619,7 @@ def run_all_assets(
 
 
 # =====================================================================
-# CLI ENTRY POINT
+# COMMAND-LINE ENTRY POINT
 # =====================================================================
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Script di training e tuning parametri per gli agenti quantitativi.")

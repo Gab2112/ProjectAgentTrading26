@@ -1,13 +1,11 @@
-"""Level C: costruzione delle strategie C_v1 e C_v2 (solo training).
+"""Level C: construction of the C_v1 and C_v2 strategies (training only).
 
-``build_level_c_training`` (C_v1) e ``build_level_c_v2_training`` (C_v2).
-Le regole dei pesi stanno in ``src/level_c_allocator.py``.
+``build_level_c_training`` builds C_v1 and ``build_level_c_v2_training``
+builds C_v2. The weight rules are defined in ``src/level_c_allocator.py``.
 
-C_v1 - minimal training-only integration adapter for the Level C v1 allocator.
-
-Reuses B_v2 regimes/budgets/momentum and existing on-disk Orchestrator
-outputs; does NOT train models, execute trades, change frozen B outputs,
-or authorize validation/OOS. The shared daily simulator is Phase 4.
+The adapter reuses the B_v2 regimes, budgets and momentum together with the
+Orchestrator outputs stored on disk. It does NOT train models, execute
+trades, change frozen B outputs or authorise access to validation/OOS data.
 """
 
 from __future__ import annotations
@@ -84,7 +82,7 @@ def build_level_c_training(config: dict, root_dir: str | Path = ".") -> dict:
 
 
 # -----------------------------------------------------------------------------
-# C_v2 (ex level_c_v2_strategy.py)
+# C_v2
 #
 # Level C v2 experimental Long/Short/Flat consensus strategy (training only).
 #
@@ -96,10 +94,10 @@ def build_level_c_training(config: dict, root_dir: str | Path = ".") -> dict:
 #
 # One shared 126-session covariance volatility cap (8%) is applied to the
 # SIGNED raw weights. Gross exposure stays <= 100%; remaining gross capacity is
-# NOT the cash ledger for a short portfolio. The historical backtest belongs to
-# Phase 4 and must use borrow costs and margin rules of the shared simulator.
+# NOT the cash ledger for a short portfolio. The historical backtest is run in the
+# shared daily simulator, including borrow costs and margin rules.
 #
-# This is an IN-SAMPLE research experiment: Orchestrator was optimized on the
+# This is an IN-SAMPLE research experiment: the Orchestrator was optimised on the
 # same period even though upstream RF/SVM forecasts were out-of-fold.
 # -----------------------------------------------------------------------------
 

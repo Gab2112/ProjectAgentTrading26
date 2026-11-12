@@ -1,10 +1,9 @@
-"""
-plots.py
+"""Visualisation and diagnostic charts for ProjectAgentTrading26.
 
-Modulo di visualizzazione grafica e diagnostica per ProjectAgentTrading26.
-Fornisce funzioni per analizzare la distribuzione dei segnali, la correlazione tra strategie,
-la distribuzione dei pesi dell'Orchestratore e il confronto delle 4 curve di equity
-(Equal Active 3 Asset, Equal Active 4 Asset con SHY, Buy & Hold SPY, Buy & Hold SHY).
+Provides functions to analyse the distribution of agent signals, the
+distribution of the Orchestrator weights and the equity curves of the
+Equal Active strategy on four assets compared with buy-and-hold SPY and
+buy-and-hold SHY.
 """
 
 from __future__ import annotations
@@ -16,12 +15,12 @@ import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
-# Configurazione directory di cache per Matplotlib per prevenire warning su ambienti con permessi limitati
+# Matplotlib cache directory, to avoid warnings in environments with restricted permissions.
 os.environ.setdefault("MPLCONFIGDIR", tempfile.gettempdir())
 
 import matplotlib
 
-# Configura backend headless se non è presente un display grafico interattivo
+# Use a headless backend when no interactive display is available.
 if not os.environ.get("DISPLAY") and sys.platform != "win32":
     matplotlib.use("Agg")
 
@@ -31,7 +30,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-# Risoluzione percorsi di progetto
+# Project path resolution.
 CURRENT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = CURRENT_DIR.parents[1] if CURRENT_DIR.name == "agents" else CURRENT_DIR.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -42,7 +41,7 @@ from src.data_loader import load_agent_macro_data, load_daily_market_data
 from src.features import build_decision_feature_panel
 from src.time_split import build_weekly_decision_dates
 
-# Mappatura standard dei nomi degli agenti per leggibilità nei grafici
+# Standard agent display names for chart readability.
 AGENT_DISPLAY_NAMES = {
     "signals_sma_ema": "SMA/EMA (Trend)",
     "signals_zscore": "Z-Score (Mean-Rev)",
@@ -61,11 +60,11 @@ AGENT_DISPLAY_NAMES = {
     "Orchestrator_Agent": "Orchestrator (GA)",
 }
 
-# Palette cromatica finanziaria standard
+# Standard financial colour palette.
 SIGNAL_COLORS = {
-    -1: "#E74C3C",  # Short: Rosso Corallo / Crimson
-    0: "#95A5A6",   # Flat: Grigio Ardesia / Slate
-    1: "#27AE60",   # Long: Verde Smeraldo / Emerald
+    -1: "#E74C3C",  # Short: coral red / crimson
+    0: "#95A5A6",   # Flat: slate grey
+    1: "#27AE60",   # Long: emerald green
 }
 
 SIGNAL_LABELS = {
@@ -76,13 +75,11 @@ SIGNAL_LABELS = {
 
 
 # =====================================================================
-# AGGREGATORE MULTI-ASSET INTEGRATO (SOLUZIONE DEFINITIVA IMPORT ERROR)
+# INTEGRATED MULTI-ASSET AGGREGATOR
 # =====================================================================
 
 class MultiAssetSignalAggregator:
-    """
-    Motore quantitativo di aggregazione segnali e asset allocation dinamica multi-asset.
-    """
+    """Quantitative engine for signal aggregation and dynamic multi-asset allocation."""
 
     def __init__(
         self,
@@ -103,6 +100,8 @@ class MultiAssetSignalAggregator:
         signals_df: pd.DataFrame,
         confidences_df: pd.DataFrame,
     ) -> pd.DataFrame:
+        """Return the active state of each asset (SPY long unless a confirmed short; others long on confident buy signals).
+        """
         active_mask = pd.DataFrame(False, index=signals_df.index, columns=self.assets)
 
         for asset in self.assets:
@@ -127,6 +126,8 @@ class MultiAssetSignalAggregator:
         method: str = "equal_active",
         max_weight_per_asset: float = 0.50,
     ) -> pd.DataFrame:
+        """Build target weights by allocating capital equally across the active assets, subject to a per-asset cap.
+        """
         common_idx = signals_df.index.intersection(returns_df.index)
         sig = signals_df.loc[common_idx]
         conf = confidences_df.loc[common_idx]
@@ -184,13 +185,13 @@ def _run_backtest_no_costs(
 
 
 # =====================================================================
-# 1. FUNZIONI DI CARICAMENTO SEGNALI
+# 1. SIGNAL LOADING FUNCTIONS
 # =====================================================================
 def load_all_signals_for_asset(
     asset: str = "SPY",
     signals_dir: Optional[Union[str, Path]] = None,
 ) -> Dict[str, pd.DataFrame]:
-    """Carica tutti i segnali disponibili per un determinato asset dalla cartella data/signals/."""
+    """Load every available signal for an asset from the data/signals/ folder."""
     asset_lower = asset.lower()
     sig_path = Path(signals_dir) if signals_dir else (PROJECT_ROOT / "data" / "signals")
 
@@ -225,7 +226,7 @@ def load_all_signals_for_asset(
 
 
 # =====================================================================
-# 2. FUNZIONE PRINCIPALE: PLOT DISTRIBUZIONE DEI SEGNALI PER ASSET
+# 2. MAIN FUNCTION: SIGNAL DISTRIBUTION PLOT BY ASSET
 # =====================================================================
 def plot_agent_signal_distributions(
     asset: str = "SPY",
@@ -235,7 +236,7 @@ def plot_agent_signal_distributions(
     figsize: Tuple[int, int] = (16, 8),
     title: Optional[str] = None,
 ) -> Tuple[plt.Figure, plt.Axes]:
-    """Crea un plot che visualizza e confronta la distribuzione dei segnali per tutti gli agenti."""
+    """Plot and compare the signal distribution of every agent."""
     asset_upper = asset.upper()
 
     if signals_dict is None or len(signals_dict) == 0:
@@ -355,7 +356,7 @@ def plot_agent_signal_distributions(
 
 
 # =====================================================================
-# 3. FUNZIONE RIPRISTINATA PER I TEST (plot_all_assets_signal_distributions)
+# 3. SIGNAL DISTRIBUTION PLOTS FOR ALL ASSETS
 # =====================================================================
 def plot_all_assets_signal_distributions(
     assets: Optional[List[str]] = None,
@@ -363,7 +364,7 @@ def plot_all_assets_signal_distributions(
     save_dir: Optional[Union[str, Path]] = None,
     show_plots: bool = False,
 ) -> Dict[str, Tuple[plt.Figure, plt.Axes]]:
-    """Genera e salva automaticamente il plot della distribuzione dei segnali per tutti gli asset."""
+    """Generate and save the signal distribution plot for every asset."""
     if assets is None:
         assets = ["SPY", "IEF", "GLD", "SHY"]
 
@@ -390,7 +391,7 @@ def plot_all_assets_signal_distributions(
 
 
 # =====================================================================
-# 4. GRAFICO A TORTA DEI PESI DELL'ORCHESTRATORE PER ASSET
+# 4. PIE CHARTS OF THE ORCHESTRATOR WEIGHTS BY ASSET
 # =====================================================================
 def plot_orchestrator_weights_pie(
     assets: Optional[List[str]] = None,
@@ -399,7 +400,8 @@ def plot_orchestrator_weights_pie(
     show_plot: bool = False,
     figsize: Tuple[int, int] = (16, 12),
 ) -> plt.Figure:
-    """Genera un pannello con grafici a torta dei pesi assegnati dall'Orchestratore (GA) agli agenti."""
+    """Generate a panel of pie charts with the weights assigned by the Orchestrator (GA) to each agent.
+    """
     if assets is None:
         assets = ["SPY", "IEF", "GLD", "SHY"]
 
@@ -509,7 +511,7 @@ def plot_orchestrator_weights_pie(
 
 
 # =====================================================================
-# 5. CONFRONTO STRATEGIA 4 ASSET (EQUAL ACTIVE) VS BENCHMARK (SPY & SHY)
+# 5. FOUR-ASSET STRATEGY (EQUAL ACTIVE) VERSUS BENCHMARKS (SPY AND SHY)
 # =====================================================================
 def plot_equity_curves_comparison(
         start_date: str = "2021-01-01",
@@ -517,15 +519,15 @@ def plot_equity_curves_comparison(
         title_suffix: str = "Out-Of-Sample (2021 - 2026)",
         save_filename: str = "equity_curves_comparison.png",
 ) -> plt.Figure:
-    """
-    Genera e salva un grafico a doppio pannello ben evidenziato:
-    - Subplot 1: Rendimento Percentuale Cumulato (%).
-    - Subplot 2: Andamento temporale del Drawdown percentuale (MDD).
+    """Generate and save a two-panel chart.
 
-    Confronto mirato tra:
-    1. Strategia Quant (4 Asset: SPY, IEF, GLD, SHY) [Cap 50%]
-    2. Benchmark Buy & Hold (100% SPY)
-    3. Benchmark Buy & Hold (100% SHY)
+    - Panel 1: cumulative percentage return.
+    - Panel 2: percentage drawdown over time.
+
+    Compared series:
+    1. Quantitative strategy (4 assets: SPY, IEF, GLD, SHY), 50% cap per asset
+    2. Buy-and-hold benchmark (100% SPY)
+    3. Buy-and-hold benchmark (100% SHY)
     """
     all_assets = ["SPY", "IEF", "GLD", "SHY"]
     assets_4 = ["SPY", "IEF", "GLD", "SHY"]
@@ -575,33 +577,33 @@ def plot_equity_curves_comparison(
     conf_eval = confidences_full.loc[target_idx]
     rets_eval = returns_full.loc[target_idx]
 
-    # 1. Equal Active 4 Asset (SPY, IEF, GLD, SHY)
+    # 1. Equal Active, 4 assets (SPY, IEF, GLD, SHY)
     agg_4 = MultiAssetSignalAggregator(assets=assets_4, min_conf=0.20, rebalance_threshold=0.05)
     w_4 = agg_4.build_target_weights(sig_eval[assets_4], conf_eval[assets_4], rets_eval[assets_4],
                                      max_weight_per_asset=cap)
     bt_4 = _run_backtest_no_costs(w_4, rets_eval[assets_4])
 
-    # 2. Buy & Hold SPY
+    # 2. Buy-and-hold SPY
     pos_spy = pd.DataFrame(0.0, index=target_idx, columns=all_assets)
     pos_spy["SPY"] = 1.0
     bt_spy = _run_backtest_no_costs(pos_spy, rets_eval[all_assets])
 
-    # 3. Buy & Hold SHY
+    # 3. Buy-and-hold SHY
     pos_shy = pd.DataFrame(0.0, index=target_idx, columns=all_assets)
     pos_shy["SHY"] = 1.0
     bt_shy = _run_backtest_no_costs(pos_shy, rets_eval[all_assets])
 
-    # Dataframe Curve di Equity
+    # Equity-curve DataFrame.
     equity_df = pd.DataFrame({
         "Equal Active (4 Asset: SPY/IEF/GLD/SHY)": bt_4["Equity"],
         "Buy & Hold (100% SPY)": bt_spy["Equity"],
         "Buy & Hold (100% SHY)": bt_shy["Equity"],
     })
 
-    # Dataframe Rendimento Percentuale Cumulato (%)
+    # Cumulative percentage return DataFrame.
     returns_cum_df = (equity_df - 1.0) * 100.0
 
-    # Dataframe Drawdown (%) per ciascuna strategia
+    # Percentage drawdown DataFrame for each strategy.
     drawdown_df = (equity_df - equity_df.cummax()) / equity_df.cummax() * 100.0
 
     plt.style.use("seaborn-v0_8-whitegrid" if "seaborn-v0_8-whitegrid" in plt.style.available else "default")
@@ -610,9 +612,9 @@ def plot_equity_curves_comparison(
                                    gridspec_kw={'height_ratios': [2, 1]})
 
     colors = {
-        "Equal Active (4 Asset: SPY/IEF/GLD/SHY)": "#16A085",  # Verde Smeraldo Scuro / Teal
-        "Buy & Hold (100% SPY)": "#E74C3C",  # Rosso Corallo
-        "Buy & Hold (100% SHY)": "#7F8C8D",  # Grigio Ardesia
+        "Equal Active (4 Asset: SPY/IEF/GLD/SHY)": "#16A085",  # Dark emerald green / teal
+        "Buy & Hold (100% SPY)": "#E74C3C",  # Coral red
+        "Buy & Hold (100% SHY)": "#7F8C8D",  # Slate grey
     }
 
     linestyles = {
@@ -622,9 +624,9 @@ def plot_equity_curves_comparison(
     }
 
     # ------------------------------------------------------------------
-    # SUBPLOT 1: RENDIMENTO PERCENTUALE CUMULATO (%)
+    # PANEL 1: CUMULATIVE PERCENTAGE RETURN
     # ------------------------------------------------------------------
-    # Disegna prima i benchmark
+    # Draw the benchmarks first.
     for col in ["Buy & Hold (100% SHY)", "Buy & Hold (100% SPY)"]:
         ax1.plot(
             returns_cum_df.index,
@@ -637,7 +639,7 @@ def plot_equity_curves_comparison(
             zorder=2,
         )
 
-    # Disegna la strategia a 4 asset in evidenza
+    # Draw the four-asset strategy on top.
     main_col = "Equal Active (4 Asset: SPY/IEF/GLD/SHY)"
     ax1.plot(
         returns_cum_df.index,
@@ -659,7 +661,7 @@ def plot_equity_curves_comparison(
     ax1.legend(loc="upper left", frameon=True, framealpha=0.95, fontsize=10.5)
 
     # ------------------------------------------------------------------
-    # SUBPLOT 2: ANDAMENTO DRAWDOWN (%)
+    # PANEL 2: DRAWDOWN (%)
     # ------------------------------------------------------------------
     for col in ["Buy & Hold (100% SHY)", "Buy & Hold (100% SPY)"]:
         ax2.plot(
@@ -701,10 +703,10 @@ def plot_equity_curves_comparison(
     return fig
 
 # =====================================================================
-# 6. FUNZIONE AUTOMATICA COMPLETA (FA TUTTO)
+# 6. COMPLETE AUTOMATIC RUN
 # =====================================================================
 def run_all_plots(assets: Optional[List[str]] = None, show_plots: bool = False) -> None:
-    """Esegue automaticamente tutti i plot diagnostici, di allocazione e le curve di equity per tutti gli asset."""
+    """Generate all diagnostic, allocation and equity-curve plots for every asset."""
     if assets is None:
         assets = ["SPY", "IEF", "GLD", "SHY"]
 
@@ -712,18 +714,18 @@ def run_all_plots(assets: Optional[List[str]] = None, show_plots: bool = False) 
     print("      AVVIO GENERAZIONE AUTOMATICA DI TUTTI I GRAFICI E DIAGNOSTICA")
     print("=" * 90)
 
-    # 1. Distribuzione segnali per ogni asset
+    # 1. Signal distribution for each asset.
     print("\n--- [1/3] Generazione Grafici Distribuzione Segnali ---")
     plot_all_assets_signal_distributions(assets=assets, show_plots=show_plots)
 
-    # 2. Pie chart dei pesi dell'Orchestratore multi-asset
+    # 2. Pie charts of the multi-asset Orchestrator weights.
     print("\n--- [2/3] Generazione Grafico a Torta Pesi Orchestratore ---")
     try:
         plot_orchestrator_weights_pie(assets=assets, show_plot=show_plots)
     except Exception as e:
         print(f"[Orchestrator Pie] Errore nella generazione del grafico a torta: {e}")
 
-    # 3. Curve di Equity (OOS e IS)
+    # 3. Equity curves.
     print("\n--- [3/3] Generazione Grafici Curve di Equity Comparative ---")
     try:
         plot_equity_curves_comparison(
@@ -747,7 +749,7 @@ def run_all_plots(assets: Optional[List[str]] = None, show_plots: bool = False) 
 
 
 # =====================================================================
-# 7. ENTRY POINT CLI
+# 7. COMMAND-LINE ENTRY POINT
 # =====================================================================
 if __name__ == "__main__":
     import argparse

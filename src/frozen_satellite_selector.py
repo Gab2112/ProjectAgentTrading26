@@ -19,6 +19,32 @@ def generate_dynamic_growth_matrix(
         min_confidence=0.35,
         hysteresis_buffer=0.015
 ):
+    """Select one satellite ETF per decision date from the orchestrator signals.
+
+    For each date, every asset with a non-zero signal and a confidence of at
+    least ``min_confidence`` is scored as ``signal * confidence / volatility``.
+    When SPY trades above its 30-week simple moving average, SPY shorts are
+    disabled and the SPY score is multiplied by ``price / SMA``, bounded
+    between 1.2 and 2.5. The asset with the highest absolute score is
+    selected, unless the current holding is still valid and the challenger
+    does not exceed its score by more than ``hysteresis_buffer``.
+
+    Args:
+        asset_dfs: Mapping ``ticker -> DataFrame`` with signal, confidence and,
+            optionally, volatility columns.
+        df_features: Optional DataFrame containing the SPY close, used for the
+            trend filter and the trend-strength multiplier.
+        signal_col: Name of the signal column (-1, 0, +1).
+        conf_col: Name of the confidence column.
+        vol_col: Name of the volatility column.
+        default_vol: Volatility used when the column is missing.
+        min_confidence: Minimum confidence required for a signal to qualify.
+        hysteresis_buffer: Relative score advantage required to switch asset.
+
+    Returns:
+        DataFrame of positions (-1, 0, +1) with one non-zero entry per date
+        at most.
+    """
     signals_dict = {}
     confidences_dict = {}
     volatilities_dict = {}
@@ -29,7 +55,7 @@ def generate_dynamic_growth_matrix(
 
         sig = df[signal_col].copy()
 
-        # Filtro Long-Only per SPY
+        # Long-only filter for SPY when it trades above its trend.
         if asset == 'SPY' and df_features is not None:
             close_col = 'SPY_Close' if 'SPY_Close' in df_features.columns else 'SPY_close'
             if close_col in df_features.columns:
@@ -67,7 +93,7 @@ def generate_dynamic_growth_matrix(
 
         scores = (S * C) / (V + 1e-8)
 
-        # Boost dinamico su SPY basato sul trend
+        # Dynamic boost of the SPY score based on trend strength.
         if 'SPY' in scores.index and valid_mask['SPY'] and df_features is not None:
             close_col = 'SPY_Close' if 'SPY_Close' in df_features.columns else 'SPY_close'
             try:

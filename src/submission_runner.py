@@ -17,6 +17,12 @@ from src.utils import ROOT_DIR, load_config
 
 def run_development_in_copy(level: str, *, b_version: str = 'v2',
                             config_path: Path | None = None) -> None:
+    """Run a historical development level inside a temporary copy of the project.
+
+    The legacy stages write generated files, so they are executed in an
+    isolated worker process on a temporary copy; release files and frozen
+    inputs in the original tree are never modified.
+    """
     root = ROOT_DIR
     with tempfile.TemporaryDirectory(prefix='group9_dev_') as tmp:
         destination = Path(tmp)/'project'
@@ -42,6 +48,7 @@ def run_development_in_copy(level: str, *, b_version: str = 'v2',
 
 
 def run_worker(level: str, b_version: str, config_path: str | None) -> None:
+    """Execute one development level inside the isolated temporary copy."""
     from main import run_pipeline, validate_config
 
     config = load_config(ROOT_DIR/(config_path or 'config.yaml'))
@@ -82,6 +89,7 @@ def run_worker(level: str, b_version: str, config_path: str | None) -> None:
 
 
 def main() -> None:
+    """Command-line entry point of the isolated development worker."""
     p = argparse.ArgumentParser(description='Private isolated development worker')
     p.add_argument('--worker', action='store_true', required=True)
     p.add_argument('--level', required=True)
