@@ -1,32 +1,62 @@
 # Group 9 | ProjectAgentTrading26
 
 **LUISS Guido Carli · Data-Driven Models for Investment**
-
 **Python 3.11 · Scientific freeze 7 November 2026 · Final submission edition 13 November 2026**
 
-This submission documents the selected **Core35-Satellite65** systematic
-strategy on four investable ETFs: SPY, IEF, GLD and SHY. A 35% SPY core is
-combined with a dynamically selected 65% long or short satellite, using weekly
-signals from a frozen ensemble of technical, macro and ML agents.
+This completed project evaluates a **multi-agent investment system with three
+portfolio-allocation policies**. The final comparative focus is on
+**Equal Active (four ETFs: SPY, IEF, GLD and SHY)** and
+**Regime-Adaptive SMA200**. The originally selected and frozen
+**Core35-Satellite65** strategy remains an immutable historical baseline.
+All three reuse the same pre-2022 fitted agent ensemble.
 
-**Empirical conclusion:** the final strategy **did not outperform** either
-SPY Buy & Hold or SPY/IEF 60/40 in the protected 2022–2026 test. The negative
-finding has been preserved. There has been **no model selection or retuning
-using the OOS result**.
+**Historical provenance.** The archived 2021 development-freeze record identifies
+Core35-Satellite65 as the original candidate selected for its protected
+2022-2026 evaluation. The additional Equal Active and SMA200 policy comparison
+was reconstructed after that historical evaluation had been examined. A
+reconstructed development-only ranking is useful evidence about the policies,
+but it is **not proof of a contemporaneous 2021 registration** for those new
+allocation rules. The official Core result and its negative benchmark finding
+remain intact.
 
-## Final OOS results (7 Jan 2022 through 9 Oct 2026)
+## Final policy study: development and subsequent historical evaluation
 
-| Portfolio | CAGR | Annual volatility | Sharpe | Max drawdown |
-|:--|--:|--:|--:|--:|
-| **Core35-Satellite65** | 5.872% | 11.566% | 0.551 | -26.543% |
-| SPY Buy & Hold | 13.116% | 17.294% | 0.799 | -23.424% |
-| 60/40 SPY-IEF | 7.388% | 11.174% | 0.694 | -19.840% |
+All policies use the same previously trained four-ETF signals, daily next-open
+execution and the same cost assumptions. The development calculation consumes
+**only prices and agent signals dated on or before 31 December 2021**.
 
-Risk-free rate for diagnostic metrics = 0; annualization = 252 trading days.
-The earliest OOS decision is 7 Jan 2022, with first executed orders at the
-next available Open (10 Jan). The 2022 and 2026 calendar-year figures therefore
-represent partial-year observation windows. All figures are net of the stated
-transaction and short-borrow assumptions, not a live trading record.
+| Policy | 2010-2021 CAGR | 2010-2021 Sharpe | 2010-2021 MDD | 2022-2026 CAGR | 2022-2026 Sharpe | 2022-2026 MDD |
+|:--|--:|--:|--:|--:|--:|--:|
+| Core35-Satellite65 (archived reference) | 12.064% | 0.929 | -18.291% | 5.872% | 0.551 | -26.543% |
+| **Equal Active, 4 ETFs** | 8.187% | **1.353** | **-9.251%** | 4.587% | 0.692 | -13.432% |
+| **Regime-Adaptive SMA200** | 10.599% | 0.889 | -16.484% | **9.805%** | **0.912** | **-12.802%** |
+
+Equal Active has the strongest development Sharpe and shallowest development
+drawdown among these three policies; SMA200 has the strongest 2022-2026 Sharpe
+and return among the three. Neither claim implies statistical evidence of
+future alpha. The policy set and the later period had been examined during
+research, so the 2022-2026 comparison of **new policies** is historical rather
+than a second independent, pre-registered test. The archived Core result is the
+original frozen OOS evaluation. Its SPY and weekly 60/40 comparators remain
+available in `reports/oos_final_2022_2026/`.
+
+Reproduce this two-period study directly:
+
+```bash
+python main.py
+python scripts/evaluate_final_policies.py
+python main.py --release-action frozen-results   # original Core OOS archive
+python main.py --release-action audit            # unchanged scientific freeze
+python main.py --release-action replay           # unchanged frozen Core replay
+```
+
+The completed policy set is explicitly declared in `final_policy_config.yaml`;
+this separate research configuration does **not** replace the registered
+`release_config.yaml` for the original historical Core policy.
+
+**No new RF/SVM/GA training was needed:** the new policies change allocation
+rules, not the previously trained predictive agents. Full provenance is in
+`docs/research_extensions_2026.md` and `docs/release_architecture_2026.md`.
 
 ## 1. Installation (no remote data downloads)
 
@@ -45,7 +75,7 @@ OOS outputs are included. No API keys or data downloads are required.
 ## 2. Main interface and execution order
 
 ```bash
-python main.py                              # Final frozen OOS results, read-only
+python main.py                              # Final multi-policy project results
 python main.py --release-action audit       # Scientific + ZIP integrity audit
 python main.py --release-action verify-models
 python main.py --level CORE                # Re-run the development-period comparison
@@ -53,11 +83,11 @@ python main.py --release-action replay      # Full locked OOS backtest replay in
 python main.py --release-action charts      # Generate equity and drawdown charts
 ```
 
-The **`replay`** command reruns the already-selected and frozen strategy on the
+The **`replay`** command reruns the originally selected and frozen Core strategy on the
 **same** OOS inputs in a disposable temporary project, compares the original
 metrics, target weights and three daily NAV files, then discards the copy. It
 does **not** refit models, re-run GA optimization or alter archived results.
-OOS observation is **never** used to select new strategy parameters.
+This archival command never retunes the original GA/Core parameters from the OOS; the two additional policies have their separate, explicitly documented research history.
 
 Historical A/B/C development experiments remain available separately:
 
@@ -96,7 +126,7 @@ covers the published `project/presentation.pptx`, and an ordinary visual
 rebuild should not overwrite those audited bytes. Regeneration is optional
 for grading; no Node.js dependency is needed for Python research execution.
 
-## 3. Frozen methodology and actual selection rules
+## 3. Archived Core-Satellite methodology (historical baseline)
 
 - Weekly close signal, **next trading-day Open** execution, daily NAV/cash and
   short-borrow accounting; USD 100k initial capital, 2 bps commission, 1 bp
@@ -120,7 +150,7 @@ for grading; no Node.js dependency is needed for Python research execution.
 
 - `main.py`: unified entry point, safe default and explicit modes.
 - `config.yaml`: original frozen legacy training configuration.
-- `release_config.yaml`: effective final-strategy release contract.
+- `release_config.yaml`: effective **historical Core-Satellite** frozen contract.
 - `src/`: reusable data, agent, strategy, simulation, integrity and plotting code.
 - `src/orchestrator_loader.py`: official compatible loader for nested GA
   `best_params`, including separate long/short thresholds.
@@ -152,14 +182,14 @@ point-in-time. Fixed execution costs are research assumptions.
 The original Git collaboration history documents research decisions beyond
 the fully reproducible scientific snapshot distributed in this submission. **The completed `group_9.zip` contains `presentation.pptx` at its outer ZIP root as required by LUISS**, while the protected historical results remain unchanged.
 
-## 6. Final 13 November 2026 supplemental comparison (post-selection)
+## 6. Final policy comparison and historical evaluation
 
-This package also includes a **separate, optional** research experiment comparing
+The final research comparison presents
 Gabriele Di Raimondo's **Equal Active** policy (3 and 4 ETFs) and Gianluca
 Addorisio's **Regime-Adaptive SMA200** extension on the **same 2022-2026 daily
 execution engine**, archived frozen Orchestrator signals and 2 bps + 1 bp costs.
 **These policies were considered after observing the original OOS**. Their
-metrics are retrospective and must **not** be presented as an independent new
+the new-policy metrics are historical and must **not** be presented as an independent new
 final OOS or as a replacement for the selected Core35-Satellite65 candidate.
 
 | Strategy | Status | CAGR | Sharpe | Maximum drawdown |
@@ -197,7 +227,7 @@ contains exact frozen code/model sources, raw/processed data, original signals,
 13 protected OOS release artefacts, 47-file freeze record, reproducible research
 code and CSV/plots, documentation, supplementary full report, and final package
 manifest. Historical scientific manifests were **never rewritten**. Only the
-submission `PACKAGE_MANIFEST.json` was rebuilt after the final editorial additions.
+submission `PACKAGE_MANIFEST.json` is regenerated to reflect the completed package.
 
 Recommended verification:
 

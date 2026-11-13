@@ -1,12 +1,20 @@
-# Frozen Core-Satellite Research: Final Evaluation
+# Frozen Core-Satellite Research: Archived Original Evaluation
 
 **Project:** ProjectAgentTrading26
 **Course:** Data-Driven Models for Investment, LUISS Guido Carli
 **Research snapshot:** 7 November 2026
-**Status:** Final out-of-sample evaluation completed; software release preparation ongoing
+**Status:** Completed archived Core-Satellite evaluation; final multi-policy project comparison published separately
 **Study design:** Systematic multi-asset allocation with frozen agent inference and daily execution accounting
 
 ---
+
+> **Scope:** This document preserves the completed original Core-Satellite
+> evaluation; it does not designate that policy as the sole final research
+> conclusion. The finished Group 9 project also studies Equal Active 4 ETFs
+> and Regime-Adaptive SMA200. Their 2010-2021 development-only and 2022-2026
+> historical results are documented in `docs/research_extensions_2026.md`.
+>
+> The historical selected-strategy and SHA256 freeze record remain unchanged.
 
 ## 1. Executive Summary
 
@@ -311,7 +319,7 @@ Some `.joblib` binaries, processed data and generated signals are not tracked by
 Use **Python 3.11**, the included frozen artifacts and the declared dependencies.
 
 ```bash
-python main.py                                      # Read frozen OOS results
+python main.py --release-action frozen-results        # Read archived Core OOS results
 python main.py --release-action audit                # 47 + 13 + complete ZIP manifest + calendars
 python main.py --release-action verify-models        # Load all four GA parameter snapshots safely
 python main.py --level CORE                         # Frozen 2010-2021 development backtest

@@ -9,12 +9,12 @@
       "size_bytes": 224
     },
     "Final_Project_Report.pdf": {
-      "sha256": "d36e006b92477f17670cb56027ba8b5524bd3b240866511df05574296fd7b66c",
-      "size_bytes": 1037291
+      "sha256": "06890d4d3851b5ee15fee71fb77f92ed3689f5445f4ee342511b2c6e7a2e62e2",
+      "size_bytes": 418441
     },
     "README.md": {
-      "sha256": "c492180d4f1509b7ebb940e4d1a8a647d765617cb85587912416e2eed35517ee",
-      "size_bytes": 11125
+      "sha256": "f6722070113f370a001050233d8ac3ab4379e41ec99281db8ce1e502382d1967",
+      "size_bytes": 13034
     },
     "config.yaml": {
       "sha256": "d9af4599002044d5168bf34800d404e7c490308c182733754464ac95c65814ab",
@@ -109,20 +109,20 @@
       "size_bytes": 20086
     },
     "docs/core_satellite_final_2026.md": {
-      "sha256": "ce6399e0d1976818e4f4e1243ac36438bdc83f30f4a48004ff5c9e3e2d38c04b",
-      "size_bytes": 25933
+      "sha256": "b5cdcb0361635d1c7c3aa8a902ef2c21e9f187621b74df208bb513831120eee2",
+      "size_bytes": 26439
     },
     "docs/historical_code_provenance.md": {
       "sha256": "66caaa8c9b68ed0cfc13a9b04b532995741624b7f2b5c7c34a54635ee8b2c611",
       "size_bytes": 1106
     },
     "docs/release_architecture_2026.md": {
-      "sha256": "fe3db56ee0f366a6c8cbb317601c158a288ddffcaae2c501cd234880ea2eba5a",
-      "size_bytes": 3314
+      "sha256": "48df336418db6598e517832cd2133f5c439b50ef475a699e9d8987223519a9c6",
+      "size_bytes": 4494
     },
     "docs/research_extensions_2026.md": {
-      "sha256": "16d1ebccecd4d7fd1cce2cc8915fbd342c9607badecbe9d997897a463f8913c4",
-      "size_bytes": 6307
+      "sha256": "94c4f0a1a3f2ac6bc712060b0e5f9f07f3d87f11b2e4da44baf0bdc5c6a91f65",
+      "size_bytes": 8405
     },
     "figures/oos_drawdowns.png": {
       "sha256": "25700f98469b30b1916bf73cdb7706c9f36f4b2cda8def5700298e7dad1b804c",
@@ -132,9 +132,13 @@
       "sha256": "9f0f3717abc83fbb1067e6c076edd052d026e0305240bfefc0fab0426551160c",
       "size_bytes": 186258
     },
+    "final_policy_config.yaml": {
+      "sha256": "3ad55eefc84e611c405bad1c8ab4c7604f5edd4c4fefbcc094044017b6100025",
+      "size_bytes": 855
+    },
     "main.py": {
-      "sha256": "3e3932ef6faa8b5efd0934852e51f8888dd8d4bb74b69c94f040c431672df0e3",
-      "size_bytes": 14512
+      "sha256": "7035420cdd3a3e087d05ccc354e6e2e2e9c7c95e18e774d7868f92d20c812905",
+      "size_bytes": 14909
     },
     "package.json": {
       "sha256": "47e542cb75f1b383061e730b18facc39ef43915bea7802e242992e502727642e",
@@ -216,9 +220,17 @@
       "sha256": "52fcce9f43fcf5811ef6002aa833feef53e58d80c1d1bc8d46f3b8698b4c26e2",
       "size_bytes": 308033
     },
+    "research_outputs/development_policy_comparison_2010_2021.csv": {
+      "sha256": "2c4533dd0785384e2e5e00838ba760762876e1df8596f952b59e723b80c17fbe",
+      "size_bytes": 561
+    },
     "research_outputs/evaluation_scope.json": {
       "sha256": "8ebfdc1ff9ea5726d4f3ad66fd3070bb3a01abe267399665900282f5beca4366",
       "size_bytes": 491
+    },
+    "research_outputs/final_policy_historical_2022_2026.csv": {
+      "sha256": "e6499f072f896b2dd63392f33885984aa3860b428cd10711ed4688b66e641671",
+      "size_bytes": 476
     },
     "research_outputs/presentation_equity_5policy.png": {
       "sha256": "cd1c3bad60534503efdf76020cb58e17a3516efeb6a1df26ee094bc42523d626",
@@ -263,6 +275,10 @@
     "scripts/build_submission.py": {
       "sha256": "ec8c6ff5f7f3b49474e3151581c4535c78d72d53aa6c468c30a7e65af99385ea",
       "size_bytes": 2893
+    },
+    "scripts/evaluate_final_policies.py": {
+      "sha256": "208ff09f99c8a23d012c26a751f064fee5f48c4e96997b4565a57ecaa1353c28",
+      "size_bytes": 539
     },
     "scripts/run_strategy_comparison.py": {
       "sha256": "8ad85a2f8e3913e3c82d1032b179125567904730e2e6b603314980f47f040126",
@@ -452,6 +468,10 @@
       "sha256": "2134e7de690c22a87acd02e8797b21df69e14c7cee09ae5817bd7e15c1af9c26",
       "size_bytes": 9449
     },
+    "src/development_policy_selection.py": {
+      "sha256": "ffdc32a8bdbb28668cbecef770b81a8b0953464cfccfcba2676fb60a85f007fe",
+      "size_bytes": 7597
+    },
     "src/evaluator.py": {
       "sha256": "fce0d9760334d650b9131bed7f9151d1cb8bca9125a5278e16ded7499f481ed9",
       "size_bytes": 23542
@@ -539,6 +559,10 @@
     "src/utils.py": {
       "sha256": "b3d42bd443ee5b5d35cdc8aa5a43e13623da09f203e75b4b8639d962a6cabb79",
       "size_bytes": 6696
+    },
+    "tests/test_final_policy_selection.py": {
+      "sha256": "72b08e53fdbfb44f4ff30013b50c667fc59fd489387beed8163fa26f9c60d3eb",
+      "size_bytes": 1414
     },
     "tests/test_research_comparison.py": {
       "sha256": "c7d6c751cf9f8dc47078dd643d0ac89f4e42dd57c7c5b3f2834cefa294ee11e9",

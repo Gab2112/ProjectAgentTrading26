@@ -1,18 +1,43 @@
-# Equal Active and SMA200: Retrospective Research Extensions
+# Final Policy Study: Equal Active 4 ETFs and Regime-Adaptive SMA200
 
-**Group 9 | 13 November 2026 | Supplemental research, not an amended official OOS**
+**Group 9 | 13 November 2026 | Completed allocation-policy comparison**
 
-## Scientific boundary
+## Scientific boundary and the original 2021 freeze
 
-The official, pre-2022-frozen selected portfolio remains **Core35-Satellite65**. Its protected final evaluation covers **7 January 2022 to 9 October 2026**, with 249 weekly decisions, 1,193 daily NAV rows, and original net annualized metrics **5.872% CAGR**, **0.551 Sharpe**, **-26.543% maximum drawdown**. The research below was designed *after the group saw* this result, and is not a newly independent holdout. Its results cannot replace the registered final OOS test or establish significant outperformance.
+The completed project compares two final policy alternatives and uses the
+original Core35-Satellite65 candidate as the frozen research baseline.
+The model **training cutoff** (31 December 2021), development-only policy
+scores, and **historical policy-selection timestamp** are distinct facts:
+computing a development ranking today does not retroactively register it in
+2021. The archived 2021 manifest continues to certify Core35-Satellite65.
 
-## Common, fully reconciled retrospective calculation
+### Development-period policy comparison: 2010-2021
+
+The table below is computed exclusively from historical market data truncated
+at 31 December 2021 and saved development signals. It uses the same next-open
+simulator and trading-cost conventions as the 2022-2026 comparison.
+
+| Policy | CAGR | Sharpe | Max drawdown |
+|---|---:|---:|---:|
+| Core35-Satellite65 | 12.064% | 0.929 | -18.291% |
+| **Equal Active, four ETFs** | 8.187% | **1.353** | **-9.251%** |
+| **Regime-Adaptive SMA200** | 10.599% | 0.889 | -16.484% |
+
+Equal Active (four ETFs) has the strongest development Sharpe and smallest
+maximum drawdown among the three displayed policies. Its better risk-adjusted
+development result does not establish that it was historically registered as
+the selected 2021 policy; the published historical selection record remains
+unchanged.
+
+The original, pre-2022-frozen selected portfolio was **Core35-Satellite65**. Its protected final evaluation covers **7 January 2022 to 9 October 2026**, with 249 weekly decisions, 1,193 daily NAV rows, and original net annualized metrics **5.872% CAGR**, **0.551 Sharpe**, **-26.543% maximum drawdown**. The research below was designed *after the group saw* this result, and is not a newly independent holdout. Its results cannot replace the registered final OOS test or establish significant outperformance.
+
+## Common, fully reconciled 2022-2026 historical evaluation
 
 All strategies below use **the same saved 2022-2026 Orchestrator signals** from `reports/oos_signals/`, **the same daily adjusted open/close market history**, the same next-session-open execution and mark-to-market accounting, **2 bps commissions + 1 bp slippage**, and **1% annual short borrowing cost**. The assumed risk-free rate is 0; annualization is 252 trading sessions. Cash earns 0. This enables a *controlled allocation-policy comparison*, not a reconstruction of the original 2021-start weekly script by Gabriele.
 
 | Strategy | Scientific status | CAGR | Sharpe | Maximum drawdown | Mean gross exposure |
 | --- | --- | ---: | ---: | ---: | ---: |
-| Core35-Satellite65 | Frozen official selected policy | 5.872% | 0.551 | -26.543% | 90.60% |
+| Core35-Satellite65 | Original frozen reference policy | 5.872% | 0.551 | -26.543% | 90.60% |
 | Equal Active, SPY/IEF/GLD | Post-selection policy variant | 5.391% | 0.678 | -13.432% | 69.16% |
 | Equal Active, SPY/IEF/GLD/SHY | Post-selection policy variant | 4.587% | 0.692 | -13.432% | 79.84% |
 | Regime-Adaptive SMA200 | Post-selection regime extension | 9.805% | 0.912 | -12.802% | 86.81% |
@@ -56,4 +81,22 @@ The comparison script is **read-only by default**. Optional CSV/plot export requ
 
 ## Interpretation for the oral presentation
 
-Equal Active has much smaller drawdowns than frozen Core, in part with lower average market exposure; **it does not have higher CAGR** on this matched replay. The adaptive SMA200 policy has stronger descriptive CAGR and risk metrics on the same observed window; however that retrospective gain might reflect trend-timing and policy selection after seeing 2022, not a new statistically proven alpha. The official selection and its negative benchmark result remain the central experimental finding.
+Equal Active has much smaller drawdowns than frozen Core, in part with lower average market exposure; **it does not have higher CAGR** on this matched replay. The adaptive SMA200 policy has stronger descriptive CAGR and risk metrics on the same observed window; however that retrospective gain might reflect trend-timing and policy selection after seeing 2022, not a new statistically proven alpha. The original frozen evaluation and the two concluding policy studies are all reported, with distinct provenance.
+
+The two concluding policies are declared independently of the original frozen
+Core configuration in `final_policy_config.yaml`, with a separate research
+provenance and historical date boundaries. The original training manifest
+and archived selected strategy are never modified.
+
+## Repeatable two-period final policy report
+
+```bash
+python scripts/evaluate_final_policies.py
+python main.py
+```
+
+These entry points display the complete development-only and later historical
+comparison without rewriting trained models, frozen manifests or stored NAVs.
+The 2021-only calculation does not use 2022-2026 market prices or signals to
+produce the development scores. A separate out-of-time prospective assessment
+would be needed for a newly independent policy-validation claim.

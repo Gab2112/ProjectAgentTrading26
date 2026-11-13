@@ -1,0 +1,22 @@
+# Completed Group 9 policy-comparison interface, November 2026.
+# The underlying GA/RF/SVM model binaries and their 2021 fitting cutoff are unchanged.
+# This file does not supersede or rewrite the original scientific freeze record.
+version: 1
+policy_study_status: completed_research_comparison
+original_frozen_reference: Core35_Satellite65
+concluding_allocation_policies:
+  - Equal_Active_4ETF
+  - Regime_Adaptive_SMA200
+development_window:
+  first_weekly_decision: '2010-01-08'
+  last_weekly_decision: '2021-12-31'
+  ranking_metric: sharpe_ratio
+historical_evaluation_window:
+  first_weekly_decision: '2022-01-07'
+  last_weekly_decision: '2026-10-09'
+policy_inputs:
+  already_fitted_models: true
+  require_dated_signals: true
+  require_next_available_open_execution: true
+original_2021_freeze_not_rewritten: true
+policy_study_reconstructed: '2026-11-13'

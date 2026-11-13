@@ -1,9 +1,12 @@
 """Group 9 reproducible systematic-trading research interface.
 
-Default: safely display the already-frozen final OOS evaluation.
+Default: show the final policy study (Equal Active 4 ETFs, Regime-Adaptive
+SMA200, and the historical Core-Satellite baseline), on development and
+later historical-evaluation periods.
 
 Examples:
-    python main.py                                # final OOS results (read-only)
+    python main.py                                # final multi-policy comparison
+    python main.py --release-action frozen-results # archived Core-Satellite OOS
     python main.py --release-action audit         # all available integrity checks
     python main.py --release-action replay        # locked OOS replay in temporary copy
     python main.py --release-action charts        # equity and drawdown charts
@@ -12,8 +15,9 @@ Examples:
     python main.py --level B --b-version v2       # historical B development only
     python main.py --level ALL                    # A1/A2/B/C/CORE development, no OOS
 
-Historical config.yaml is frozen. release_config.yaml describes the immutable
-final candidate without rewriting pre-OOS model selection or parameters.
+Historical config.yaml and release_config.yaml describe the immutable
+original Core-Satellite archive. The final research comparison is a separate
+policy-analysis layer; this file does not rewrite historical selection.
 """
 from __future__ import annotations
 
@@ -245,11 +249,11 @@ def _run_core_development() -> None:
 def main(argv: list[str] | None = None) -> None:
     """Unified release interface. Never trains or retunes frozen models."""
     parser = argparse.ArgumentParser(
-        description='Group 9: frozen Core-Satellite evaluation, replay and development diagnostics.'
+        description='Group 9: final policy comparison and preserved frozen-Core archive.'
     )
     parser.add_argument('--level', type=str.upper,
                         choices=('A1', 'A2', 'B', 'C', 'CORE', 'ALL'),
-                        help='Historical training level (CORE = final candidate development). '
+                        help='Historical training level (CORE = original frozen-policy development). '
                              'ALL = all development comparisons only.')
     parser.add_argument('--b-version', choices=B_VERSIONS, default=None,
                         help='Select historical B_v1 or B_v2 (default: v2).')
@@ -283,9 +287,12 @@ def main(argv: list[str] | None = None) -> None:
     if args.release_action == 'audit':
         audit_release(ROOT_DIR)
         return
-    if args.release_action == 'frozen-results' or (not args.level and
-        not args.core_development and not args.release_action):
+    if args.release_action == 'frozen-results':
         show_frozen_results(ROOT_DIR)
+        return
+    if not args.level and not args.core_development and not args.release_action:
+        from src.development_policy_selection import print_final_policy_report
+        print_final_policy_report(ROOT_DIR)
         return
     if args.release_action == 'verify-models':
         audit_release(ROOT_DIR)
