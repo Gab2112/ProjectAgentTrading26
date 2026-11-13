@@ -1,0 +1,24 @@
+{
+  "first_common_oos_session": "2022-01-03",
+  "last_common_oos_session": "2026-10-09",
+  "common_oos_sessions": 1197,
+  "raw_input_sha256": {
+    "data/raw/macro/CPIAUCSL.csv": "52720eff3f9f52fa47b13ee4e5ceec4b29c306a3276ab42d2e166ec551f7bbdc",
+    "data/raw/macro/CPILFESL.csv": "dbdfea6e7c933edaa823e41667043590c6c510c11389bc83eaec8baa3c4f478d",
+    "data/raw/macro/DGS10.csv": "3d5170259bacd89c44d042c03562fad00ac9489acb159659195c5760d602f947",
+    "data/raw/macro/DGS2.csv": "5a17b609709b4746bb7ed47ce827595560a9b573dcbd48d50ee5e25cf76c5fa3",
+    "data/raw/macro/DGS30.csv": "2ec0ef4edf4600d5b0d3e3fc7d2fe4bb20b01d393e295f223c658ef706f17bef",
+    "data/raw/macro/DGS3MO.csv": "6f1d1e7e2cae8f3090fb1227c2f7e5af3451557b3c98c4a3e27fc2d7431e2b02",
+    "data/raw/macro/DGS5.csv": "b0a86ed400c91ba672aa75c523c4d8742e05021702dde2da24760397357efc4c",
+    "data/raw/macro/FEDFUNDS.csv": "dea2633bbebd9a44382d467b03fa048386d2a1adbfa10153f68a61630d4befc3",
+    "data/raw/macro/T10YIE.csv": "862c28f2dcda9830ce7f9e5a31c9bd3f0220f76c4715f25b3d41af786851f0a9",
+    "data/raw/macro/T5YIE.csv": "82b4a63b5d630f0eaff016f0acb17b572e86327b86c02efab6d721bbf1c71a72",
+    "data/raw/macro/VIXCLS.csv": "a307c4ce903f3ef802de27e892bfc07be9cd2a508ddeb2604c49a4b5962c7829",
+    "data/raw/market/GLD.csv": "615b809ef0383981da779e9ad54aa5ae10dffcf7164dbd8037a5503d51d8aa1f",
+    "data/raw/market/IEF.csv": "5c084fa5d3e01ebef6eef5e27693d76d3db1944c0cce3c00d9ff909cdd5b61c5",
+    "data/raw/market/SHY.csv": "021b3fb3a15c2fbdc3be5bf6ffcc1184535bd85b3147675c895956231c209068",
+    "data/raw/market/SPY.csv": "2baea6088491a1847676879c8c93489680dff59fa52e8a0578e0aedda5c24363",
+    "data/raw/market/TLT.csv": "f89b46e0b42c16f9b9c928e1db6abf8f1823e5493d7f1bc7f2a145235c53e03e"
+  },
+  "final_oos_performance_evaluated": false
+}

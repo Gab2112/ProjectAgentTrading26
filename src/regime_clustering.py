@@ -1,24 +1,28 @@
-"""Identification of macro-financial regimes with a Gaussian Mixture Model (GMM).
+"""
+regime_clustering.py
 
-Preparatory work for Level B. The module does NOT modify A1/A2 weights and is
-not used directly by any strategy: it produces regime labels and diagnostics
-that Level B can use as contextual information.
+Preparazione del Level B: identificazione dei regimi macro-finanziari con un
+Gaussian Mixture Model (GMM).
 
-Methodological choices (recorded in the decision log; configuration frozen):
+Il modulo NON modifica i pesi di A1/A2 e non è ancora usato da alcuna
+strategia: produce i regimi e alcune diagnostiche, che il Level B potrà
+utilizzare come informazione di contesto.
 
-- variables are built only from information available at the weekly
-  decision date:
-    * 13-week change of the 2Y Treasury yield and of the 10Y-2Y curve;
-    * 13-week volatility of weekly changes in the 10Y yield;
-    * 3-year (156-week) z-score of the 2Y yield and of the 10Y-2Y curve;
-- raw levels are not used, since they identify historical eras rather than
-  recurring regimes;
-- a 3-cluster GMM with diagonal covariance is fitted ONCE on the training
-  period and then applied to subsequent weeks;
-- clusters are numbered in ascending order of the mean 2Y change, so that
-  labels remain stable;
-- weeks less likely than the most unusual 2% of the training period are
-  flagged as "unrecognised" (known = False).
+Scelte metodologiche (registrate nel decision log, configurazione congelata):
+
+- variabili costruite solo con informazioni disponibili alla data di
+  decisione settimanale:
+    * variazione a 13 settimane del Treasury 2Y e della curva 10Y-2Y;
+    * volatilità a 13 settimane delle variazioni settimanali del 10Y;
+    * z-score a 3 anni (156 settimane) del 2Y e della curva 10Y-2Y;
+- i livelli grezzi non sono usati: identificano epoche storiche, non
+  regimi ricorrenti;
+- GMM con 3 cluster e covarianza diagonale, allenato UNA SOLA VOLTA sul
+  training e poi applicato alle settimane successive;
+- cluster numerati in ordine crescente della variazione media del 2Y, così
+  le etichette restano stabili;
+- settimane meno verosimili del 2% più insolito del training segnalate come
+  "non riconosciute" (known = False).
 
 Output:
     data/signals/B/regime_clusters_weekly.csv
@@ -26,7 +30,7 @@ Output:
     data/results/B/regime_clustering/risk_by_cluster_train.csv
     data/results/B/regime_clustering/cluster_timeline.png
 
-Run from the repository root:
+Esecuzione dalla radice del repository:
     python3 -m src.regime_clustering
 """
 
@@ -49,17 +53,17 @@ from src.features import build_cluster_features
 from src.time_split import build_weekly_decision_dates, get_time_windows, restrict_to_allowed_period
 from src.utils import ROOT_DIR, get_tickers, load_config
 
-# Categorical colours in a fixed order (one colour per cluster).
+# Colori categoriali in ordine fisso (un colore per cluster).
 CLUSTER_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#6250d6"]
 UNKNOWN_COLOR = "#b0b0b0"
 
 
 # =============================================================================
-# Settings
+# Impostazioni
 # =============================================================================
 
 def get_clustering_settings(config: dict) -> dict:
-    """Read the clustering settings from ``strategies.B.clustering``."""
+    """Legge le impostazioni del clustering da strategies.B.clustering."""
     settings = config.get("strategies", {}).get("B", {}).get("clustering")
     if not isinstance(settings, dict):
         raise KeyError("Sezione 'strategies.B.clustering' mancante nel config.yaml.")
@@ -81,8 +85,8 @@ def get_clustering_settings(config: dict) -> dict:
 
 
 # =============================================================================
-# Alignment to the decision dates
-# (data: src/data_loader.load_weekly_yields, variables: src/features.build_cluster_features)
+# Allineamento alle date di decisione
+# (dati: src/data_loader.load_weekly_yields, variabili: src/features.build_cluster_features)
 # =============================================================================
 
 
@@ -90,7 +94,9 @@ def align_to_decision_dates(
     weekly_features: pd.DataFrame,
     decision_dates: pd.DatetimeIndex,
 ) -> pd.DataFrame:
-    """Attach to each decision date (last session of the week) the variables of its W-FRI week.
+    """
+    Associa a ogni data di decisione (ultima seduta della settimana) le
+    variabili della sua settimana W-FRI.
     """
     week_labels = decision_dates.to_period("W-FRI").end_time.normalize()
     aligned = weekly_features.reindex(week_labels)
@@ -100,7 +106,7 @@ def align_to_decision_dates(
 
 
 # =============================================================================
-# Model
+# Modello
 # =============================================================================
 
 def fit_cluster_model(
@@ -109,7 +115,7 @@ def fit_cluster_model(
     covariance_type: str,
     seed: int,
 ) -> tuple[StandardScaler, GaussianMixture]:
-    """Standardise the variables and fit the GMM on training weeks ONLY."""
+    """Standardizza e allena il GMM usando SOLO le settimane di training."""
     scaler = StandardScaler().fit(train)
     model = GaussianMixture(
         n_components=n_clusters,
@@ -127,10 +133,11 @@ def compute_cluster_probabilities(
     model: GaussianMixture,
     order_by: str,
 ) -> pd.DataFrame:
-    """Return the probability of each cluster for every week and the most likely cluster.
+    """
+    Probabilità di ogni cluster per ogni settimana e cluster più probabile.
 
-    Clusters are renumbered in ascending order of the mean of ``order_by``
-    (cluster 0 = strongest fall in the 2Y yield), so that labels remain stable.
+    I cluster sono rinumerati in ordine crescente della media di `order_by`
+    (cluster 0 = calo più forte del 2Y): le etichette restano stabili.
     """
     probs = pd.DataFrame(model.predict_proba(scaler.transform(data)), index=data.index)
     order = model.means_[:, list(data.columns).index(order_by)].argsort()
@@ -147,11 +154,12 @@ def flag_unknown_weeks(
     model: GaussianMixture,
     quantile: float,
 ) -> pd.DataFrame:
-    """Flag the weeks that the model does not recognise.
+    """
+    Segnala le settimane che il modello non riconosce.
 
-    Threshold = ``quantile`` quantile of the log-likelihood of the training
-    weeks: a week is "unrecognised" if it is less likely than the most unusual
-    ``quantile`` share of the training period.
+    Soglia = quantile `quantile` della log-verosimiglianza delle settimane
+    di training: una settimana è "non riconosciuta" se è meno verosimile
+    del più insolito `quantile` del periodo di allenamento.
     """
     log_likelihood = pd.Series(model.score_samples(scaler.transform(data)), index=data.index)
     threshold = log_likelihood.loc[train_index].quantile(quantile)
@@ -164,7 +172,7 @@ def run_cluster_model(
     settings: dict,
     seed: int,
 ) -> pd.DataFrame:
-    """Fit the GMM on the training period and assign clusters to all supplied weeks."""
+    """Allena il GMM sul training e assegna i cluster a tutte le settimane fornite."""
     columns = list(settings["features"])
     data = features[columns].dropna()
     train = data.loc[data.index <= train_end]
@@ -180,7 +188,7 @@ def run_cluster_model(
 
 
 # =============================================================================
-# Diagnostics
+# Diagnostiche
 # =============================================================================
 
 def build_cluster_summary(
@@ -188,11 +196,9 @@ def build_cluster_summary(
     regimes: pd.DataFrame,
     train_end: pd.Timestamp,
 ) -> pd.DataFrame:
-    """Summarise the cluster variables and counts.
-
-    Reports the mean of each variable per cluster (training only), the number
-    of weeks per cluster inside and outside the training period, and the
-    unrecognised weeks.
+    """
+    Media delle variabili per cluster (solo training), settimane per cluster
+    dentro e fuori dal training e settimane non riconosciute.
     """
     labeled = features.loc[regimes.index].assign(
         cluster=regimes["cluster"], known=regimes["known"]
@@ -216,11 +222,13 @@ def build_risk_summary_train(
     tickers: list[str],
     train_end: pd.Timestamp,
 ) -> pd.DataFrame:
-    """Annualised volatility of each ETF's daily returns in the week AFTER the decision, by cluster.
+    """
+    Volatilità annualizzata dei rendimenti giornalieri di ogni ETF nella
+    settimana SUCCESSIVA alla decisione, per cluster. SOLO TRAINING: entrano
+    solo le settimane la cui finestra futura termina entro `train_end`.
 
-    TRAINING ONLY: only weeks whose forward window ends by ``train_end`` are
-    included. The purpose is to check whether the regimes separate riskier and
-    calmer periods without consulting validation or OOS data.
+    Serve a verificare se i regimi distinguono periodi più o meno rischiosi,
+    senza consultare validation o OOS.
     """
     closes = market_daily[[f"{t}_close" for t in tickers]]
     returns = closes.pct_change()
@@ -247,8 +255,7 @@ def build_risk_summary_train(
 
 
 def plot_cluster_timeline(regimes: pd.DataFrame, train_end: pd.Timestamp, output_path: Path) -> None:
-    """Plot the most likely cluster week by week; unrecognised weeks are shown in grey.
-    """
+    """Cluster più probabile settimana per settimana; non riconosciute in grigio."""
     clusters = regimes["cluster"]
     known = regimes["known"]
     fig, ax = plt.subplots(figsize=(12, 3))
@@ -281,12 +288,12 @@ def plot_cluster_timeline(regimes: pd.DataFrame, train_end: pd.Timestamp, output
 # =============================================================================
 
 def run_regime_clustering(config: dict, root_dir: Path = ROOT_DIR) -> pd.DataFrame:
-    """Build the variables, fit the GMM and save regimes and diagnostics."""
+    """Costruisce le variabili, allena il GMM e salva regimi e diagnostiche."""
     settings = get_clustering_settings(config)
     seed = int(config["project"].get("random_seed", 42))
     train_end = get_time_windows(config)["train_end"]
 
-    # Decision calendar: the same used by A1/A2 (last session of the week).
+    # Calendario decisionale: stesso usato da A1/A2 (ultima seduta della settimana).
     market_daily, _ = load_daily_market_data(config, root_dir)
     market_daily = restrict_to_allowed_period(market_daily, config)
     decision_dates = pd.DatetimeIndex(build_weekly_decision_dates(market_daily).index)

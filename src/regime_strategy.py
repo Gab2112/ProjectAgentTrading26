@@ -163,8 +163,8 @@ def _build_portfolio(common: dict, *, long_flat: bool) -> dict:
         "budgets": budgets,
         "signed_weights": raw_weights,
         "target_weights": weights,
-        "risk": risk,  # The three historical columns remain byte-compatible.
-        # The historical key keeps its meaning: budget unused BEFORE risk scaling.
+        "risk": risk,  # Legacy three columns remain byte-compatible.
+        # Legacy key retains its meaning: budget unused BEFORE risk scaling.
         "unused_budget": unused_budget,
         "unused_gross_budget_final": remaining_allocation_weight(
             weights, long_only=False,

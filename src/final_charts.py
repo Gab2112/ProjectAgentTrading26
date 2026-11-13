@@ -15,10 +15,6 @@ NAMES = {'Core35_Satellite65': 'Core35-Satellite65',
 
 
 def build_final_charts(root: Path = ROOT_DIR, output_dir: Path | None = None) -> list[Path]:
-    """Build the OOS equity-curve and drawdown charts from the archived daily NAVs.
-
-    Returns the paths of the saved images.
-    """
     root = Path(root)
     audit_release(root)
     folder = Path(output_dir) if output_dir is not None else root/'outputs'/'figures'

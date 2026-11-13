@@ -1,18 +1,16 @@
-"""Modular, NumPy-vectorised framework for a weekly trading meta-decision model
-optimised with a real-coded genetic algorithm (GA).
+"""
+orchestrator_agent.py
 
-Architectural components:
-1. WeeklySignalAggregator: continuous aggregation, non-linear confidence
-   calibration and dynamic position sizing (2D and 3D).
-2. PortfolioFitnessEvaluator: net performance evaluation (52 periods per year),
-   turnover costs and anti-overfitting constraints.
-3. GeneticMetaOptimizer: real-coded GA with BLX-alpha crossover, adaptive
-   Gaussian mutation, elitism and a cap on the FinBERT weight.
-4. WalkForwardEngine: rolling out-of-sample validation without data leakage,
-   with tracking of parameter drift.
-5. OrchestratorAgent: operational inference agent compatible with BaseAgent.
-6. OrchestratorOptimizer and WalkForwardOrchestrator: unified interfaces for
-   training and validation on the production assets.
+Framework Quantitativo Modulare e Vettorizzato in NumPy per Meta-Decisore di Trading
+su Serie Storiche Settimanali (Weekly Timeframe) basato su Algoritmo Genetico (GA) a Codifica Reale.
+
+Componenti architetturali:
+1. WeeklySignalAggregator: Aggregazione continua, calibrazione non-lineare e position sizing dinamico (2D e 3D).
+2. PortfolioFitnessEvaluator: Valutazione netta delle performance (52 periodi/anno), costi di turnover e vincoli anti-overfitting.
+3. GeneticMetaOptimizer: Algoritmo Genetico a codifica reale con BLX-alpha, mutazione Gaussiana adattiva, elitismo e vincolo FinBERT <= 5%.
+4. WalkForwardEngine: Validazione out-of-sample rolling rigorosa senza data leakage e tracciamento del drift dei parametri.
+5. OrchestratorAgent: Agente di trading per inferenza operativa compatibile con l'ecosistema BaseAgent.
+6. OrchestratorOptimizer & WalkForwardOrchestrator: Interfacce unificate per training e validazione su asset di produzione.
 """
 
 from __future__ import annotations
@@ -28,7 +26,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-# Path resolution for direct or module execution.
+# Risoluzione percorsi per esecuzione diretta o modulare
 CURRENT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = CURRENT_DIR.parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -49,11 +47,10 @@ from src.utils import ASSETS, get_project_root
 
 
 # =====================================================================
-# SECTION 1: SIGNAL VALIDATION AND ALIGNMENT
+# SEZIONE 1: VALIDAZIONE E ALLINEAMENTO SEGNALI
 # =====================================================================
 def validate_signal_dataframe(df: pd.DataFrame, source_name: str = "SignalSource") -> pd.DataFrame:
-    """Check and normalise the 'signal' ({-1, 0, 1}) and 'confidence' ([0.0, 1.0]) columns.
-    """
+    """Verifica e normalizza le colonne 'signal' ({-1, 0, 1}) e 'confidence' ([0.0, 1.0])."""
     if not isinstance(df, pd.DataFrame):
         raise TypeError(f"[{source_name}] Atteso pd.DataFrame, ricevuto: {type(df)}")
 
@@ -78,7 +75,7 @@ def align_signals(
         signals_dict: Dict[str, pd.DataFrame],
         fill_method: str = "zeros",
 ) -> Tuple[Dict[str, pd.DataFrame], pd.DatetimeIndex]:
-    """Align a dictionary of signals on a common, sorted time index."""
+    """Allinea un dizionario di segnali su un indice temporale comune ordinato."""
     if not signals_dict:
         raise ValueError("Il dizionario dei segnali in input è vuoto.")
 
@@ -106,19 +103,19 @@ def align_signals(
 
 
 # =====================================================================
-# SECTION 2: AGGREGATION, CALIBRATION AND POSITION SIZING (PHENOTYPE)
+# SEZIONE 2: AGGREGAZIONE, CALIBRAZIONE E POSITION SIZING (FENOTIPO)
 # =====================================================================
 class WeeklySignalAggregator:
-    """NumPy-vectorised phenotype engine for weekly series.
+    """
+    Motore fenotipico vettorizzato in NumPy per serie settimanali.
 
-    Implemented formulas:
-    1. Non-linear calibration: C_cal = clip(C, 1e-6, 1.0) ** alpha
-    2. Continuous score Z_t, damped by flat agents (s_i = 0):
+    Specifiche matematiche implementate:
+    1. Calibrazione non-lineare: C_cal = clip(C, 1e-6, 1.0) ** alpha
+    2. Punteggio continuo Z_t con freno da agenti Flat (s_i = 0):
        Z_t = sum(w_i * s_i * c_cal_i) / (sum(w_i * c_cal_i) + eps)
-    3. Asymmetric discretisation: S_out = +1 if Z > theta_long,
-       -1 if Z < -theta_short, 0 otherwise.
-    4. Modulated confidence C_out in [0, 1].
-    5. Dynamic position sizing: P_t = S_out,t * C_out,t in [-1, 1].
+    3. Discretizzazione asimmetrica: S_out = +1 se Z > theta_long, -1 se Z < -theta_short, 0 altrimenti.
+    4. Confidenza modulata C_out in [0, 1].
+    5. Position Sizing dinamico: P_t = S_out,t * C_out,t in [-1, 1].
     """
 
     def __init__(
@@ -152,8 +149,7 @@ class WeeklySignalAggregator:
             signals: np.ndarray,
             confidences: np.ndarray,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Vectorised inference over the full history (T, N). Returns (Z, S_out, C_out, P).
-        """
+        """Inferenza vettorizzata sull'intera serie storica (T, N). Restituisce (Z, S_out, C_out, P)."""
         S = np.asarray(signals, dtype=np.float64)
         C = np.asarray(confidences, dtype=np.float64)
         if S.ndim == 1:
@@ -163,20 +159,20 @@ class WeeklySignalAggregator:
         w = self.weights.reshape(1, N)
         a = self.alphas.reshape(1, N)
 
-        # 1. Non-linear calibration.
+        # 1. Calibrazione non-lineare
         C_cal = np.clip(C, 1e-6, 1.0) ** a
 
-        # 2. Continuous score Z, damped by flat agents.
+        # 2. Score Z continuo con effetto freno agenti flat
         num = np.sum(w * S * C_cal, axis=1)
         den = np.sum(w * C_cal, axis=1) + self.epsilon
         Z = np.clip(num / den, -1.0, 1.0)
 
-        # 3. Directional discretisation with asymmetric thresholds.
+        # 3. Discretizzazione direzionale con soglie asimmetriche
         S_out = np.zeros(T, dtype=np.int32)
         S_out[Z > self.theta_long] = 1
         S_out[Z < -self.theta_short] = -1
 
-        # 4. Continuous confidence C_out.
+        # 4. Confidenza continua C_out
         C_out = np.zeros(T, dtype=np.float64)
         long_m = S_out == 1
         short_m = S_out == -1
@@ -192,7 +188,7 @@ class WeeklySignalAggregator:
         C_out[flat_neg] = 1.0 - (abs_Z[flat_neg] / (self.theta_short + self.epsilon))
         C_out = np.clip(C_out, 0.0, 1.0)
 
-        # 5. Dynamic position sizing.
+        # 5. Position Sizing dinamico
         P = S_out.astype(np.float64) * C_out
         return Z, S_out, C_out, P
 
@@ -203,15 +199,15 @@ class WeeklySignalAggregator:
             chromosomes: np.ndarray,
             epsilon: float = 1e-12,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """3D tensor broadcasting (M, T, N) over a population of M chromosomes.
-
-        Returns (P, S_out, C_out), each with shape (M, T).
+        """
+        Broadcasting tensoriale 3D (M, T, N) per l'intera popolazione di M cromosomi.
+        Restituisce (P, S_out, C_out) con forma (M, T).
         """
         chroms = np.asarray(chromosomes, dtype=np.float64)
         M, _ = chroms.shape
         T, N = signals.shape
 
-        # Normalise the weights.
+        # Normalizzazione pesi
         W_raw = chroms[:, :N]
         W_sum = np.sum(W_raw, axis=1, keepdims=True)
         W = np.where(W_sum > epsilon, W_raw / np.maximum(W_sum, epsilon), 1.0 / N)[:, np.newaxis, :]  # (M, 1, N)
@@ -219,21 +215,21 @@ class WeeklySignalAggregator:
         TL = chroms[:, 2 * N: 2 * N + 1]  # (M, 1)
         TS = chroms[:, 2 * N + 1: 2 * N + 2]  # (M, 1)
 
-        # Broadcast tensors.
+        # Tensori broadcasted
         S_3d = signals[np.newaxis, :, :]  # (1, T, N)
         C_cal = np.clip(confidences[np.newaxis, :, :], 1e-6, 1.0) ** A  # (M, T, N)
 
-        # Compute Z.
+        # Calcolo Z
         num = np.sum(W * S_3d * C_cal, axis=2)
         den = np.sum(W * C_cal, axis=2) + epsilon
         Z = np.clip(num / den, -1.0, 1.0)  # (M, T)
 
-        # Discrete signals.
+        # Segnali discreti
         S_out = np.zeros((M, T), dtype=np.int32)
         S_out[Z > TL] = 1
         S_out[Z < -TS] = -1
 
-        # Confidences.
+        # Confidenze
         TL_mat = np.broadcast_to(TL, (M, T))
         TS_mat = np.broadcast_to(TS, (M, T))
         abs_Z = np.abs(Z)
@@ -257,18 +253,17 @@ class WeeklySignalAggregator:
 
 
 # =====================================================================
-# SECTION 3: PORTFOLIO DYNAMICS AND FITNESS EVALUATION
+# SEZIONE 3: DINAMICA DI PORTAFOGLIO E VALUTAZIONE DELLA FITNESS
 # =====================================================================
 class PortfolioFitnessEvaluator:
-    """Quantitative evaluation of weekly performance.
-
-    Includes turnover friction, proportional costs and anti-overfitting
-    constraints (minimum activity and concentration penalty).
+    """
+    Valutazione quantitativa delle performance settimanali con attrito di turnover,
+    costi proporzionali e vincoli anti-overfitting (attività minima e penalità concentrazione).
     """
 
     def __init__(
             self,
-            transaction_fee: float = 0.0010,  # 10 bps per unit of turnover
+            transaction_fee: float = 0.0010,  # 10 bps per unità di turnover
             annualization_factor: int = 52,
             min_active_ratio: float = 0.15,
             min_trades: int = 5,
@@ -302,7 +297,7 @@ class PortfolioFitnessEvaluator:
             previous_position: float = 0.0,
             initial_signal: int = 0,
     ) -> Dict[str, float]:
-        """Compute the full set of metrics for a single trajectory (T,)."""
+        """Calcola il profilo completo delle metriche su una singola traiettoria (T,)."""
         P = np.asarray(positions, dtype=np.float64)
         S = np.asarray(signals, dtype=np.int32)
         r = np.asarray(returns, dtype=np.float64)
@@ -312,7 +307,7 @@ class PortfolioFitnessEvaluator:
         if T < 2:
             return {"sharpe_ratio": 0.0, "fitness": self.penalty_fitness}
 
-        # Causal weekly turnover: Delta P_0 = |P_0|, Delta P_t = |P_t - P_{t-1}|
+        # Turnover settimanale causale: Delta P_0 = |P_0|, Delta P_t = |P_t - P_{t-1}|
         held = np.empty_like(P)
         held[0] = float(initial_position)
         held[1:] = P[:-1]
@@ -379,7 +374,7 @@ class PortfolioFitnessEvaluator:
             chromosomes: np.ndarray,
             n_agents: int,
     ) -> np.ndarray:
-        """Vectorised fitness evaluation for the whole population (M, T)."""
+        """Valutazione vettorizzata simultanea della fitness per la popolazione (M, T)."""
         P = np.asarray(positions, dtype=np.float64)
         S = np.asarray(signals, dtype=np.int32)
         r = np.asarray(returns, dtype=np.float64)
@@ -453,12 +448,44 @@ class PortfolioFitnessEvaluator:
 
 
 # =====================================================================
-# SECTION 4: EVOLUTIONARY ENGINE (GENETIC META-OPTIMIZER)
+# SEZIONE 4: MOTORE EVOLUTIVO (GENETIC META-OPTIMIZER)
 # =====================================================================
-class GeneticMetaOptimizer:
-    """Real-coded genetic algorithm (real-coded GA) for the optimal parameter synthesis.
 
-    Chromosome (2N + 2): [w_1..w_N, alpha_1..alpha_N, theta_long, theta_short]
+def _bounded_agent_weights(raw, agent_names):
+    """Normalizza i pesi, rispettando FinBERT <= 5%."""
+    w = np.asarray(raw, dtype=float).reshape(-1)
+    if not len(w) or len(w) != len(agent_names):
+        raise ValueError("Dimensioni dei pesi non valide")
+    if not np.isfinite(w).all():
+        raise ValueError("Pesi non finiti")
+
+    caps = np.array([
+        0.05 if "finbert" in name.lower() else 1.0
+        for name in agent_names
+    ])
+
+    if caps.sum() < 1.0 - 1e-12:
+        raise ValueError("Vincoli sui pesi non ammissibili")
+
+    w = np.maximum(w, 0.0)
+    if w.sum() <= 1e-12:
+        w = np.ones_like(w)
+
+    w = w / w.sum()
+    excess = np.maximum(w - caps, 0.0).sum()
+    w = np.minimum(w, caps)
+
+    if excess > 1e-12:
+        room = np.maximum(caps - w, 0.0)
+        w += excess * room / room.sum()
+
+    return w
+
+
+class GeneticMetaOptimizer:
+    """
+    Algoritmo Genetico a Codifica Reale (Real-Coded GA) per la sintesi ottima dei parametri:
+    Cromosoma (2N + 2): [w_1..w_N, alpha_1..alpha_N, theta_long, theta_short]
     """
 
     def __init__(
@@ -493,16 +520,14 @@ class GeneticMetaOptimizer:
         self.random_seed = int(random_seed)
         self.verbose = bool(verbose)
 
-        # Parameter bounds.
+        # Definizione bounds
         self.lower_bounds = np.zeros(self.chromosome_len, dtype=np.float64)
         self.upper_bounds = np.ones(self.chromosome_len, dtype=np.float64)
 
-        # Upper bound of the weights in the search space: 5% for FinBERT, 80% for the other agents.
+        # Solo FinBERT ha un cap individuale del 5%.
         for i, name in enumerate(self.agent_names):
             if "finbert" in name.lower():
                 self.upper_bounds[i] = 0.05
-            else:
-                self.upper_bounds[i] = 0.80
 
         self.lower_bounds[: self.n_agents] = 0.0
         self.lower_bounds[self.n_agents: 2 * self.n_agents] = 0.1
@@ -513,47 +538,15 @@ class GeneticMetaOptimizer:
         self.rng = np.random.default_rng(self.random_seed)
 
     def decode_chromosome(self, chromosome: np.ndarray) -> Dict[str, Any]:
-        """Decode a chromosome, applying clipping and iterative rescaling.
-
-        The decoding guarantees that no agent exceeds its weight cap (1% for
-        FinBERT, 80% for the other agents) and that the weights sum exactly to 1.0.
+        """
+        Decodifica il cromosoma applicando il clipping e la riscalatura ricorsiva
+        per garantire che nessun agente superi i limiti imposti (FinBERT <= 5%, altri <= 40%)
+        e che la somma finale dei pesi sia esattamente 1.0.
         """
         c = np.asarray(chromosome, dtype=np.float64).flatten()
         w_raw = c[: self.n_agents].copy()
 
-        # 1. Apply the individual upper bounds to the raw weights.
-        for i, name in enumerate(self.agent_names):
-            if "finbert" in name.lower():
-                w_raw[i] = np.clip(w_raw[i], 0.0, 0.01)
-            else:
-                w_raw[i] = np.clip(w_raw[i], 0.0, 0.80)
-
-        # 2. Iterative normalisation with clipping to respect the caps after summing.
-        w = w_raw.copy()
-        w_sum = np.sum(w)
-        if w_sum > 1e-12:
-            w /= w_sum
-        else:
-            w = np.full(self.n_agents, 1.0 / self.n_agents)
-
-        # Safety correction (at most 5 projection iterations).
-        for _ in range(5):
-            excess = 0.0
-            for i, name in enumerate(self.agent_names):
-                limit = 0.01 if "finbert" in name.lower() else 0.80
-                if w[i] > limit:
-                    excess += (w[i] - limit)
-                    w[i] = limit
-
-            # Redistribute the excess across the agents that have not reached their cap.
-            if excess > 1e-12:
-                free_mask = np.array([0.01 if "finbert" in n.lower() else 0.80 for n in self.agent_names]) > w
-                free_sum = np.sum(w[free_mask])
-                if free_sum > 1e-12:
-                    w[free_mask] += excess * (w[free_mask] / free_sum)
-                else:
-                    w = np.clip(w, 0.0, [0.01 if "finbert" in n.lower() else 0.80 for n in self.agent_names])
-                    w /= np.sum(w)
+        w = _bounded_agent_weights(w_raw, self.agent_names)
 
         return {
             "weights": w,
@@ -564,11 +557,9 @@ class GeneticMetaOptimizer:
         }
 
     def initialize_population(self) -> np.ndarray:
-        """Draw the initial population uniformly within the bounds and enforce the weight caps.
-        """
         pop = self.rng.uniform(self.lower_bounds, self.upper_bounds, size=(self.population_size, self.chromosome_len))
 
-        # Ensure that each initial individual also respects the constraints through decode_chromosome.
+        # Assicura che anche l'individuo iniziale rispetti i vincoli tramite decode_chromosome
         for idx in range(self.population_size):
             decoded = self.decode_chromosome(pop[idx])
             pop[idx, : self.n_agents] = decoded["weights"]
@@ -576,7 +567,7 @@ class GeneticMetaOptimizer:
         return pop
 
     def tournament_selection(self, population: np.ndarray, fitnesses: np.ndarray) -> np.ndarray:
-        """k-way tournament selection."""
+        """Selezione a torneo k-way."""
         selected = np.empty_like(population)
         for i in range(len(population)):
             c_idx = self.rng.integers(0, len(population), size=self.tournament_size)
@@ -584,7 +575,7 @@ class GeneticMetaOptimizer:
         return selected
 
     def blx_alpha_crossover(self, p1: np.ndarray, p2: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """BLX-alpha blend crossover on continuous variables."""
+        """Blend Crossover BLX-alpha su variabili continue."""
         d = np.abs(p1 - p2)
         u_min = np.minimum(p1, p2) - self.blx_alpha * d
         u_max = np.maximum(p1, p2) + self.blx_alpha * d
@@ -593,7 +584,7 @@ class GeneticMetaOptimizer:
         return c1, c2
 
     def gaussian_mutation(self, individual: np.ndarray, gen: int, max_gen: int) -> np.ndarray:
-        """Gaussian mutation with a scheduled decay of the variance."""
+        """Mutazione Gaussiana con decadimento programmato della varianza."""
         decay = (1.0 - gen / max(max_gen, 1)) ** self.sigma_decay_power
         ranges = self.upper_bounds - self.lower_bounds
         sigma_g = (0.20 * decay + 0.02) * ranges
@@ -606,6 +597,9 @@ class GeneticMetaOptimizer:
                 self.lower_bounds[mask],
                 self.upper_bounds[mask],
             )
+        mutated[:self.n_agents] = _bounded_agent_weights(
+            mutated[:self.n_agents], self.agent_names
+        )
         return mutated
 
     def optimize(
@@ -614,8 +608,7 @@ class GeneticMetaOptimizer:
             confidences: np.ndarray,
             returns: np.ndarray,
     ) -> Tuple[np.ndarray, Dict[str, Any], List[Dict[str, float]]]:
-        """Full evolutionary loop with 3D NumPy tensor evaluation at every generation.
-        """
+        """Ciclo evolutivo completo con valutazione tensoriale 3D NumPy ad ogni generazione."""
         t0 = time.time()
         population = self.initialize_population()
         history: List[Dict[str, float]] = []
@@ -624,6 +617,10 @@ class GeneticMetaOptimizer:
         best_chrom = population[0].copy()
 
         for gen in range(self.n_generations):
+            for chrom in population:
+                chrom[:self.n_agents] = _bounded_agent_weights(
+                    chrom[:self.n_agents], self.agent_names
+                )
             P_pop, S_pop, _ = WeeklySignalAggregator.aggregate_3d_population(signals, confidences, population)
             fitnesses = self.evaluator.evaluate_population(P_pop, S_pop, returns, population, self.n_agents)
 
@@ -653,7 +650,7 @@ class GeneticMetaOptimizer:
             if gen == self.n_generations - 1:
                 break
 
-            # Reproduction with elitism.
+            # Riproduzione con Elitismo
             next_pop = np.empty_like(population)
             next_pop[: self.n_elites] = population[: self.n_elites]
             mating = self.tournament_selection(population, fitnesses)
@@ -682,10 +679,10 @@ class GeneticMetaOptimizer:
 
 
 # =====================================================================
-# SECTION 5: WALK-FORWARD VALIDATION ENGINE (OUT-OF-SAMPLE)
+# SEZIONE 5: MOTORE DI VALIDAZIONE WALK-FORWARD (OUT-OF-SAMPLE)
 # =====================================================================
 class WalkForwardEngine:
-    """Rolling walk-forward validation engine for weekly time series."""
+    """Motore di validazione Walk-Forward rolling su serie storiche settimanali."""
 
     def __init__(
             self,
@@ -714,7 +711,7 @@ class WalkForwardEngine:
             signals_dict: Dict[str, pd.DataFrame],
             returns: Union[pd.Series, np.ndarray],
     ) -> Dict[str, Any]:
-        """Run the rolling walk-forward loop over all time folds."""
+        """Esegue il ciclo Walk-Forward rolling su tutti i fold temporali."""
         aligned, common_idx = align_signals(signals_dict, fill_method="inner")
 
         if common_idx.empty:
@@ -754,7 +751,7 @@ class WalkForwardEngine:
             t_str = f"{common_idx[start_train].date()} : {common_idx[end_train - 1].date()}"
             o_str = f"{common_idx[start_test].date()} : {common_idx[end_test - 1].date()}"
 
-            # 1. In-sample optimisation on the training window only.
+            # 1. Ottimizzazione In-Sample esclusiva sul Train
             ga = GeneticMetaOptimizer(
                 n_agents=self.n_agents,
                 agent_names=agent_names,
@@ -767,7 +764,7 @@ class WalkForwardEngine:
             best_c, is_m, _ = ga.optimize(signals_mat[tr_idx], conf_mat[tr_idx], ret_np[tr_idx])
             dec = ga.decode_chromosome(best_c)
 
-            # 2. Frozen application to the out-of-sample window.
+            # 2. Applicazione congelata su finestra Out-of-Sample
             agg = WeeklySignalAggregator(dec["weights"], dec["alphas"], dec["theta_long"], dec["theta_short"])
             _, S_te, C_te, P_te = agg.aggregate_2d(signals_mat[te_idx], conf_mat[te_idx])
 
@@ -833,7 +830,7 @@ class WalkForwardEngine:
         df_oos = pd.DataFrame(oos_records).set_index("date")
         df_oos["equity_curve"] = np.cumprod(1.0 + df_oos["net_return"])
 
-        # Aggregate out-of-sample metrics.
+        # Metriche aggregate OOS
         net_ret = df_oos["net_return"].to_numpy()
         tot_weeks = len(df_oos)
         m_ret, s_ret = float(np.mean(net_ret)), float(np.std(net_ret, ddof=1)) if tot_weeks > 1 else 0.0
@@ -869,7 +866,7 @@ class WalkForwardEngine:
 
 
 def _validate_training_provenance(config_path: Path, root: Path) -> None:
-    """Check the temporal compatibility of a saved model."""
+    """Verifica la compatibilità temporale di un modello salvato."""
 
     with (root / "config.yaml").open("r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
@@ -923,10 +920,10 @@ def _validate_training_provenance(config_path: Path, root: Path) -> None:
 
 
 # =====================================================================
-# SECTION 6: ORCHESTRATOR AGENT (OPERATIONAL INFERENCE)
+# SEZIONE 6: AGENTE ORCHESTRATORE (INFERENZA OPERATIVA)
 # =====================================================================
 class OrchestratorAgent(BaseAgent):
-    """Orchestrator agent for inference and synthesis of multi-agent signals."""
+    """Agente Orchestratore per inferenza e sintesi di segnali multi-agente."""
 
     def __init__(
             self,
@@ -978,11 +975,11 @@ class OrchestratorAgent(BaseAgent):
         }
 
     def register_agent(self, name: str, agent: Any) -> None:
-        """Register a custom agent dynamically."""
+        """Registra dinamicamente un agente personalizzato."""
         self.registered_agents[name] = agent
 
     def _apply_params(self, params: Dict[str, Any]) -> None:
-        """Load parameters from a dictionary or JSON."""
+        """Carica parametri da dizionario/JSON."""
         super()._apply_params(params)
         self.target_asset = str(params.get("target_asset", self.target_asset or "SPY")).upper()
         if "weights" in params:
@@ -1000,8 +997,7 @@ class OrchestratorAgent(BaseAgent):
             self.include_svm = bool(params["include_svm"])
 
     def combine(self, signals_input: Union[Dict[str, pd.DataFrame], List[pd.DataFrame]]) -> pd.DataFrame:
-        """Combine multi-agent signals and return the 'signal' and 'confidence' columns.
-        """
+        """Combina segnali multi-agente restituendo colonne 'signal' e 'confidence'."""
         signals_dict = {f"agent_{i + 1}": df for i, df in enumerate(signals_input)} if isinstance(signals_input,
                                                                                                   list) else signals_input
         if not signals_dict:
@@ -1028,7 +1024,7 @@ class OrchestratorAgent(BaseAgent):
         return pd.DataFrame({"signal": final_sig, "confidence": np.clip(final_conf, 0.0, 1.0)}, index=common_idx)
 
     def _build_signals_pool_from_df(self, df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
-        """Automatically build the signal pool for the target asset."""
+        """Costruisce automaticamente il pool di segnali per il target_asset."""
         asset = (self.target_asset or "SPY").upper()
         root = get_project_root()
         cfg_dir = root / "src" / "agents" / "config"
@@ -1111,7 +1107,7 @@ class OrchestratorAgent(BaseAgent):
 
             pool["SVM_Agent"] = _get_signal(_make_svm)
 
-        # 6. FinBERT sentiment (if present in the saved files or registered).
+        # 6. FinBERT Sentiment (se presente nei file salvati o registrato)
         sent_csv = sig_dir / f"signals_sentiment_{asset.lower()}.csv"
         if sent_csv.exists():
             try:
@@ -1132,7 +1128,7 @@ class OrchestratorAgent(BaseAgent):
         return pool
 
     def predict(self, df_or_signals: Union[pd.DataFrame, Dict[str, pd.DataFrame]]) -> pd.Series:
-        """Return the series of discrete trading signals {-1, 0, 1}."""
+        """Restituisce la serie dei segnali operativi discreti {-1, 0, 1}."""
         df_c = self.combine(
             df_or_signals if isinstance(df_or_signals, dict) else self._build_signals_pool_from_df(df_or_signals))
         return self._format_signals(df_c["signal"])
@@ -1140,14 +1136,14 @@ class OrchestratorAgent(BaseAgent):
     def predict_with_confidence(self,
                                 df_or_signals: Union[pd.DataFrame, Dict[str, pd.DataFrame], List[pd.DataFrame]]) -> \
     Tuple[pd.Series, pd.Series]:
-        """Return the tuple (signal, confidence)."""
+        """Restituisce la tupla (signal, confidence)."""
         df_c = self.combine(self._build_signals_pool_from_df(df_or_signals)) if isinstance(df_or_signals,
                                                                                            pd.DataFrame) else self.combine(
             df_or_signals)
         return df_c["signal"], df_c["confidence"]
 
     def predict_multi_asset(self, df: pd.DataFrame, assets: Optional[Any] = None) -> pd.DataFrame:
-        """Generate signals and confidences for the requested assets."""
+        """Genera segnali e confidenze per gli asset specificati."""
         target_assets = [str(a).upper() for a in assets] if assets is not None else list(ASSETS)
         out_df = pd.DataFrame(index=df.index)
         cfg_dir = get_project_root() / "src" / "agents" / "config"
@@ -1168,11 +1164,10 @@ class OrchestratorAgent(BaseAgent):
 
 
 # =====================================================================
-# SECTION 7: QUANTITATIVE OPTIMISER OF THE ORCHESTRATOR
+# SEZIONE 7: OTTIMIZZATORE QUANTITATIVO DELL'ORCHESTRATORE
 # =====================================================================
 class OrchestratorOptimizer:
-    """Unified quantitative optimiser for the Orchestrator (supports method='ga' and 'grid').
-    """
+    """Ottimizzatore quantitativo unificato per l'Orchestratore (supporta method='ga' e 'grid')."""
 
     def __init__(
             self,
@@ -1216,8 +1211,7 @@ class OrchestratorOptimizer:
             asset_name: str = "ASSET",
             method: str = "ga",
     ) -> Tuple[OrchestratorAgent, pd.DataFrame]:
-        """In-sample optimisation (<= max_train_year) with the genetic algorithm or a grid search.
-        """
+        """Ottimizzazione In-Sample (<= max_train_year) con Algoritmo Genetico o Grid Search."""
         aligned, common_idx = align_signals(signals_dict, fill_method="inner")
         if common_idx.empty:
             raise ValueError(
@@ -1253,7 +1247,7 @@ class OrchestratorOptimizer:
         print(
             f"\n{'=' * 88}\n  OTTIMIZZAZIONE ORCHESTRATORE - ASSET: {asset_name.upper()} | METODO: {method.upper()} | OOS LOCK <= {self.max_train_year}\n  Agenti ({k}): {', '.join(names)} | Campione IS: {len(is_idx)} settimane\n{'=' * 88}")
 
-        # In-sample benchmark of the individual agents.
+        # Benchmark In-Sample dei singoli agenti
         for n in names:
             bm_strat = (aligned[n]["signal"].loc[is_idx].shift(1).fillna(0.0)) * ret_s.loc[is_idx]
             bm_m = calculate_performance_metrics(bm_strat, annualization_factor=self.annualization_factor)
@@ -1319,12 +1313,9 @@ class OrchestratorOptimizer:
                     prev = cut
                 parts.append((n_steps + k - 1 - prev) / n_steps)
 
-                # Cap the FinBERT weight at 1% in the grid search as well.
-                w_vec = np.array(parts, dtype=float)
-                for i, name in enumerate(names):
-                    if "finbert" in name.lower():
-                        w_vec[i] = min(w_vec[i], 0.01)
-                w_vec /= np.sum(w_vec)
+                w_vec = _bounded_agent_weights(
+                    np.array(parts, dtype=float), names
+                )
                 cuts_combos.append(w_vec.tolist())
 
             w_cands = np.array(cuts_combos, dtype=float)
@@ -1378,7 +1369,7 @@ class OrchestratorOptimizer:
         return best_agent, df_summary
 
     def save_final_config(self, filepath: Union[str, Path]) -> None:
-        """Save the optimal configuration in JSON format."""
+        """Salva la configurazione ottimale in formato JSON."""
         path = Path(filepath)
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
@@ -1394,10 +1385,10 @@ class OrchestratorOptimizer:
 
 
 # =====================================================================
-# SECTION 8: WALK-FORWARD COMPATIBILITY WRAPPER
+# SEZIONE 8: WRAPPER COMPATIBILITÀ WALK-FORWARD
 # =====================================================================
 class WalkForwardOrchestrator:
-    """Wrapper around WalkForwardEngine kept for backward compatibility."""
+    """Wrapper di WalkForwardEngine per compatibilità retroattiva."""
 
     def __init__(self, optimizer: OrchestratorOptimizer, train_window_years: int = 5, test_window_years: int = 1):
         self.optimizer = optimizer
@@ -1407,7 +1398,6 @@ class WalkForwardOrchestrator:
 
     def run(self, signals_dict: Dict[str, pd.DataFrame],
             returns_or_prices: Union[pd.Series, pd.DataFrame]) -> pd.DataFrame:
-        """Run the walk-forward validation and return the per-fold results."""
         engine = WalkForwardEngine(
             n_agents=len(signals_dict),
             train_window_weeks=self.train_window_years * 52,
@@ -1424,14 +1414,13 @@ class WalkForwardOrchestrator:
 
 
 # =====================================================================
-# SECTION 9: SYNTHETIC SIMULATION AND ENTRY POINT
+# SEZIONE 9: SIMULAZIONE SINTETICA ED ENTRY POINT
 # =====================================================================
 def generate_synthetic_market_data(
         T: int = 520,
         random_seed: int = 42,
 ) -> Tuple[pd.DataFrame, Dict[str, pd.DataFrame]]:
-    """Generate 520 weeks with multiple regimes (bull, bear, choppy) and 4 realistic agents.
-    """
+    """Genera 520 settimane con regimi multipli (Bull, Bear, Choppy) e 4 agenti realistici."""
     rng = np.random.default_rng(random_seed)
     returns = np.zeros(T, dtype=float)
     regimes = []
@@ -1490,14 +1479,13 @@ def generate_synthetic_market_data(
         "Trend_Follower": pd.DataFrame({"signal": s_trend, "confidence": c_trend}, index=dates),
         "Mean_Reverting": pd.DataFrame({"signal": s_mr, "confidence": c_mr}, index=dates),
         "Sentiment_Macro": pd.DataFrame({"signal": s_macro, "confidence": c_macro}, index=dates),
-        "FinBERT_Agent": pd.DataFrame({"signal": s_noise, "confidence": c_noise}, index=dates),  # Noise agent used to test the FinBERT weight cap.
+        "FinBERT_Agent": pd.DataFrame({"signal": s_noise, "confidence": c_noise}, index=dates),  # Test vincolo 5%
     }
     return df_market, signals_pool
 
 
 def run_end_to_end_simulation() -> None:
-    """Run the full walk-forward simulation on synthetic data and print the quantitative report.
-    """
+    """Esegue la simulazione Walk-Forward completa su dati sintetici e stampa il report quantitativo."""
     print("\n" + "#" * 94)
     print("### SIMULAZIONE END-TO-END META-DECISORE GENETICO (WEEKLY TIMEFRAME - 10 ANNI) ###")
     print("#" * 94)

@@ -11,8 +11,6 @@ Examples:
     python main.py --level C                      # historical C_v1/C_v2 development only
     python main.py --level B --b-version v2       # historical B development only
     python main.py --level ALL                    # A1/A2/B/C/CORE development, no OOS
-    python main.py --analysis temporal-robustness  # read-only 2023+ archived NAV slice
-    python main.py --analysis regime-adaptive      # retrospective B/C + SMA200 extension
 
 Historical config.yaml is frozen. release_config.yaml describes the immutable
 final candidate without rewriting pre-OOS model selection or parameters.
@@ -113,7 +111,7 @@ def _select_levels(config: dict, level: str | None) -> list[str]:
     elif requested in LIVELLI_IMPLEMENTATI:
         levels = [requested]
     elif requested == "C":
-        raise NotImplementedError("Level C is not yet implemented.")
+        raise NotImplementedError("The legacy A1/A2 pipeline excludes Level C; use main.py --level C for the isolated historical comparison.")
     else:
         raise ValueError(f"Unknown strategy level: {requested!r}")
 
@@ -257,16 +255,13 @@ def main(argv: list[str] | None = None) -> None:
                         help='Select historical B_v1 or B_v2 (default: v2).')
     parser.add_argument('--config', type=Path,
                         help='Alternative configuration for A1/A2/B ONLY (in isolated run).')
-    parser.add_argument('--analysis',
-                        choices=('temporal-robustness', 'regime-adaptive'),
-                        help='Read-only/retrospective research; never replaces frozen OOS.')
     parser.add_argument('--release-action',
                         choices=('audit', 'frozen-results', 'replay', 'charts', 'verify-models'),
                         help='Read-only archive functions, OOS reproducibility replay or plots.')
     parser.add_argument('--core-development', action='store_true',
                         help='Legacy alias for --level CORE; does not run final OOS.')
     parser.add_argument('--output-dir', type=Path,
-                        help='Destination for charts or optional research CSV outputs.')
+                        help='Where to write generated figures (charts only).')
     args = parser.parse_args(argv)
     if args.core_development and any([args.level, args.b_version, args.config,
                                        args.release_action, args.output_dir]):
@@ -274,11 +269,8 @@ def main(argv: list[str] | None = None) -> None:
     if args.release_action and any([args.level, args.b_version, args.config,
                                     args.core_development]):
         parser.error('Archive action cannot be combined with development flags')
-    if args.analysis and any([args.level, args.b_version, args.config,
-                              args.release_action, args.core_development]):
-        parser.error('--analysis is exclusive of release/development commands')
-    if args.output_dir is not None and args.release_action != 'charts' and not args.analysis:
-        parser.error('--output-dir requires --release-action charts or --analysis')
+    if args.output_dir is not None and args.release_action != 'charts':
+        parser.error('--output-dir requires --release-action charts')
     if args.b_version and args.level not in ('B', 'ALL'):
         parser.error('--b-version requires --level B or ALL')
     if args.config and args.level not in ('A1','A2','B'):
@@ -288,11 +280,6 @@ def main(argv: list[str] | None = None) -> None:
     from src.release_pipeline import audit_release, show_frozen_results
     verify_release_contract(ROOT_DIR)
 
-    if args.analysis:
-        from src.submission_runner import run_archived_research_analysis
-        audit_release(ROOT_DIR)
-        run_archived_research_analysis(args.analysis, output_dir=args.output_dir)
-        return
     if args.release_action == 'audit':
         audit_release(ROOT_DIR)
         return

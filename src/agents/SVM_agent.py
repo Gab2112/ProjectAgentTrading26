@@ -1,32 +1,36 @@
-"""Machine-learning agent based on a Support Vector Machine (SVM) for the
-multi-asset project (SPY, IEF, GLD, SHY).
+"""
+SVM_agent.py
 
-For each ETF and each weekly decision date, the agent predicts whether the
-price will be higher in ``horizon_weeks`` weeks (binary classification) and,
-like the other agents, produces a signal in {-1, 0, +1} and a confidence in
-[0, 1]. Settings are defined in ``config.yaml`` (``strategies.C.svm_agent``).
+Agente di Machine Learning basato su Support Vector Machine (SVM) per il
+progetto Multi-Asset (SPY, IEF, GLD, SHY).
 
-Methodological safeguards
--------------------------
-1. Backward-looking variables only (``src/features.build_asset_features``):
-   ETF returns and momentum, momentum of the other ETFs and, if requested,
-   Treasury rate changes from the regime module. No backward filling:
-   incomplete rows are neither used nor predicted.
-2. Annual walk-forward: predictions for year Y use a model trained only on
-   weeks whose label is known before the start of Y (purge equal to the
-   forecast horizon). These out-of-fold predictions feed the orchestrator.
-3. Hyperparameters are chosen for each year with an internal temporal
-   cross-validation (TimeSeriesSplit with gap = horizon), using balanced
-   accuracy. No "mode" is computed over the years being evaluated.
-4. The StandardScaler is fitted inside the pipeline, on training data only.
-5. The score is the ``decision_function`` divided by its standard deviation
-   on the training set (not centred), with a neutral band. This avoids Platt
-   probabilities, which calibrate on non-temporal folds, and reduces the
-   tendency to always predict an up move.
-6. The final model (for dates after the training period) is trained only up
-   to the cutoff passed to ``SVMWalkForwardTrainer.run``.
+Per ogni ETF e per ogni data di decisione settimanale prevede se il prezzo
+sarà più alto tra ``horizon_weeks`` settimane (classificazione binaria) e
+produce, come gli altri agenti, un segnale {-1, 0, +1} e una confidenza in
+[0, 1]. Le impostazioni stanno in ``config.yaml`` (``strategies.C.svm_agent``).
 
-Usage through the central training pipeline:
+Protezioni metodologiche
+------------------------
+1. Variabili solo retrospettive (``src/features.build_asset_features``):
+   rendimenti e momentum dell'ETF, momentum degli altri ETF e, se richiesto,
+   variazioni dei tassi Treasury dal modulo dei regimi. Nessun riempimento
+   all'indietro: le righe incomplete non vengono usate né previste.
+2. Walk-forward annuale: le previsioni dell'anno Y usano un modello allenato
+   solo con settimane la cui etichetta è nota prima dell'inizio di Y
+   (purge pari all'orizzonte della previsione). Sono previsioni
+   out-of-fold, usate dall'orchestratore.
+3. Iperparametri scelti per ogni anno con una validazione incrociata
+   temporale interna (TimeSeriesSplit con gap = orizzonte), metrica
+   balanced accuracy. Nessuna "moda" calcolata sugli anni da valutare.
+4. Lo StandardScaler è stimato dentro la pipeline, solo sul training.
+5. Il punteggio è la ``decision_function`` divisa per la sua deviazione
+   standard sul training (non centrata), con una banda neutra: evita la
+   probabilità di Platt, che stima una calibrazione con fold non temporali,
+   e riduce la tendenza a prevedere sempre "rialzo".
+6. Il modello finale (per le date successive al training) è allenato solo
+   fino al cutoff passato a ``SVMWalkForwardTrainer.run``.
+
+Uso tramite la pipeline centralizzata:
     python3 -m src.agents.train SPY
 """
 
@@ -60,11 +64,11 @@ MACRO_FEATURE_COLUMNS = (
 
 
 # =============================================================================
-# Settings and data
+# Impostazioni e dati
 # =============================================================================
 
 def get_svm_settings(config: dict) -> dict:
-    """Read ``strategies.C.svm_agent`` from config.yaml and check its keys."""
+    """Legge ``strategies.C.svm_agent`` da config.yaml e controlla le chiavi."""
     settings = config.get("strategies", {}).get("C", {}).get("svm_agent")
     if not isinstance(settings, dict):
         raise KeyError("Sezione 'strategies.C.svm_agent' mancante nel config.yaml.")
@@ -79,7 +83,7 @@ def get_svm_settings(config: dict) -> dict:
 
 
 def weekly_closes_from_panel(df: pd.DataFrame) -> pd.DataFrame:
-    """Extract the closing prices of the four ETFs (``<ETF>_close`` columns)."""
+    """Estrae i prezzi di chiusura dei quattro ETF (colonne ``<ETF>_close``)."""
     if (
         not isinstance(df.index, pd.DatetimeIndex)
         or df.index.hasnans
@@ -101,8 +105,8 @@ def load_macro_features(
     config: dict,
     root_dir: Path,
 ) -> pd.DataFrame:
-    """Rate changes from the regime module, aligned to the decision dates."""
-    # Local import: regime_clustering sets the matplotlib backend.
+    """Variazioni dei tassi del modulo dei regimi, allineate alle date di decisione."""
+    # Import locale: regime_clustering imposta il backend grafico di matplotlib.
     from src.regime_clustering import align_to_decision_dates, get_clustering_settings
 
     weekly = build_cluster_features(
@@ -115,15 +119,16 @@ def load_macro_features(
 
 
 # =============================================================================
-# Prediction target
+# Obiettivo da prevedere
 # =============================================================================
 
 
 def build_direction_target(weekly_close: pd.Series, horizon: int) -> pd.Series:
-    """Binary label: 1 if the price ``horizon`` decisions ahead is higher than the current price, else 0.
+    """
+    Etichetta binaria: 1 se il prezzo tra `horizon` decisioni è più alto
+    di quello attuale, 0 altrimenti. NaN dove il futuro non è disponibile.
 
-    NaN where the future is not available. The label uses FUTURE information
-    and is used only for training and evaluation.
+    L'etichetta usa informazioni FUTURE: serve solo per allenare/valutare.
     """
     future_return = weekly_close.shift(-horizon) / weekly_close - 1.0
     label = (future_return > 0).astype(float)
@@ -131,19 +136,17 @@ def build_direction_target(weekly_close: pd.Series, horizon: int) -> pd.Series:
 
 
 # =============================================================================
-# Model
+# Modello
 # =============================================================================
 
 @dataclass(frozen=True)
 class SVMCandidate:
-    """One SVM hyperparameter configuration from the search grid."""
     kernel: str
     C: float
     gamma: Any = "scale"
     class_weight: Optional[str] = None
 
     def build(self) -> Pipeline:
-        """Build the scikit-learn pipeline (StandardScaler followed by SVC)."""
         return Pipeline(
             [
                 ("scaler", StandardScaler()),
@@ -160,12 +163,11 @@ class SVMCandidate:
         )
 
     def as_dict(self) -> Dict[str, Any]:
-        """Return the configuration as a dictionary for logging and serialisation."""
         return {"kernel": self.kernel, "C": self.C, "gamma": self.gamma}
 
 
 def build_candidates(settings: dict) -> List[SVMCandidate]:
-    """Small hyperparameter grid fixed in the configuration (simpler models first)."""
+    """Griglia piccola e fissata nel config (prima i modelli più semplici)."""
     weight = settings.get("class_weight")
     weight = None if weight in (None, "none") else str(weight)
     candidates = [SVMCandidate("linear", float(c), "scale", weight) for c in settings["C_values"]]
@@ -182,12 +184,11 @@ def select_candidate(
     n_splits: int,
     gap: int,
 ) -> Tuple[SVMCandidate, float]:
-    """Select the hyperparameters with the highest mean balanced accuracy.
-
-    The score comes from a TEMPORAL cross-validation in which each fold
-    validates only on dates after its training dates, with a gap equal to the
-    horizon. Ties are broken in favour of the candidate listed first (the
-    simpler one).
+    """
+    Sceglie l'iperparametro con la balanced accuracy media più alta in una
+    validazione incrociata TEMPORALE (ogni fold valida solo su date successive
+    a quelle di allenamento, con un gap pari all'orizzonte).
+    A parità vince il candidato elencato prima (più semplice).
     """
     splitter = TimeSeriesSplit(n_splits=n_splits, gap=gap)
     best, best_score = candidates[0], -np.inf
@@ -211,12 +212,13 @@ def scores_to_signals(
     neutral_band: float,
     long_only: bool,
 ) -> Tuple[pd.Series, pd.Series]:
-    """Convert the standardised score into a signal and a confidence.
+    """
+    Converte il punteggio standardizzato in segnale e confidenza.
 
-    |z| <= neutral_band -> 0 (uncertain)
-    z >  neutral_band   -> +1
-    z < -neutral_band   -> -1 (or 0 if long_only)
-    confidence = tanh(|z|) for active signals, 0 for null signals.
+    |z| <= neutral_band          -> 0 (incertezza)
+    z >  neutral_band            -> +1
+    z < -neutral_band            -> -1 (oppure 0 se long_only)
+    confidenza = tanh(|z|) per i segnali attivi, 0 per i segnali nulli.
     """
     signals = pd.Series(0, index=z_scores.index, dtype=int)
     signals[z_scores > neutral_band] = 1
@@ -234,18 +236,19 @@ def walk_forward_svm(
     first_year: int,
     last_year: int,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Walk-forward predictions, year by year.
+    """
+    Previsioni walk-forward anno per anno.
 
-    For year Y:
-      - usable samples: rows with complete variables and a label known at the
-        start of Y (position + horizon <= first decision of Y);
-      - hyperparameters are chosen with TimeSeriesSplit on past samples only;
-      - the model is retrained on the past and predicts every week of Y;
-      - the score is divided by the standard deviation of the training scores
-        (no information from year Y). The mean is not subtracted, so the sign
-        of the score remains that of the class predicted by the SVM.
+    Per l'anno Y:
+      - campioni utilizzabili: righe con variabili complete e etichetta
+        conosciuta all'inizio di Y (posizione + orizzonte <= prima decisione di Y);
+      - scelta dell'iperparametro con TimeSeriesSplit sui soli campioni passati;
+      - riallenamento sul passato e previsione di tutte le settimane di Y;
+      - il punteggio è diviso per la deviazione standard dei punteggi del
+        training (nessuna informazione dell'anno Y). Non si sottrae la media:
+        il segno del punteggio resta quello della classe prevista dalla SVM.
 
-    Returns (weekly predictions, annual history of the selections).
+    Restituisce (previsioni settimanali, storico annuale delle scelte).
     """
     horizon = int(settings["horizon_weeks"])
     candidates = build_candidates(settings)
@@ -304,18 +307,19 @@ def walk_forward_svm(
 
 
 # =============================================================================
-# Agent (common BaseAgent interface)
+# Agente (interfaccia comune BaseAgent)
 # =============================================================================
 
 class SVMAgent(BaseAgent):
-    """SVM agent for a single ETF.
+    """
+    Agente SVM per un singolo ETF.
 
-    - ``fit_walk_forward``: out-of-fold predictions, year by year (training);
-    - ``fit_final``: a single model trained on the full training period, saved
-      with ``save_params`` and used by ``predict`` for later dates.
+    - ``fit_walk_forward``: previsioni out-of-fold anno per anno (training);
+    - ``fit_final``: modello unico allenato su tutto il training, salvato con
+      ``save_params`` e usato da ``predict`` sulle date successive.
 
-    ``predict`` uses the final model if available; otherwise it uses the
-    walk-forward predictions already computed for the requested dates.
+    ``predict`` usa il modello finale se presente, altrimenti le previsioni
+    walk-forward già calcolate per le date richieste.
     """
 
     def __init__(
@@ -344,7 +348,7 @@ class SVMAgent(BaseAgent):
         self.params = {"target_asset": self.target_asset, **self.settings}
 
     # ------------------------------------------------------------------
-    # Features
+    # Variabili
     # ------------------------------------------------------------------
     def _macro_for(self, dates: pd.DatetimeIndex) -> Optional[pd.DataFrame]:
         if not self.settings["use_macro_features"]:
@@ -357,11 +361,10 @@ class SVMAgent(BaseAgent):
         weekly_close: pd.DataFrame,
         macro_features: Optional[pd.DataFrame] = None,
     ) -> pd.DataFrame:
-        """Build the backward-looking features of the target ETF."""
         return build_asset_features(weekly_close, self.target_asset, macro_features)
 
     # ------------------------------------------------------------------
-    # Training
+    # Allenamento
     # ------------------------------------------------------------------
     def fit_walk_forward(
         self,
@@ -370,8 +373,6 @@ class SVMAgent(BaseAgent):
         first_year: int,
         last_year: int,
     ) -> "SVMAgent":
-        """Compute the out-of-fold walk-forward predictions between ``first_year`` and ``last_year``.
-        """
         features = self.build_features(weekly_close, macro_features)
         label = build_direction_target(
             weekly_close[self.target_asset], int(self.settings["horizon_weeks"])
@@ -386,7 +387,7 @@ class SVMAgent(BaseAgent):
         weekly_close: pd.DataFrame,
         macro_features: Optional[pd.DataFrame],
     ) -> "SVMAgent":
-        """Train the final model on every week with a known label."""
+        """Allena il modello finale su tutte le settimane con etichetta nota."""
         features = self.build_features(weekly_close, macro_features)
         label = build_direction_target(
             weekly_close[self.target_asset], int(self.settings["horizon_weeks"])
@@ -418,11 +419,10 @@ class SVMAgent(BaseAgent):
         return self
 
     # ------------------------------------------------------------------
-    # Prediction
+    # Previsione
     # ------------------------------------------------------------------
     def predict_score(self, df: pd.DataFrame) -> pd.Series:
-        """Scaled score: decision_function divided by its standard deviation on the training set.
-        """
+        """Punteggio scalato: decision_function / deviazione standard sul training."""
         if self.model is not None:
             closes = weekly_closes_from_panel(df)
             features = self.build_features(closes, self._macro_for(closes.index))
@@ -437,12 +437,10 @@ class SVMAgent(BaseAgent):
         raise ValueError(f"[{self.name}] Modello non allenato: eseguire fit_final() o fit_walk_forward().")
 
     def predict(self, df: pd.DataFrame) -> pd.Series:
-        """Return the discrete trading signals {-1, 0, +1}."""
         signals, _ = self.predict_with_confidence(df)
         return signals
 
     def predict_with_confidence(self, df: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
-        """Return the trading signals and their confidence."""
         signals, confidence = scores_to_signals(
             self.predict_score(df),
             float(self.settings["neutral_band"]),
@@ -451,11 +449,10 @@ class SVMAgent(BaseAgent):
         return self._format_signals(signals), confidence
 
     # ------------------------------------------------------------------
-    # Persistence
+    # Salvataggio
     # ------------------------------------------------------------------
     def save_params(self, filepath: Union[str, Path]) -> None:
-        """Save the parameters to JSON and the final model to a .joblib file alongside it.
-        """
+        """Parametri in JSON e modello finale in un file .joblib accanto."""
         if self.model is None:
             raise ValueError("Nessun modello finale da salvare: eseguire fit_final().")
         path = Path(filepath)
@@ -467,8 +464,6 @@ class SVMAgent(BaseAgent):
             json.dump(self.params, handle, indent=4, default=str)
 
     def load_params(self, filepath: Union[str, Path]) -> "SVMAgent":
-        """Load the parameters from JSON and the final model from the matching .joblib file.
-        """
         path = Path(filepath)
         if not path.exists():
             raise FileNotFoundError(f"File parametri non trovato: {path}")
@@ -484,18 +479,17 @@ class SVMAgent(BaseAgent):
 
 
 # =============================================================================
-# Hyperparameter selection and walk-forward (interface used by train.py)
+# Scelta degli iperparametri e walk-forward (interfaccia usata da train.py)
 # =============================================================================
 
 class SVMOptimizer:
-    """Hyperparameter grid with selection by temporal cross-validation."""
+    """Griglia di iperparametri e scelta con validazione incrociata temporale."""
 
     def __init__(self, settings: dict):
         self.settings = dict(settings)
         self.candidates = build_candidates(self.settings)
 
     def select(self, X: pd.DataFrame, y: pd.Series) -> Tuple[SVMCandidate, float]:
-        """Select the best candidate and return it with its cross-validation score."""
         return select_candidate(
             X, y, self.candidates, int(self.settings["cv_splits"]),
             gap=int(self.settings["horizon_weeks"]),
@@ -503,10 +497,11 @@ class SVMOptimizer:
 
 
 class SVMWalkForwardTrainer:
-    """Produce the out-of-fold signals (``oof_signals``) and the final model.
+    """
+    Produce i segnali out-of-fold (``oof_signals``) e il modello finale.
 
-    ``run(df, max_year)``: ``df`` is the weekly training panel with the
-    ``<ETF>_close`` columns; no row after ``max_year`` is used.
+    ``run(df, max_year)``: ``df`` è il pannello settimanale di training con le
+    colonne ``<ETF>_close``; nessuna riga successiva a ``max_year`` viene usata.
     """
 
     def __init__(
@@ -527,8 +522,6 @@ class SVMWalkForwardTrainer:
         self.final_agent: Optional[SVMAgent] = None
 
     def run(self, df: pd.DataFrame, max_year: int) -> Dict[str, Any]:
-        """Run the annual walk-forward, build the out-of-fold signals and train the final model.
-        """
         closes = weekly_closes_from_panel(df)
         closes = closes.loc[closes.index.year <= int(max_year)]
         first_year = int(self.settings["first_test_year"])
@@ -572,7 +565,6 @@ class SVMWalkForwardTrainer:
         return self.selected_params
 
     def save_final_agent_config(self, filepath: Union[str, Path]) -> None:
-        """Save the parameters and the model of the final agent."""
         if self.final_agent is None:
             raise ValueError("Nessun agente addestrato. Esegui prima .run().")
         self.final_agent.save_params(filepath)

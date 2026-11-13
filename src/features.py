@@ -1,14 +1,14 @@
-"""Feature construction for the multi-asset project (single source of truth).
+"""Costruzione delle feature del progetto Multi-Asset (unica fonte).
 
-Every variable used by strategies, clustering and agents is computed here,
-so that all models share the same definitions:
-- market features on the actual decision dates (``build_decision_feature_panel``);
-- macro levels for Level B (``build_macro_feature_levels``);
-- clustering variables (``build_cluster_features``);
-- per-asset features for the ML agents (``build_asset_features``);
-- derived macro features for the agents (``build_agent_macro_features``).
+Tutte le variabili usate da strategie, clustering e agenti si calcolano qui,
+così ogni modello vede le stesse definizioni:
+- feature di mercato sulle vere date di decisione (``build_decision_feature_panel``);
+- livelli macro per il livello B (``build_macro_feature_levels``);
+- variabili del clustering (``build_cluster_features``);
+- feature per asset degli agenti ML (``build_asset_features``);
+- feature macro derivate degli agenti (``build_agent_macro_features``).
 
-No function in this module reads files: data is supplied by ``src/data_loader.py``.
+Nessuna funzione legge file: i dati arrivano da ``src/data_loader.py``.
 """
 
 from collections.abc import Mapping
@@ -57,9 +57,9 @@ def build_decision_feature_panel(
         raise ValueError("Decision dates must correspond to trading sessions")
 
     # A missing decision week would turn 'return_1w' into a multi-week return.
-    # Using a Thursday signal when Friday also traded would likewise mislabel
+    # Using a Thu signal when Friday also traded would similarly mislabel
     # the week's close. Both situations are rejected instead of silently
-    # producing plausible but misdated ML features.
+    # manufacturing plausible but misdated ML features.
     weekly_dates = build_weekly_decision_dates(
         market_daily.loc[:decision_dates.max()]
     ).index
@@ -73,8 +73,8 @@ def build_decision_feature_panel(
     if not close_cols:
         raise ValueError("Missing adjusted ETF Close columns")
 
-    # The explicit cutoff guarantees that changes to later rows cannot affect
-    # the feature values available at earlier decisions.
+    # The explicit cutoff makes future-row changes incapable of affecting
+    # feature values available at earlier decisions.
     closes = market_daily.loc[:decision_dates.max(), close_cols].astype(float)
     if not np.isfinite(closes.to_numpy()).all() or (closes <= 0).any().any():
         raise ValueError("Invalid adjusted Close prices")
@@ -106,12 +106,11 @@ def build_training_decision_features(
     decision_dates: pd.DatetimeIndex,
     macro_daily: Mapping[str, pd.Series] | None = None,
 ) -> pd.DataFrame:
-    """Build a training-only research panel with historical indicator warm-up.
+    """Construct one train-only research panel with historical indicator warm-up.
 
-    The returned rows explicitly exclude the 2017+ validation period and the
-    2022+ final holdout. The input history may contain an earlier warm-up
-    period. Macro inputs must be requested explicitly and are NOT
-    point-in-time certified.
+    Explicitly excludes 2017+ validation and 2022+ final holdout from the
+    returned rows. The input history can contain an earlier warm-up period.
+    Macro inputs must be explicitly requested and are NOT PIT-certified.
     """
     if (config.get("evaluation", {}).get("evaluate_oos") is not False
             or config.get("validation", {}).get("development_only") is not True):
@@ -137,7 +136,7 @@ def build_macro_feature_levels(
     vix: pd.Series,
     breakeven_10y: pd.Series,
 ) -> pd.DataFrame:
-    """Build candidate macro features. These are not point-in-time verified."""
+    """Build candidate features. Not point-in-time verified."""
 
     vix_data = align_daily_observation_proxy(decision_dates, vix)
 
@@ -156,7 +155,7 @@ def build_macro_feature_levels(
         breakeven_data["observation_date"]
     )
     # Four-week changes, measured in index points
-    # and percentage points respectively.
+    # and percentage points, respectively.
     features["vix_change_4w"] = (
         features["vix_level"].diff(4)
     )
@@ -168,17 +167,17 @@ def build_macro_feature_levels(
 
 
 def rolling_zscore(series: pd.Series, window: int, min_periods: int) -> pd.Series:
-    """Measure how high or low the current value is relative to the last ``window`` weeks.
-    """
+    """Quanto il valore attuale è alto o basso rispetto alle ultime `window` settimane."""
     mean = series.rolling(window, min_periods=min_periods).mean()
     std = series.rolling(window, min_periods=min_periods).std()
     return (series - mean) / std
 
 
 def build_cluster_features(weekly_yields: pd.DataFrame, settings: dict) -> pd.DataFrame:
-    """Build the clustering variables on the weekly W-FRI calendar.
+    """
+    Costruisce le variabili del clustering sul calendario settimanale W-FRI.
 
-    All transformations are backward-looking only (diff, rolling).
+    Tutte le trasformazioni guardano solo indietro (diff, rolling).
     """
     change = int(settings["change_weeks"])
     vol_window = int(settings["volatility_weeks"])
@@ -204,18 +203,19 @@ def build_asset_features(
     target: str,
     macro_features: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
-    """Build the agent features for one ETF on the decision dates.
+    """
+    Costruisce le variabili dell'agente per un ETF, alle date di decisione.
 
-    All transformations are backward-looking only (pct_change, rolling).
+    Tutte le trasformazioni guardano solo indietro (pct_change, rolling).
 
-    ETF variables:
+    Variabili dell'ETF:
         ret_1w, mom_4w, mom_13w, mom_26w, mom_52w,
-        vol_13w (standard deviation of weekly returns),
-        dist_52w_high (distance from the 52-week high).
-    Cross-asset variables:
-        <OTHER>_mom_13w.
-    Macro variables (optional, from the regime module):
-        13-week changes of the 2Y yield and of the curve, rate volatility.
+        vol_13w (deviazione standard dei rendimenti settimanali),
+        dist_52w_high (distanza dal massimo delle ultime 52 settimane).
+    Variabili degli altri ETF:
+        <ALTRO>_mom_13w.
+    Variabili macro (opzionali, dal modulo dei regimi):
+        variazioni a 13 settimane di 2Y e curva, volatilità dei tassi.
     """
     if target not in weekly_close.columns:
         raise KeyError(f"ETF '{target}' non presente nei prezzi settimanali.")
@@ -245,16 +245,16 @@ def build_agent_macro_features(
     raw_series: Mapping[str, pd.Series],
     config: dict,
 ) -> pd.DataFrame:
-    """Derived macro features used by the agents (curves, changes, CPI, VIX, breakeven).
+    """Feature macro derivate usate dagli agenti (curve, variazioni, CPI, VIX, breakeven).
 
-    ``daily_macro``: aligned daily FRED series (FEDFUNDS already lagged);
-    ``raw_series``: raw FRED series by ID (monthly CPI is read from here);
-    publication lags come from ``config`` (``get_release_lag_days``).
+    ``daily_macro``: serie FRED giornaliere allineate (FEDFUNDS gia' ritardata);
+    ``raw_series``: serie FRED grezze per ID (il CPI mensile si legge da qui);
+    i ritardi di pubblicazione vengono da ``config`` (``get_release_lag_days``).
     """
-    # Compute derived indicators (curve spreads, changes, inflation).
+    # Calcolo indicatori derivati (curve spread, variazioni, inflazione)
     calc_df = pd.DataFrame(index=daily_macro.index)
 
-    # 1. Curve slopes
+    # 1. Pendenze di curva
     if "DGS10" in daily_macro and "DGS2" in daily_macro:
         calc_df["curve_10y_2y"] = daily_macro["DGS10"] - daily_macro["DGS2"]
         calc_df["curve_10y_2y_change_1w"] = calc_df["curve_10y_2y"].diff(5)
@@ -267,7 +267,7 @@ def build_agent_macro_features(
         calc_df["curve_30y_10y"] = daily_macro["DGS30"] - daily_macro["DGS10"]
         calc_df["curve_30y_10y_change_1w"] = calc_df["curve_30y_10y"].diff(5)
 
-    # 2. One-week rate changes (about 5 trading sessions)
+    # 2. Variazioni tassi 1w (~5 sedute lavorative)
     if "DGS10" in daily_macro:
         calc_df["treasury_10y_change_1w"] = daily_macro["DGS10"].diff(5)
         calc_df["treasury_10y"] = daily_macro["DGS10"]
@@ -277,11 +277,11 @@ def build_agent_macro_features(
     if "DGS3MO" in daily_macro:
         calc_df["treasury_3m_change_1w"] = daily_macro["DGS3MO"].diff(5)
 
-    # 3. Fed policy rate
+    # 3. Policy rate Fed
     if "FEDFUNDS" in daily_macro:
         calc_df["rates__policy_rate"] = daily_macro["FEDFUNDS"].ffill()
 
-    # 4. YoY inflation (CPIAUCSL shifted by a prudential 45-day lag to avoid look-ahead)
+    # 4. Inflazione YoY (CPIAUCSL shifted con ritardo prudenziale di 45 giorni per evitare lookahead)
     if "CPIAUCSL" in raw_series:
         cpi_monthly = raw_series["CPIAUCSL"].dropna().sort_index()
         cpi_yoy = cpi_monthly.pct_change(12, fill_method=None)
@@ -289,7 +289,7 @@ def build_agent_macro_features(
         cpi_yoy.index = cpi_yoy.index + pd.Timedelta(days=lag)
         calc_df["cpi_yoy"] = cpi_yoy.reindex(calc_df.index, method="ffill")
 
-    # 5. VIX volatility
+    # 5. Volatilità VIX
     if "VIXCLS" in daily_macro:
         calc_df["vix_level"] = daily_macro["VIXCLS"]
         calc_df["vix_change_4w"] = daily_macro["VIXCLS"].diff(20)

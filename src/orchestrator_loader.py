@@ -16,11 +16,6 @@ AGENTS = ('SMA_EMA_Agent', 'ZScore_Agent', 'Macro_YieldCurve_Agent',
 
 
 def load_frozen_orchestrator(asset: str, root: Path = ROOT_DIR) -> OrchestratorAgent:
-    """Load and validate the frozen GA Orchestrator of one ETF.
-
-    The snapshot must have been optimised with data up to 2021, contain exactly
-    the expected agents and have valid long/short thresholds.
-    """
     asset = str(asset).upper()
     if asset not in ASSETS:
         raise ValueError('Invalid frozen ETF asset')
@@ -46,7 +41,6 @@ def load_frozen_orchestrator(asset: str, root: Path = ROOT_DIR) -> OrchestratorA
 
 
 def verify_all_orchestrators(root: Path = ROOT_DIR) -> int:
-    """Load every frozen Orchestrator and return the number of verified assets."""
     for asset in ASSETS:
         load_frozen_orchestrator(asset, root)
     return len(ASSETS)

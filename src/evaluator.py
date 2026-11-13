@@ -1,27 +1,28 @@
-"""Evaluation of the multi-asset strategies A1 and A2.
+"""Valutazione delle strategie Multi-Asset A1 e A2.
 
-The module reads the daily backtests produced by ``backtester.py``.
-It does not generate signals, rebuild benchmarks or simulate trades.
+Il modulo legge i backtest giornalieri prodotti da ``backtester.py``.
+Non genera segnali, non ricostruisce i benchmark e non simula operazioni.
 
-Conventions:
-- evaluation on the training period only, without validation or OOS data;
-- daily returns net of transaction costs;
-- annualisation over 252 sessions (configurable);
-- constant annual risk-free rate, zero by default;
-- CAGR, Sharpe, Sortino, drawdown, turnover and costs for each strategy.
+Convenzioni adottate in questa fase:
+- valutazione esclusivamente sul training, senza usare validation o OOS;
+- rendimenti giornalieri netti dei costi di transazione;
+- annualizzazione su 252 sedute (configurabile);
+- tasso risk-free annuo costante, inizialmente pari a zero;
+- CAGR, Sharpe, Sortino, drawdown, turnover e costi per strategia.
 
-The OOS test is never opened in this module.
+La validation dovra' essere implementata in una fase distinta, dopo aver
+congelato le regole di A1/A2. Il test OOS non viene mai aperto qui.
 
-Public interface:
+Interfaccia pubblica:
     run_evaluation(config, root_dir, level=None, backtests=None)
 
-Output per level:
+Output per livello:
     data/results/A1/evaluation_metrics.csv
     data/results/A1/evaluation_curves.csv
     data/results/A2/evaluation_metrics.csv
     data/results/A2/evaluation_curves.csv
 
-Each strategy also receives its own summary and equity curve.
+Ogni strategia riceve anche il proprio riepilogo e la propria equity curve.
 """
 
 from __future__ import annotations
@@ -49,12 +50,12 @@ COLONNE_OBBLIGATORIE = (
 
 
 # =============================================================================
-# Configuration and level selection
+# Configurazione e selezione del livello
 # =============================================================================
 
 
 def _seleziona_livello(config: dict, level: str | None) -> tuple[str, list[str]]:
-    """Select only the strategies that are implemented and enabled in the YAML file."""
+    """Seleziona soltanto strategie implementate e abilitate nel YAML."""
     selezionato = str(
         level if level is not None
         else config.get("pipeline", {}).get("active_level", "A1")
@@ -95,7 +96,7 @@ def _seleziona_livello(config: dict, level: str | None) -> tuple[str, list[str]]
 
 
 def _parametri_valutazione(config: dict) -> tuple[int, float, pd.Timestamp, pd.Timestamp, float]:
-    """Read the evaluation parameters and enforce the use of training data only."""
+    """Legge i parametri e impone esplicitamente l'uso del solo training."""
     impostazioni = config.get("evaluation", {})
     if not isinstance(impostazioni, dict):
         raise TypeError("La sezione 'evaluation' deve essere un dizionario.")
@@ -114,7 +115,7 @@ def _parametri_valutazione(config: dict) -> tuple[int, float, pd.Timestamp, pd.T
     if fattore <= 1:
         raise ValueError("annualization_factor deve essere maggiore di uno.")
 
-    # Backtester returns are daily in this version.
+    # In questa versione i rendimenti del backtester sono giornalieri.
     if impostazioni.get("returns_frequency", "daily") != "daily":
         raise ValueError("Il backtester Multi-Asset produce rendimenti giornalieri.")
 
@@ -140,7 +141,7 @@ def _parametri_valutazione(config: dict) -> tuple[int, float, pd.Timestamp, pd.T
 
 
 # =============================================================================
-# Loading and validation of backtest results
+# Lettura e validazione dei risultati di backtest
 # =============================================================================
 
 
@@ -150,7 +151,7 @@ def load_backtest_dataset(
     level: str,
     portfolio: str,
 ) -> pd.DataFrame:
-    """Load the backtest of a single strategy."""
+    """Legge il backtest di una singola strategia, senza usare file Treasury."""
     path = (
         Path(root_dir)
         / config["paths"]["results"]
@@ -173,10 +174,10 @@ def _convalida_backtest(
     capitale_iniziale: float,
     nome: str,
 ) -> pd.DataFrame:
-    """Validate inputs, calendar, returns and NAV consistency.
+    """Controlla input, calendario, rendimenti e coerenza del NAV.
 
-    The date check precedes any computation: no observation after the
-    training period may enter the evaluation.
+    Il controllo sulle date precede qualsiasi calcolo: nessuna osservazione
+    successiva al training deve entrare nella valutazione.
     """
     if not isinstance(backtest, pd.DataFrame) or backtest.empty:
         raise ValueError(f"{nome}: backtest assente o vuoto.")
@@ -220,8 +221,8 @@ def _convalida_backtest(
     if not risultato["operazione_eseguita"].any():
         raise ValueError(f"{nome}: nessuna operazione eseguita.")
 
-    # The first row compares the NAV with the initial capital;
-    # subsequent rows use the NAV of the previous session.
+    # La prima riga confronta il NAV con il capitale investito inizialmente;
+    # le righe successive utilizzano il NAV della seduta precedente.
     nav_precedente = risultato["nav"].shift(1)
     nav_precedente.iloc[0] = capitale_iniziale
     rendimenti_attesi = risultato["nav"] / nav_precedente - 1.0
@@ -237,12 +238,12 @@ def _convalida_backtest(
 
 
 # =============================================================================
-# Financial performance metrics
+# Metriche economico-finanziarie
 # =============================================================================
 
 
 def calculate_max_drawdown(returns: pd.Series) -> float:
-    """Compute the maximum drawdown, including the initial wealth."""
+    """Calcola il massimo drawdown includendo la ricchezza iniziale."""
     r = pd.to_numeric(returns, errors="raise").dropna().to_numpy(dtype=float)
     if not len(r) or not np.isfinite(r).all() or np.any(r <= -1):
         raise ValueError("Serie dei rendimenti non valida per il maximum drawdown.")
@@ -253,10 +254,10 @@ def calculate_max_drawdown(returns: pd.Series) -> float:
 
 
 def calculate_profit_factor(returns: pd.Series) -> float:
-    """Ratio between positive and absolute negative daily returns.
+    """Rapporto fra rendimenti giornalieri positivi e negativi in valore assoluto.
 
-    This measure is based on PERIODIC returns, not on the profit factor of
-    individual trades, and must not be read as a count of profitable trades.
+    E' una misura basata sui rendimenti PERIODICI, non il profit factor dei
+    singoli trade. Non va interpretata come numero di operazioni profittevoli.
     """
     r = pd.to_numeric(returns, errors="raise").dropna().to_numpy(dtype=float)
     if not len(r) or not np.isfinite(r).all():
@@ -271,12 +272,12 @@ def calculate_metrics(
     risk_free: pd.Series | float,
     annualization_factor: int,
 ) -> dict:
-    """Compute metrics on daily returns net of transaction costs.
+    """Calcola le metriche sui rendimenti giornalieri netti di transazione.
 
-    CAGR: (final wealth / initial wealth) ** (252 / n) - 1.
-    Sharpe: mean excess return / standard deviation (ddof=1).
-    Sortino: mean excess return / downside deviation relative to the risk-free rate.
-    Volatility is the annualised sample standard deviation.
+    CAGR: (ricchezza finale / iniziale) ** (252 / n) - 1.
+    Sharpe: media dei rendimenti in eccesso / deviazione standard (ddof=1).
+    Sortino: media degli eccessi / semideviazione negativa rispetto al risk-free.
+    La volatilita' e' la deviazione standard campionaria annualizzata.
     """
     r = pd.to_numeric(returns, errors="raise").astype(float)
     if isinstance(risk_free, pd.Series):
@@ -308,8 +309,8 @@ def calculate_metrics(
         if std_excess > 0 else float("nan")
     )
 
-    # Positive observations also enter the Sortino denominator with a zero
-    # contribution: this is the downside deviation relative to the risk-free target.
+    # Nel denominatore del Sortino entrano anche le osservazioni positive,
+    # con contributo zero: e' la semideviazione rispetto al target risk-free.
     downside = float(np.sqrt(np.mean(np.minimum(excess, 0.0) ** 2)))
     sortino = (
         float(np.mean(excess) / downside * np.sqrt(annualization_factor))
@@ -335,11 +336,11 @@ def evaluate_period(
     risk_free_annual: float = 0.0,
     initial_capital: float = 100000.0,
 ) -> tuple[dict, pd.DataFrame]:
-    """Evaluate a daily backtest and build its equity curve.
+    """Valuta un backtest giornaliero e costruisce la sua equity curve.
 
-    The period is always the training period in the current implementation.
-    Each strategy is evaluated on its actual trades, without building
-    alternative theoretical prices.
+    Il periodo e' sempre training nell'implementazione attuale. Ogni
+    strategia viene valutata usando le sue operazioni effettive, senza
+    costruire prezzi teorici alternativi.
     """
     if period_name != "train":
         raise NotImplementedError("La valutazione e' attualmente limitata al training.")
@@ -348,7 +349,7 @@ def evaluate_period(
     rf = pd.Series(tasso_giornaliero, index=period.index)
     metriche = calculate_metrics(period["rendimento_netto"], rf, annualization_factor)
 
-    # The NAV includes costs and the weights actually held at each close.
+    # Il NAV include i costi e i pesi realmente detenuti alle chiusure.
     nav = period["nav"].to_numpy(dtype=float)
     massimo = np.maximum.accumulate(np.concatenate(([initial_capital], nav)))[1:]
     drawdown = nav / massimo - 1.0
@@ -373,7 +374,7 @@ def evaluate_period(
         "last_execution_date": period.index[operazioni][-1].date().isoformat(),
     })
 
-    # Consistency check between cumulative return and final capital.
+    # Verifica di coerenza fra rendimento cumulato e capitale finale.
     rapporto_nav = nav[-1] / initial_capital - 1.0
     if not np.isclose(metriche["cumulative_return"], rapporto_nav, rtol=1e-7, atol=1e-8):
         raise RuntimeError("Il rendimento cumulato non coincide con il NAV finale.")
@@ -384,7 +385,7 @@ def evaluate_period(
 
 
 # =============================================================================
-# Evaluation pipeline and output files
+# Pipeline di valutazione e file di output
 # =============================================================================
 
 
@@ -394,13 +395,13 @@ def run_evaluation(
     level: str | None = None,
     backtests: dict[str, pd.DataFrame] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Evaluate every strategy of the requested level, on the training period only.
+    """Valuta tutte le strategie del livello richiesto, solo sul training.
 
-    If ``backtests`` is provided, the DataFrames returned by ``run_backtest``
-    are evaluated directly; otherwise the ``backtest_daily.csv`` files are read.
+    Se ``backtests`` e' fornito, valuta direttamente i DataFrame restituiti
+    da ``run_backtest``. Altrimenti legge i rispettivi ``backtest_daily.csv``.
 
-    A1 and A2 output files are kept separate and do not overwrite the
-    historical results of the earlier Treasury project.
+    I file di output di A1 e A2 sono separati e non sovrascrivono i risultati
+    storici del vecchio progetto Treasury.
     """
     livello, nomi = _seleziona_livello(config, level)
     fattore, rf_annuo, inizio, fine, capitale = _parametri_valutazione(config)
@@ -414,8 +415,8 @@ def run_evaluation(
     curve_per_strategia = []
     risultati_pronti = []
 
-    # ALL backtests are validated and evaluated first; files are written only
-    # afterwards, avoiding partial output if one strategy is invalid.
+    # Prima si convalidano e si valutano TUTTI i backtest; solo dopo si
+    # scrivono i file, evitando output parziali se una strategia e' errata.
     for nome in nomi:
         originale = (
             backtests[nome] if backtests is not None
@@ -476,23 +477,24 @@ def run_evaluation(
 
 
 # =====================================================================
-# PERFORMANCE AND STABILITY METRIC UTILITIES
+# FUNZIONI DI UTILITÀ PER METRICHE DI PERFORMANCE E STABILITÀ
 # =====================================================================
 def calculate_performance_metrics(
     returns: pd.Series,
     annualization_factor: int = 52,
     risk_free_rate: float = 0.0,
 ) -> Dict[str, float]:
-    """Compute performance and risk/stability metrics for a series of periodic returns.
+    """
+    Calcola le metriche complete di performance e rischio/stabilità per una serie di rendimenti periodici.
 
-    Args:
-        returns: Periodic (weekly) returns.
-        annualization_factor: Annualisation factor (default 52 for weekly data).
-        risk_free_rate: Annualised risk-free rate (default 0.0).
+    Parametri:
+        returns: Serie di rendimenti periodici (settimanali).
+        annualization_factor: Fattore di annualizzazione (default 52 per frequenza settimanale).
+        risk_free_rate: Tasso privo di rischio annualizzato (default 0.0).
 
-    Returns:
-        Dictionary with cumulative_return, annualized_return, annualized_volatility,
-        sharpe_ratio, max_drawdown, profit_factor and calmar_ratio.
+    Ritorna:
+        Dizionario con metriche: cumulative_return, annualized_return, annualized_volatility,
+        sharpe_ratio, max_drawdown, profit_factor, calmar_ratio.
     """
     clean_ret = returns.fillna(0.0)
     n = len(clean_ret)
@@ -550,15 +552,16 @@ def compute_objective_score(
     metrics: Dict[str, float],
     metric_type: str = "sharpe_mdd",
 ) -> float:
-    """Compute the optimisation score, balancing return against stability and risk.
+    """
+    Calcola lo score di ottimizzazione bilanciando rendimento e stabilità/rischio.
 
-    Supported options:
-    - ``'sharpe_mdd'`` (default): Sharpe ratio penalised by the maximum drawdown,
-      rewarding smooth equity curves with limited maximum losses.
-      Score = Sharpe * (1 - MDD) if Sharpe >= 0, otherwise Sharpe * (1 + MDD).
-    - ``'sharpe'``: plain annualised Sharpe ratio.
-    - ``'calmar'``: Calmar ratio (annualised return / maximum drawdown).
-    - ``'return'``: plain cumulative return, with no risk penalty.
+    Opzioni supportate:
+    - 'sharpe_mdd' (default): Sharpe ratio penalizzato per il Maximum Drawdown.
+        Premia strategie con curve di equity regolari e perdite massime contenute.
+        Score = Sharpe * (1 - MDD) se Sharpe >= 0, altrimenti Sharpe * (1 + MDD).
+    - 'sharpe': Sharpe ratio annualizzato puro.
+    - 'calmar': Calmar ratio (rendimento annualizzato / max drawdown).
+    - 'return': Rendimento cumulato puro (non include penalità sul rischio).
     """
     sharpe = metrics["sharpe_ratio"]
     mdd = metrics["max_drawdown"]

@@ -1,13 +1,13 @@
-"""Statistical agent based on a rolling Z-score.
+"""
+ZScore_agent.py
 
-Features:
-- mean reversion with hysteresis (reversion to the mean in sideways markets);
-- momentum/breakout with hysteresis (trend following in directional regimes);
-- an optional stop-loss based on extreme deviations, for risk protection;
-- joint computation of discrete signals {-1, 0, 1} and a continuous confidence in [0.0, 1.0];
-- stability-oriented walk-forward optimisation (5-year in-sample -> 1-year
-  out-of-sample) with a maximum drawdown penalty;
-- detailed and summary logging of every combination tested in the grid search.
+Agente statistico basato su Z-Score rolling con supporto per:
+- Mean-Reversion a isteresi (ritorno alla media su mercati laterali)
+- Momentum / Breakout a isteresi (inseguimento trend su regimi direzionali)
+- Meccanismo opzionale di Stop-Loss basato su deviazione estrema per la protezione del rischio
+- Calcolo congiunto di Segnali discreti {-1, 0, 1} e Confidenza continua [0.0, 1.0]
+- Ottimizzazione Walk-Forward (5y IS -> 1y OOS) orientata alla stabilita e penalizzazione del Max Drawdown
+- Logging dettagliato e riassuntivo di tutte le combinazioni testate durante la grid search
 """
 
 import itertools
@@ -23,7 +23,7 @@ from src.evaluator import calculate_performance_metrics, compute_objective_score
 
 
 # =====================================================================
-# Z-SCORE TRADING LOGIC WITH HYSTERESIS
+# LOGICA DI TRADING SU Z-SCORE A ISTERESI
 # =====================================================================
 def compute_zscore_positions(
     z_scores: np.ndarray,
@@ -32,33 +32,32 @@ def compute_zscore_positions(
     stop_threshold: Optional[float] = None,
     mode: str = "momentum",
 ) -> np.ndarray:
-    """Compute the Z-score based positions with hysteresis and an optional stop.
+    """
+    Calcola la serie delle posizioni operative basate su Z-score con isteresi e stop opzionale.
 
-    Modes:
-    - ``mode == 'momentum'`` (trend following / breakout):
-        * Z > +entry_threshold: upside breakout -> BUY (+1)
-        * Z <= +exit_threshold: pull-back / exhaustion -> FLAT (0)
-        * Z < -entry_threshold: downside breakdown -> SELL (-1)
-        * Z >= -exit_threshold: pull-back / exhaustion -> FLAT (0)
-        * With stop_threshold active: stop if Z reverses beyond -stop_threshold
-          (when long) or +stop_threshold (when short).
-    - ``mode == 'mean_reversion'``:
-        * Z < -entry_threshold: abnormally oversold -> BUY (+1)
-        * Z >= -exit_threshold: reversion to the mean -> FLAT (0)
-        * Z > +entry_threshold: abnormally overbought -> SELL (-1)
-        * Z <= +exit_threshold: reversion to the mean -> FLAT (0)
-        * With stop_threshold active: stop if Z deviates beyond -stop_threshold
-          (e.g. -3.5) to cut losses in adverse trends.
+    Modalita:
+    - mode == 'momentum' (trend-following / breakout):
+        * Z > +entry_threshold: Breakout rialzista -> BUY (+1)
+        * Z <= +exit_threshold: Rientro / esaurimento -> FLAT (0)
+        * Z < -entry_threshold: Breakdown ribassista -> SELL (-1)
+        * Z >= -exit_threshold: Rientro / esaurimento -> FLAT (0)
+        * Se stop_threshold e attivo: stop se Z inverte oltre -stop_threshold (quando long) o +stop_threshold (quando short).
+    - mode == 'mean_reversion' (ritorno alla media):
+        * Z < -entry_threshold: Ipervenduto anomalo -> BUY (+1)
+        * Z >= -exit_threshold: Ritorno alla media -> FLAT (0)
+        * Z > +entry_threshold: Ipercomprato anomalo -> SELL (-1)
+        * Z <= +exit_threshold: Ritorno alla media -> FLAT (0)
+        * Se stop_threshold e attivo: stop se Z devia oltre -stop_threshold (es. -3.5) per tagliare le perdite su trend avversi.
 
-    Args:
-        z_scores: NumPy array of Z-score values.
-        entry_threshold: Standard-deviation threshold for entries.
-        exit_threshold: Threshold of reversion towards the mean for exits (default 0.0).
-        stop_threshold: Optional stop-loss threshold for extreme deviations.
-        mode: ``'momentum'`` or ``'mean_reversion'``.
+    Parametri:
+        z_scores: Array numpy con i valori dello Z-score.
+        entry_threshold: Soglia di deviazione standard per l'ingresso.
+        exit_threshold: Soglia di rientro verso la media per l'uscita (default 0.0).
+        stop_threshold: Soglia opzionale di stop loss per deviazione estrema.
+        mode: 'momentum' oppure 'mean_reversion'.
 
-    Returns:
-        np.ndarray of integers in {-1, 0, 1}.
+    Ritorna:
+        np.ndarray di interi con valori in {-1, 0, 1}.
     """
     n = len(z_scores)
     positions = np.zeros(n, dtype=int)
@@ -75,7 +74,7 @@ def compute_zscore_positions(
                 elif z < -entry_threshold:
                     current_pos = -1
             elif current_pos == 1:
-                # Normal exit or stop.
+                # Uscita normale o stop
                 if z <= exit_threshold:
                     current_pos = 0
                     if z < -entry_threshold:
@@ -83,7 +82,7 @@ def compute_zscore_positions(
                 elif stop_threshold is not None and z < -stop_threshold:
                     current_pos = 0
             elif current_pos == -1:
-                # Normal exit or stop.
+                # Uscita normale o stop
                 if z >= -exit_threshold:
                     current_pos = 0
                     if z > entry_threshold:
@@ -103,17 +102,17 @@ def compute_zscore_positions(
                 elif z > entry_threshold:
                     current_pos = -1
             elif current_pos == 1:
-                # Normal exit on reversion to the mean, or stop-loss.
+                # Uscita normale a rientro alla media o stop loss
                 if stop_threshold is not None and z < -stop_threshold:
-                    current_pos = 0  # Stop-loss on a persistent decline.
+                    current_pos = 0  # Stop loss su crollo persistente
                 elif z >= -exit_threshold:
                     current_pos = 0
                     if z > entry_threshold:
                         current_pos = -1
             elif current_pos == -1:
-                # Normal exit, or stop-loss on a sharp rally.
+                # Uscita normale o stop loss su rialzo violento
                 if stop_threshold is not None and z > stop_threshold:
-                    current_pos = 0  # Stop-loss.
+                    current_pos = 0  # Stop loss
                 elif z <= exit_threshold:
                     current_pos = 0
                     if z < -entry_threshold:
@@ -124,13 +123,12 @@ def compute_zscore_positions(
 
 
 # =====================================================================
-# 1. Z-SCORE INFERENCE AGENT
+# 1. AGENTE INFERENZIALE Z-SCORE
 # =====================================================================
 class ZScoreAgent(BaseAgent):
-    """Inference agent based on a rolling Z-score.
-
-    Supports momentum (breakout) or mean-reversion modes, an optional
-    stop-loss and confidence estimation.
+    """
+    Agente inferenziale basato su Z-Score rolling con supporto per modalita
+    momentum (breakout) o mean-reversion, stop loss opzionale e calcolo della confidenza.
     """
 
     def __init__(
@@ -142,7 +140,7 @@ class ZScoreAgent(BaseAgent):
         mode: str = "momentum",
         price_col: Optional[str] = None,
         target_asset: Optional[str] = None,
-        output_format: str = "numeric",  # 'numeric' (-1, 0, 1) or 'string' ('SELL', 'HOLD', 'BUY')
+        output_format: str = "numeric",  # 'numeric' (-1, 0, 1) o 'string' ('SELL', 'HOLD', 'BUY')
     ):
         super().__init__(
             name="ZScoreAgent",
@@ -170,7 +168,7 @@ class ZScoreAgent(BaseAgent):
             }
 
     def _apply_params(self, params: Dict[str, Any]) -> None:
-        """Update the agent parameters after loading them from JSON."""
+        """Aggiorna i parametri dell'agente dopo il caricamento da JSON."""
         super()._apply_params(params)
         self.window = int(params["window"])
         self.threshold = float(params["threshold"])
@@ -196,7 +194,7 @@ class ZScoreAgent(BaseAgent):
         }
 
     def predict(self, df: pd.DataFrame) -> pd.Series:
-        """Compute the Z-score and generate the discrete signals {-1, 0, 1}."""
+        """Calcola lo Z-Score e genera i segnali discreti {-1, 0, 1}."""
         if self.window is None or self.threshold is None:
             raise ValueError(
                 "Parametri non impostati. Inizializzali nel costruttore o usa .load_params()."
@@ -224,12 +222,12 @@ class ZScoreAgent(BaseAgent):
         return self._format_signals(signals)
 
     def predict_with_confidence(self, df: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
-        """Compute the trading signals together with their confidence.
+        """
+        Calcola congiuntamente i segnali operativi e la relativa confidenza.
 
-        Confidence is a function of the size of the standardised deviation:
-        - in an active position (|signal| == 1), confidence starts at 0.50 and
-          rises towards 0.95 or more;
-        - when flat or during warm-up (signal == 0), confidence is 0.0.
+        La confidenza e funzione dell'intensita della deviazione standard:
+        - Se in posizione attiva (|signal| == 1), la confidenza parte da 0.50 e cresce verso 0.95+.
+        - Durante il flat o warm-up (signal == 0), la confidenza e 0.0.
         """
         signals = self.predict(df)
 
@@ -250,18 +248,16 @@ class ZScoreAgent(BaseAgent):
 
 
 # =====================================================================
-# 2. SINGLE-BLOCK Z-SCORE OPTIMISER (in-sample training + out-of-sample validation)
+# 2. OTTIMIZZATORE Z-SCORE SU SINGOLO BLOCCO (Train IS + Val OOS)
 # =====================================================================
 class ZScoreOptimizer:
-    """Z-score optimiser for a single time block.
-
-    - Runs the grid search over (window, threshold, mode) STRICTLY on the
-      training block (in-sample, 5 years).
-    - Scores each combination with a stability/risk objective (``'sharpe_mdd'``).
-    - Evaluates out-of-sample metrics on the following validation year,
-      without re-optimising.
-    - Compares in-sample and out-of-sample performance to detect overfitting.
-    - Records the full results of ALL combinations tested in the grid search.
+    """
+    Ottimizzatore Z-Score su singolo blocco temporale:
+    - Esegue la grid search su (window, threshold, mode) RIGOROSAMENTE sul Train (IS, 5 anni).
+    - Valuta secondo una funzione obiettivo basata sulla stabilita/rischio ('sharpe_mdd').
+    - Valuta le metriche Out-Of-Sample sull'anno successivo di Validation (OOS) senza re-ottimizzare.
+    - Confronta le performance In-Sample e Out-Of-Sample per rilevare l'overfitting.
+    - Registra i risultati completi di TUTTE le combinazioni testate durante la grid search.
     """
 
     def __init__(
@@ -294,10 +290,9 @@ class ZScoreOptimizer:
         val_df: Optional[pd.DataFrame] = None,
         warmup_df: Optional[pd.DataFrame] = None,
     ) -> Dict[str, Any]:
-        """Run the grid search on the training data only and evaluate every combination.
-
-        Performance is reported on both the training (in-sample) and validation
-        (out-of-sample) periods for each combination.
+        """
+        Esegue la grid search sui soli dati di Train (In-Sample) e valuta la performance
+        sia su Train che su Validation (Out-Of-Sample) per ciascuna combinazione.
         """
         dfs_to_concat = [df for df in [warmup_df, train_df, val_df] if df is not None and not df.empty]
         full_df = pd.concat(dfs_to_concat)
@@ -342,17 +337,17 @@ class ZScoreOptimizer:
                 mode=m,
             )
 
-            # SHIFT(1): the signal generated at close t applies to the returns of t+1.
+            # SHIFT(1): il segnale generato a chiusura t opera sui rendimenti di t+1
             pos_series = pd.Series(pos_array, index=full_df.index, dtype=float).shift(1)
 
-            # STRICT evaluation on the TRAINING (in-sample) period only.
+            # Valutazione RIGOROSA solo su periodo di TRAINING (In-Sample)
             train_pos = pos_series.reindex(train_indices).fillna(0.0)
             train_strat_ret = train_pos * full_returns.reindex(train_indices).fillna(0.0)
 
             is_metrics = calculate_performance_metrics(train_strat_ret)
             score = compute_objective_score(is_metrics, metric_type=self.objective_metric)
 
-            # Out-of-sample evaluation for this combination.
+            # Valutazione OOS per questa combinazione
             oos_metrics = None
             if val_indices is not None and len(val_indices) > 0:
                 val_pos = pos_series.reindex(val_indices).fillna(0.0)
@@ -397,7 +392,7 @@ class ZScoreOptimizer:
         if best_w is None or best_thresh is None or best_mode is None:
             raise RuntimeError("Nessuna combinazione valida trovata durante l'ottimizzazione.")
 
-        # Out-of-sample metrics of the selected parameters.
+        # Estrazione metriche OOS per il miglior parametro scelto
         best_oos_metrics = None
         if val_df is not None and not val_df.empty:
             best_match = next(
@@ -449,7 +444,7 @@ class ZScoreOptimizer:
         return self.best_params
 
     def save_params(self, filepath: Union[str, Path]) -> None:
-        """Save the optimal parameters to a JSON file."""
+        """Salva i parametri ottimali su file JSON."""
         if self.best_params is None:
             raise ValueError("Nessun parametro trovato. Esegui prima .fit().")
         path = Path(filepath)
@@ -459,18 +454,16 @@ class ZScoreOptimizer:
 
 
 # =====================================================================
-# 3. Z-SCORE WALK-FORWARD LOOP (5-year in-sample training -> 1-year out-of-sample validation)
+# 3. ORCHESTRATORE WALK-FORWARD Z-SCORE (5 Anni Train IS -> 1 Anno Val OOS)
 # =====================================================================
 class ZScoreWalkForwardTrainer:
-    """Run the walk-forward procedure for the Z-score agent.
-
-    - Rolling window: 5 years of training (in-sample) followed by one validation
-      year (out-of-sample).
-    - Optimises on the training window with the chosen stability/risk metric
-      (``'sharpe_mdd'``).
-    - Detects overfitting by comparing in-sample and out-of-sample results.
-    - Keeps the full log of ALL evaluated combinations.
-    - Selects the most frequent (window, threshold, mode) combination (statistical mode).
+    """
+    Gestisce il Walk-Forward temporale per Z-Score:
+    - Finestra mobile: 5 anni di train (IS) -> test sull'anno successivo di validation (OOS).
+    - Ottimizza sul training con la metrica di stabilita/rischio desiderata ('sharpe_mdd').
+    - Rileva l'overfitting confrontando In-Sample e Out-Of-Sample.
+    - Registra e preserva il log completo di TUTTE le combinazioni valutate.
+    - Seleziona la combinazione (window, threshold, mode) piu frequente (Moda statistica).
     """
 
     def __init__(
@@ -487,11 +480,12 @@ class ZScoreWalkForwardTrainer:
         self.selected_params: Optional[Dict[str, Any]] = None
 
     def run(self, df: pd.DataFrame, max_year: Optional[int] = None, initial_warmup_df: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
-        """Run the rolling loop over the dataset.
+        """
+        Esegue il loop rolling sul dataset.
 
-        Args:
-            df: Historical DataFrame with a DatetimeIndex.
-            max_year: Latest year allowed (e.g. 2021 to respect the OOS lock).
+        Parametri:
+            df: DataFrame storico con DatetimeIndex.
+            max_year: Anno massimo consentito (es. 2021 per rispettare l'OOS lock).
         """
         data = df.copy()
         if not isinstance(data.index, pd.DatetimeIndex):
@@ -544,7 +538,7 @@ class ZScoreWalkForwardTrainer:
                 warmup_df=fold_warmup_df,
             )
 
-            # Collect the results of every combination for this window.
+            # Raccoglie i risultati di tutte le combinazioni per questa finestra
             for c in self.optimizer.combinations_log:
                 rec = dict(c)
                 rec["fold"] = i + 1
@@ -588,7 +582,7 @@ class ZScoreWalkForwardTrainer:
                 f"OOS (1y): Ret={res['oos_return_pct']:+6.1f}%, Sh={res['oos_sharpe']:+.2f}, MDD={res['oos_mdd_pct']:4.1f}%{overfit_alert}"
             )
 
-        # Select the mode.
+        # Selezione moda
         counts = Counter(param_tuples)
         most_common_tuple, freq = counts.most_common(1)[0]
 
@@ -651,11 +645,13 @@ class ZScoreWalkForwardTrainer:
         return self.selected_params
 
     def get_combinations_dataframe(self) -> pd.DataFrame:
-        """Return the full log of every combination tested in every window."""
+        """Restituisce il DataFrame con il log completo di ogni singola combinazione testata in ogni finestra."""
         return pd.DataFrame(self.all_combinations_history)
 
     def get_combinations_summary(self) -> pd.DataFrame:
-        """Return a summary of all (window, threshold, mode) combinations across walk-forward windows.
+        """
+        Restituisce un DataFrame riassuntivo che aggrega le performance di tutte le combinazioni
+        (window, threshold, mode) calcolate su tutte le finestre del Walk-Forward.
         """
         df_all = self.get_combinations_dataframe()
         if df_all.empty:
@@ -688,7 +684,7 @@ class ZScoreWalkForwardTrainer:
         ]:
             summary[col] = summary[col].round(2)
 
-        # Sort by selection frequency, then by mean out-of-sample Sharpe ratio.
+        # Ordina per frequenza di selezione e poi per Sharpe OOS medio
         summary = summary.sort_values(
             by=["times_best", "mean_oos_sharpe", "mean_is_score"],
             ascending=[False, False, False],
@@ -697,7 +693,7 @@ class ZScoreWalkForwardTrainer:
         return summary
 
     def save_combinations_log(self, filepath: Union[str, Path]) -> None:
-        """Export the full list of tested combinations to CSV."""
+        """Esporta l'elenco completo di ogni combinazione testata su file CSV."""
         df_log = self.get_combinations_dataframe()
         if df_log.empty:
             raise ValueError("Nessun dato di combinazioni presente. Esegui prima .run().")
@@ -707,7 +703,7 @@ class ZScoreWalkForwardTrainer:
         print(f"Log dettagliato combinazioni salvato in: {path} ({len(df_log)} righe)")
 
     def save_combinations_summary(self, filepath: Union[str, Path]) -> None:
-        """Export the aggregated summary of each combination to CSV."""
+        """Esporta la tabella riassuntiva aggregata per ciascuna combinazione su file CSV."""
         df_sum = self.get_combinations_summary()
         if df_sum.empty:
             raise ValueError("Nessun dato presente. Esegui prima .run().")
@@ -717,7 +713,7 @@ class ZScoreWalkForwardTrainer:
         print(f"Riepilogo combinazioni aggregato salvato in: {path} ({len(df_sum)} righe)")
 
     def save_final_agent_config(self, filepath: Union[str, Path]) -> None:
-        """Save the modal parameters to a JSON file readable by ZScoreAgent."""
+        """Salva i parametri della moda in un JSON direttamente leggibile da ZScoreAgent."""
         if self.selected_params is None:
             raise ValueError("Nessun parametro selezionato. Esegui prima .run().")
         path = Path(filepath)

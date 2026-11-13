@@ -1,0 +1,17 @@
+{
+  "stress_decisions": 58,
+  "total_decisions": 249,
+  "frozen_equal_active_3_etf_universe": [
+    "SPY",
+    "IEF",
+    "GLD"
+  ],
+  "equal_active_4_etf_universe": [
+    "SPY",
+    "IEF",
+    "GLD",
+    "SHY"
+  ],
+  "methodology": "POST-SELECTION RESEARCH: models frozen 2021; allocations selected after reviewing 2022-2026; next-open 2+1bps cost; 1% borrow; not new independent OOS",
+  "notes": "Gabriele original 2021-start weekly zero-cost setup is distinct and not reproduced here."
+}

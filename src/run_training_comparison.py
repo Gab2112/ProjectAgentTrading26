@@ -233,7 +233,6 @@ def save_comparison(result: dict, config: dict, root_dir: str | Path = ".") -> P
 
 
 def main() -> None:
-    """Command-line entry point: print the comparison and optionally save it."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--save", action="store_true", help="Write training-only diagnostics")
     args = parser.parse_args()

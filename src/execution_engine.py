@@ -1,10 +1,10 @@
-"""Execution engine shared by levels A1, A2 and B.
+"""Motore di esecuzione condiviso da A1, A2 e B (ex ``longshort_backtester.py``).
 
-A single execution and accounting model:
-- orders are executed at the open of the session following the decision;
-- costs (commission plus slippage) are charged on the traded notional;
-- short positions carry collateral requirements and a borrowing cost;
-- the portfolio net asset value (NAV) is updated at every close.
+Un solo modello di esecuzione e contabilita':
+- ordini eseguiti all'apertura della seduta successiva alla decisione;
+- costi (commissioni + slippage) sul nozionale scambiato;
+- posizioni Short con collaterale e costo di prestito;
+- valore del portafoglio (NAV) aggiornato a ogni chiusura.
 """
 
 import numpy as np
@@ -345,7 +345,7 @@ def mark_to_market_close(
     ):
         raise ValueError("Invalid previous NAV")
 
-    # Reuse the existing accounting and margin checks.
+    # Reuse our existing accounting and margin checks.
     report = inspect_short_collateral(
         shares=shares,
         cash=cash,
@@ -541,7 +541,7 @@ def simulate_longshort_daily(
     return pd.DataFrame(rows).set_index("Date")
 
 
-# A1/A2 input validation and historical result schema.
+# A1/A2 input validation and legacy result schema.
 # Core execution remains in simulate_longshort_daily above.
 
 def _prepare_long_only_targets(
@@ -598,7 +598,7 @@ def _prepare_long_only_targets(
     ):
         raise ValueError("A1/A2 richiedono pesi long-only interamente investiti")
 
-    # Same small numerical tolerance and normalisation as the original A engine.
+    # Same small numerical tolerance and normalization as the original A engine.
     weights = np.clip(weights, 0.0, 1.0)
     weights /= weights.sum(axis=1, keepdims=True)
     return pd.DataFrame(weights, index=pesi_target.index, columns=list(ASSETS))
@@ -654,7 +654,7 @@ def simula_portafoglio(
     result["rendimento_netto"] = common["daily_return"]
     result["turnover"] = common["turnover"]
     result["costo_transazione"] = common["transaction_cost"]
-    # Preserve the historical A convention even for zero-notional orders.
+    # Preserve the pre-refactor A convention even for zero-notional orders.
     result["operazione_eseguita"] = result.index.isin(scheduled.index)
     for ticker in aperture.columns:
         result[f"{ticker}_peso_effettivo"] = common[f"{ticker}_weight"]

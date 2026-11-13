@@ -1,41 +1,15 @@
-# File compilati Python, cache e artefatti di sviluppo
+# Local-only caches and environments. Frozen code and archived research data are tracked.
 __pycache__/
 *.py[cod]
-*$py.class
+.venv/
+venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-.coverage
-.coverage.*
-htmlcov/
-.tox/
-*.egg-info/
-build/
-dist/
-
-# Ambienti virtuali locali e configurazioni degli editor
-.venv/
-venv/
-env/
-.idea/
-.vscode/
-.ipynb_checkpoints/
-
-# Variabili d'ambiente private, log e file temporanei di sistema
-.env
-.env.*
-!.env.example
-*.log
 .DS_Store
-
-# Prodotti generati dalla pipeline: non versionare i risultati rigenerabili.
-# Restano tracciati soltanto gli snapshot sorgente in data/raw/.
-data/processed/
-data/signals/
-data/results/
-
-
-# Generated final charts, excluded from Git
+*.log
+node_modules/
 outputs/
-
-agents_presentation_guide.md
+*.aux
+*.toc
+*.out

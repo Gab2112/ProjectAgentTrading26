@@ -1,10 +1,10 @@
-"""Shared utilities for the multi-asset pipeline.
+"""Funzioni di supporto condivise della pipeline Multi-Asset.
 
-This module centralises:
-- the investable universe (``ASSETS``, the single definition of the ETFs, and ``get_tickers``);
-- loading of ``config.yaml`` (``load_config``) and resolution of the project root;
-- the provisional publication lags of macroeconomic series;
-- protected writing of frozen artifacts, which are never overwritten.
+Questo modulo centralizza:
+- l'universo investibile (``ASSETS``, unica definizione degli ETF, e ``get_tickers``);
+- la lettura di ``config.yaml`` (``load_config``) e la radice del progetto;
+- i ritardi provvisori di pubblicazione delle serie macroeconomiche;
+- la scrittura protetta dei file congelati (mai sovrascritti).
 """
 
 from pathlib import Path
@@ -17,18 +17,18 @@ import yaml
 ROOT_DIR = Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT_DIR / "config.yaml"
 
-# Universe of levels A/B/C, in the order used for weights, columns and orders.
-# This is the ONLY definition in the code base: every module imports it from here.
+# Universo dei livelli A/B/C, nell'ordine usato da pesi, colonne e ordini.
+# E' l'UNICA definizione nel codice: tutti i moduli la importano da qui.
 ASSETS = ("SPY", "IEF", "GLD", "SHY")
 
-# Allowed ticker characters: each ticker is also used as a CSV file name.
+# Caratteri ammessi nei ticker: il ticker diventa anche il nome di un file CSV.
 _VALID_TICKER = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
-# Indicative publication lags, in calendar days, for selected FRED series.
-# They do NOT represent a historical release calendar nor the data vintages
-# available at each date. Actual release dates and revisions must be verified
-# before these series are used in Level B.
+# Ritardi indicativi, espressi in giorni di calendario, per alcune serie FRED.
+# NON rappresentano un calendario storico delle pubblicazioni né le versioni
+# dei dati disponibili in ciascuna data (vintage). Prima del livello B occorre
+# verificare le date di rilascio effettive e gli eventuali aggiornamenti.
 DEFAULT_RELEASE_LAGS_DAYS = {
     "CPIAUCSL": 45,
     "CPILFESL": 45,
@@ -37,14 +37,14 @@ DEFAULT_RELEASE_LAGS_DAYS = {
 
 
 def get_tickers(config: dict) -> list[str]:
-    """Return the investable tickers in the order defined in ``config.yaml``.
+    """Restituisce i ticker investibili nell'ordine definito in ``config.yaml``.
 
-    The project universe is SPY, IEF, GLD and SHY. This function does not
-    enforce those four instruments: checking the universe required by levels
-    A1/A2 is the responsibility of the strategy modules.
+    Nel nuovo progetto l'universo comprende SPY, IEF, GLD e SHY. La funzione
+    non impone tuttavia questi quattro strumenti: la verifica dell'universo
+    specifico dei livelli A1/A2 compete ai moduli di strategia.
 
-    It verifies that the configuration entries are valid and that each ticker
-    appears only once, avoiding ambiguity between data, weights and orders.
+    Controlla che le voci della configurazione siano valide e che ogni ticker
+    sia presente una sola volta, evitando ambiguità tra dati, pesi e ordini.
     """
     if not isinstance(config, dict):
         raise TypeError("La configurazione deve essere un dizionario.")
@@ -78,18 +78,18 @@ def get_tickers(config: dict) -> list[str]:
 
 
 def get_release_lag_days(config: dict, series_id: str) -> int:
-    """Return the conventional publication lag of a FRED series, in days.
+    """Restituisce il ritardo convenzionale di una serie FRED, in giorni.
 
-    The value is read from ``data.release_lags_days`` in ``config.yaml``. If no
-    specific value is configured, ``DEFAULT_RELEASE_LAGS_DAYS`` is used; any
-    other series keeps the previous behaviour and returns zero.
+    Cerca anzitutto ``data.release_lags_days`` in ``config.yaml``. In assenza
+    di un valore specifico usa ``DEFAULT_RELEASE_LAGS_DAYS``; per le altre
+    serie conserva il comportamento precedente, restituendo zero.
 
-    A lag of zero does NOT certify that a series was available in real time.
-    The fixed 45- and 35-day lags are approximations as well: Level B must rely
-    on a verified point-in-time protocol.
+    Il valore zero NON certifica che una serie fosse disponibile in tempo
+    reale. Anche i ritardi fissi di 45 o 35 giorni sono approssimazioni:
+    il livello B dovrà utilizzare un protocollo point-in-time verificato.
 
-    Negative, fractional or boolean lags are rejected, since they could
-    otherwise introduce look-ahead errors that are hard to detect.
+    Rifiuta ritardi negativi, frazionari o booleani, che altrimenti
+    potrebbero generare errori temporali difficili da individuare.
     """
     if not isinstance(config, dict):
         raise TypeError("La configurazione deve essere un dizionario.")
@@ -158,7 +158,9 @@ def write_frozen_outputs(files: dict[Path, str]) -> None:
 
 
 def get_project_root(start_path: Optional[Union[str, Path]] = None) -> Path:
-    """Robustly resolve the root directory of the ProjectAgentTrading repository."""
+    """
+    Risolve in modo robusto la directory radice del repository ProjectAgentTrading.
+    """
     if start_path is not None:
         current = Path(start_path).resolve()
     else:
@@ -168,5 +170,5 @@ def get_project_root(start_path: Optional[Union[str, Path]] = None) -> Path:
         if (candidate / "config.yaml").is_file() and (candidate / "src").is_dir():
             return candidate
 
-    # Standard fallback: the repository root that contains src/.
+    # Fallback standard: la radice del repository che contiene src/
     return ROOT_DIR

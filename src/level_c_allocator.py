@@ -1,24 +1,21 @@
-"""Level C allocation rules (v1 Long/Flat and v2 Long/Short/Flat).
+"""Level C: regole di allocazione (v1 Long/Flat e v2 Long/Short/Flat).
 
-``build_level_c_target_weights`` implements C_v1 and
-``build_level_c_v2_target_weights`` implements C_v2 (consensus between
-momentum and the orchestrator). Data loading and strategy composition are
-handled in ``src/level_c_strategy.py``.
+``build_level_c_target_weights`` (C_v1) e ``build_level_c_v2_target_weights``
+(C_v2, consenso fra momentum e orchestratore). Il caricamento dei dati e la
+composizione delle strategie stanno in ``src/level_c_strategy.py``.
 
-Level C v1: training-only, long/flat B_v2 allocation gated by the AI agents.
+Level C v1: training-only, long/flat B_v2 allocation gated by AI agents.
 
-Policy (decisions after the market close):
+Policy (decisions after market close):
     raw_weight[i,t] = b_v2_budget[i,t] * (b_v2_trend[i,t] == +1)
                        * (agent_signal[i,t] == +1 and confidence[i,t] > 0)
 
 The existing 126-session historical covariance overlay is applied EXACTLY ONCE.
-Unused exposure is held in cash (0% yield under the project modelling
-assumptions). This module does not train models, read files, select
-parameters or run backtests.
+Unused exposure is cash (0% yield under the project modelling assumptions).
+This module does not train models, read files, select parameters, or backtest.
 
-Important: even when the underlying RF/SVM predictions are out-of-fold, the
-output of the fitted orchestrator is not an independent OOS validation of
-the ensemble.
+Important: even when the underlying RF/SVM predictions are OOF, the fitted
+orchestrator's output is not an independent OOS validation of the ensemble.
 """
 
 from __future__ import annotations
@@ -37,8 +34,7 @@ _TOL = 1e-10
 
 
 def _validated_dates(index: pd.Index, name: str) -> pd.DatetimeIndex:
-    """Require strictly ordered, unique, timezone-naive, midnight decision/session dates.
-    """
+    """Require strictly ordered, unique, naive, midnight decision/session dates."""
     if not isinstance(index, pd.DatetimeIndex) or len(index) == 0:
         raise ValueError(f"{name}: expected nonempty DatetimeIndex")
     if (
@@ -229,12 +225,12 @@ def build_level_c_v2_target_weights(
     covariance_window: int = 126,
     target_volatility: float = 0.08,
 ) -> dict:
-    """Create signed C_v2 targets from the same validated C_v1 inputs.
+    """Create signed C_v2 targets from the identical, validated C_v1 inputs.
 
-    IMPORTANT: pass the original C_v1 regime budgets (NOT the B_v2 target weights).
-    ``signed_trend`` must contain the actual {-1, 0, +1} B_v2 momentum decisions.
+    IMPORTANT: pass C_v1's original regime budgets (NOT B_v2 target weights).
+    signed_trend must contain actual {-1,0,+1} B_v2 momentum decisions.
     Historical returns may include pre-training warm-up but no post-training
-    observations. No implicit reindexing, filling or sign imputation occurs.
+    observations. No implicit reindex, filling, or sign imputation occurs.
     """
     start, end = _validated_window(train_start, train_end)
     if (

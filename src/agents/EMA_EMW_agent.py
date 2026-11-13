@@ -1,12 +1,14 @@
-"""Statistical trend-following agent based on a crossover between a simple
-moving average (SMA) and an exponential moving average (EMA).
+"""
+EMA_EMW_agent.py
 
-The agent inherits from BaseAgent to provide a standard interface and supports:
-- joint prediction of signals {-1, 0, 1} and a continuous confidence in [0.0, 1.0];
-- an optional dead band that reduces false entries in sideways markets;
-- stability-oriented walk-forward optimisation (Sharpe ratio penalised by
-  the maximum drawdown);
-- detailed logging of every combination tested during the grid search.
+Agente statistico Trend-Following basato su Crossover tra Media Mobile Semplice (SMA)
+e Media Mobile Esponenziale (EMA).
+Eredita da BaseAgent per garantire un'interfaccia standardizzata.
+Supporta:
+- Predizione congiunta di Segnali {-1, 0, 1} e Confidenza continua [0.0, 1.0]
+- Dead-band opzionale per ridurre le false partenze su movimenti laterali
+- Ottimizzazione Walk-Forward orientata alla stabilita (Sharpe penalizzato per Max Drawdown)
+- Logging dettagliato di tutte le combinazioni testate durante la grid search
 """
 
 import itertools
@@ -22,15 +24,15 @@ from src.evaluator import calculate_performance_metrics, compute_objective_score
 
 
 # =====================================================================
-# 1. SMA/EMA INFERENCE AGENT
+# 1. AGENTE INFERENZIALE SMA/EMA
 # =====================================================================
 class SMAEMAAgent(BaseAgent):
-    """Trend-following inference agent based on an SMA/EMA crossover.
-
-    - fast EMA > slow SMA -> BUY (+1)
-    - fast EMA < slow SMA -> SELL (-1)
-    - if dead_band > 0 and |EMA - SMA| / SMA <= dead_band -> HOLD (0)
-    - during the initial warm-up period -> HOLD (0)
+    """
+    Agente inferenziale Trend-Following basato su Crossover SMA / EMA:
+    - EMA (veloce) > SMA (lenta) -> BUY (+1)
+    - EMA (veloce) < SMA (lenta) -> SELL (-1)
+    - Se dead_band > 0 e |EMA - SMA| / SMA <= dead_band -> HOLD (0)
+    - Durante il periodo iniziale di warm-up -> HOLD (0)
     """
 
     def __init__(
@@ -40,7 +42,7 @@ class SMAEMAAgent(BaseAgent):
         dead_band: float = 0.0,
         price_col: Optional[str] = None,
         target_asset: Optional[str] = None,
-        output_format: str = "numeric",  # 'numeric' (-1, 0, 1) or 'string' ('SELL', 'HOLD', 'BUY')
+        output_format: str = "numeric",  # 'numeric' (-1, 0, 1) o 'string' ('SELL', 'HOLD', 'BUY')
     ):
         super().__init__(
             name="SMAEMAAgent",
@@ -64,7 +66,7 @@ class SMAEMAAgent(BaseAgent):
             }
 
     def _apply_params(self, params: Dict[str, Any]) -> None:
-        """Update the internal agent parameters after loading them from JSON."""
+        """Aggiorna i parametri interni dell'agente dopo il caricamento da JSON."""
         super()._apply_params(params)
         self.sma_window = int(params["sma_window"])
         self.ema_window = int(params["ema_window"])
@@ -82,8 +84,7 @@ class SMAEMAAgent(BaseAgent):
         }
 
     def predict(self, df: pd.DataFrame) -> pd.Series:
-        """Compute the SMA and EMA of prices and return the standardised trading signals.
-        """
+        """Calcola SMA ed EMA sui prezzi e restituisce i segnali operativi uniformati."""
         if self.sma_window is None or self.ema_window is None:
             raise ValueError(
                 "Parametri non impostati. Inizializzali nel costruttore o usa .load_params()."
@@ -105,19 +106,19 @@ class SMAEMAAgent(BaseAgent):
             raw_signal = np.where(ema > sma, 1, -1)
 
         signals = pd.Series(raw_signal, index=df.index, dtype=int)
-        # During the initial warm-up the SMA is NaN: the signal is set to 0 (HOLD).
+        # Durante il warm-up iniziale la SMA è NaN: impostiamo segnale a 0 (HOLD)
         signals[sma.isna()] = 0
 
         return self._format_signals(signals)
 
     def predict_with_confidence(self, df: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
-        """Compute both the discrete signals and the associated confidence estimate.
+        """
+        Calcola sia i segnali operativi discreti sia la stima di confidenza / probabilità associata.
 
-        Confidence is a function of the normalised divergence between EMA and SMA:
-        - right after a crossover (difference close to 0), confidence is about 0.50;
-        - in an established trend (large difference relative to volatility),
-          confidence rises towards 0.95 or more;
-        - during warm-up or when flat (signal 0), confidence is 0.0.
+        La confidenza è funzione della divergenza normalizzata tra EMA e SMA:
+        - Appena avvenuto il crossover (diff ~ 0), la confidenza è circa 0.50 (incertezza iniziale).
+        - Con trend consolidato (diff elevata rispetto alla volatilità), la confidenza sale verso 0.95+.
+        - Durante il warm-up o flat (segnale 0), la confidenza è 0.0.
         """
         signals = self.predict(df)
 
@@ -139,23 +140,20 @@ class SMAEMAAgent(BaseAgent):
         return signals, confidence
 
 
-# Alias kept for backward compatibility.
+# Alias per retrocompatibilità
 EMA_EMW_Agent = SMAEMAAgent
 
 
 # =====================================================================
-# 2. SINGLE-WINDOW OPTIMISER (in-sample training + out-of-sample validation)
+# 2. OTTIMIZZATORE SU SINGOLA FINESTRA (Train IS + Val OOS)
 # =====================================================================
 class SMAEMAOptimizer:
-    """Optimiser for a single time block.
-
-    - Optimises (sma_window, ema_window) STRICTLY on the training block
-      (in-sample, typically 5 years).
-    - Supports a stability/risk-oriented objective (Sharpe ratio penalised by
-      the maximum drawdown, Calmar ratio, or plain Sharpe ratio).
-    - Evaluates the optimal parameters on both the training period and the
-      following validation period (out-of-sample, 1 year).
-    - Records the full results of ALL combinations tested in the grid search.
+    """
+    Ottimizzatore su singolo blocco temporale:
+    - Ottimizza i parametri (sma_window, ema_window) RIGOROSAMENTE sul blocco di Train (In-Sample, tipicamente 5 anni).
+    - Supporta una funzione obiettivo mirata alla stabilità/rischio (Sharpe ratio penalizzato per Max Drawdown, Calmar, o Sharpe puro).
+    - Valuta poi i parametri ottimi sia sul periodo di Train (In-Sample) sia sul periodo successivo di Validation (Out-Of-Sample, 1 anno).
+    - Registra i risultati completi di TUTTE le combinazioni testate durante la grid search.
     """
 
     def __init__(
@@ -180,10 +178,9 @@ class SMAEMAOptimizer:
         val_df: Optional[pd.DataFrame] = None,
         warmup_df: Optional[pd.DataFrame] = None,
     ) -> Dict[str, Any]:
-        """Run the grid search on the training data only and evaluate every combination.
-
-        Performance is reported on both the training (in-sample) and validation
-        (out-of-sample) periods for all combinations.
+        """
+        Esegue la grid search sui soli dati di Train (In-Sample) e valuta la performance
+        sia su Train che su Validation (Out-Of-Sample) per tutte le combinazioni.
         """
         dfs_to_concat = [df for df in [warmup_df, train_df, val_df] if df is not None and not df.empty]
         full_df = pd.concat(dfs_to_concat)
@@ -218,7 +215,7 @@ class SMAEMAOptimizer:
         best_is_metrics = None
         self.combinations_log = []
 
-        # Technical constraint: the fast EMA window must be shorter than the slow SMA window.
+        # Vincolo tecnico: EMA (veloce) deve avere finestra minore di SMA (lenta)
         param_grid = [
             (s, e) for s, e in itertools.product(self.sma_range, self.ema_range) if e < s
         ]
@@ -236,21 +233,21 @@ class SMAEMAOptimizer:
                 )
             else:
                 pos = np.where(ema > sma, 1.0, -1.0)
-            # No position until both moving averages are available.
+            # Nessuna posizione finché entrambe le medie non sono disponibili
             valid_indicators = sma.notna() & ema.notna()
             pos = np.where(valid_indicators, pos, 0.0)
 
-            # SHIFT(1): the signal computed at close t applies to the returns of t+1.
+            # SHIFT(1): il segnale calcolato a chiusura t opera sui rendimenti di t+1
             pos_series = pd.Series(pos, index=full_df.index).shift(1)
 
-            # STRICT evaluation on the TRAINING (in-sample) period only.
+            # Valutazione RIGOROSA solo su periodo di TRAINING (In-Sample)
             train_pos = pos_series.reindex(train_indices).fillna(0.0)
             train_strat_ret = train_pos * full_returns.reindex(train_indices).fillna(0.0)
 
             is_metrics = calculate_performance_metrics(train_strat_ret)
             score = compute_objective_score(is_metrics, metric_type=self.objective_metric)
 
-            # Out-of-sample evaluation for this combination.
+            # Valutazione OOS per questa specifica combinazione
             oos_metrics = None
             if val_indices is not None and len(val_indices) > 0:
                 val_pos = pos_series.reindex(val_indices).fillna(0.0)
@@ -293,7 +290,7 @@ class SMAEMAOptimizer:
         if best_sma is None or best_ema is None:
             raise RuntimeError("Nessuna combinazione valida trovata durante l'ottimizzazione.")
 
-        # Out-of-sample metrics of the selected parameters.
+        # Estrazione metriche OOS per il miglior parametro scelto
         best_oos_metrics = None
         if val_df is not None and not val_df.empty:
             best_match = next(
@@ -340,7 +337,7 @@ class SMAEMAOptimizer:
         return self.best_params
 
     def save_params(self, filepath: Union[str, Path]) -> None:
-        """Save the optimal parameters to a JSON file."""
+        """Salva i parametri ottimali su file JSON."""
         if self.best_params is None:
             raise ValueError("Nessun parametro trovato. Esegui prima .fit().")
         path = Path(filepath)
@@ -350,17 +347,16 @@ class SMAEMAOptimizer:
 
 
 # =====================================================================
-# 3. WALK-FORWARD LOOP (5-year in-sample training -> 1-year out-of-sample validation)
+# 3. ORCHESTRATORE WALK-FORWARD (5 Anni Train IS -> 1 Anno Val OOS)
 # =====================================================================
 class WalkForwardTrainer:
-    """Run the walk-forward cycle.
-
-    - Splits the DataFrame year by year.
-    - At each step, uses a 5-year training window (in-sample) followed by one
-      validation year (out-of-sample).
-    - Optimises on the training window with the chosen stability/risk metric.
-    - Keeps the history of ALL combinations tested in every window.
-    - Exports the full log and an aggregated summary for each parameter pair.
+    """
+    Gestisce il ciclo di Walk-Forward:
+    - Suddivide il DataFrame anno per anno.
+    - Per ogni step estrae una finestra di 5 anni di training (IS) e l'anno successivo di validation (OOS).
+    - Ottimizza sul training con la metrica di stabilità/rischio desiderata.
+    - Raccoglie e preserva lo storico di TUTTE le combinazioni testate in ogni singola finestra.
+    - Esporta il log completo e una sintesi aggregata per ciascuna coppia di parametri.
     """
 
     def __init__(
@@ -377,11 +373,12 @@ class WalkForwardTrainer:
         self.selected_params: Optional[Dict[str, Any]] = None
 
     def run(self, df: pd.DataFrame, max_year: Optional[int] = None, initial_warmup_df: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
-        """Run the rolling loop over the full historical dataset.
+        """
+        Esegue il loop rolling sull'intero dataset storico.
 
-        Args:
-            df: Historical DataFrame with a DatetimeIndex.
-            max_year: Latest year allowed (e.g. 2021 to respect the OOS lock).
+        Parametri:
+            df: DataFrame storico con DatetimeIndex.
+            max_year: Anno massimo consentito (es. 2021 per rispettare l'OOS lock).
         """
         data = df.copy()
         if not isinstance(data.index, pd.DatetimeIndex):
@@ -433,7 +430,7 @@ class WalkForwardTrainer:
                 val_df,
                 warmup_df=fold_warmup_df,
             )
-            # Collect the results of every combination for this window.
+            # Raccoglie i risultati di tutte le combinazioni per questa finestra
             for c in self.optimizer.combinations_log:
                 rec = dict(c)
                 rec["fold"] = i + 1
@@ -472,7 +469,7 @@ class WalkForwardTrainer:
                 f"OOS (1y): Ret={res['oos_return_pct']:+6.1f}%, Sh={res['oos_sharpe']:+.2f}, MDD={res['oos_mdd_pct']:4.1f}%{overfit_alert}"
             )
 
-        # Select the mode.
+        # Selezione moda
         counts = Counter(param_tuples)
         most_common_pair, freq = counts.most_common(1)[0]
 
@@ -529,11 +526,13 @@ class WalkForwardTrainer:
         return self.selected_params
 
     def get_combinations_dataframe(self) -> pd.DataFrame:
-        """Return the full log of every combination tested in every window."""
+        """Restituisce il DataFrame con il log completo di ogni singola combinazione testata in ogni finestra."""
         return pd.DataFrame(self.all_combinations_history)
 
     def get_combinations_summary(self) -> pd.DataFrame:
-        """Return a summary of all (sma_window, ema_window) combinations across walk-forward windows.
+        """
+        Restituisce un DataFrame riassuntivo che aggrega le performance di tutte le combinazioni
+        (sma_window, ema_window) calcolate su tutte le finestre del Walk-Forward.
         """
         df_all = self.get_combinations_dataframe()
         if df_all.empty:
@@ -566,7 +565,7 @@ class WalkForwardTrainer:
         ]:
             summary[col] = summary[col].round(2)
 
-        # Sort by selection frequency, then by mean out-of-sample Sharpe ratio.
+        # Ordina per frequenza di selezione e poi per Sharpe OOS medio
         summary = summary.sort_values(
             by=["times_best", "mean_oos_sharpe", "mean_is_score"],
             ascending=[False, False, False],
@@ -575,7 +574,7 @@ class WalkForwardTrainer:
         return summary
 
     def save_combinations_log(self, filepath: Union[str, Path]) -> None:
-        """Export the full list of tested combinations to CSV."""
+        """Esporta l'elenco completo di ogni combinazione testata su file CSV."""
         df_log = self.get_combinations_dataframe()
         if df_log.empty:
             raise ValueError("Nessun dato di combinazioni presente. Esegui prima .run().")
@@ -585,7 +584,7 @@ class WalkForwardTrainer:
         print(f"Log dettagliato combinazioni salvato in: {path} ({len(df_log)} righe)")
 
     def save_combinations_summary(self, filepath: Union[str, Path]) -> None:
-        """Export the aggregated summary of each combination to CSV."""
+        """Esporta la tabella riassuntiva aggregata per ciascuna combinazione su file CSV."""
         df_sum = self.get_combinations_summary()
         if df_sum.empty:
             raise ValueError("Nessun dato presente. Esegui prima .run().")
@@ -595,7 +594,7 @@ class WalkForwardTrainer:
         print(f"Riepilogo combinazioni aggregato salvato in: {path} ({len(df_sum)} righe)")
 
     def save_final_agent_config(self, filepath: Union[str, Path]) -> None:
-        """Save the final (modal) parameters to a JSON file readable by SMAEMAAgent."""
+        """Salva i parametri finali della moda in un JSON leggibile da SMAEMAAgent."""
         if self.selected_params is None:
             raise ValueError("Nessun parametro selezionato. Esegui prima .run().")
         path = Path(filepath)

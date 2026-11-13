@@ -1,21 +1,22 @@
-"""Centralised management of the project time periods.
+"""Gestione centralizzata dei periodi temporali del progetto Multi-Asset.
 
-Dates and permissions are read exclusively from ``config.yaml``. Existing
-functions keep their interfaces so that other modules can migrate gradually.
+Le date e le autorizzazioni si leggono esclusivamente da ``config.yaml``.
+Le funzioni esistenti mantengono le loro interfacce per consentire una
+migrazione graduale degli altri moduli.
 
-The module also provides the decision calendar
-(``build_weekly_decision_dates``): the last actual trading session of each week.
+Contiene anche il calendario delle decisioni (``build_weekly_decision_dates``):
+ultima seduta reale di ogni settimana.
 
-Core rules:
-- training starts at ``train_start`` when that date is defined;
-- validation starts at ``validation_start`` when that date is defined;
-- data preceding the training window may remain available to warm up
-  indicators (for example 126 sessions of covariance estimation);
-- the OOS period is hidden during development and requires two explicit
-  authorisations before it becomes accessible.
+Regole fondamentali:
+- il training inizia da ``train_start`` quando questa data e' definita;
+- la validation inizia da ``validation_start`` quando e' definita;
+- i dati precedenti al training possono restare disponibili per il
+  riscaldamento degli indicatori (ad esempio 126 sedute di covarianza);
+- il periodo OOS e' nascosto durante lo sviluppo e richiede una doppia
+  autorizzazione esplicita prima di essere reso accessibile.
 
-This module separates the periods, but it does NOT by itself prevent an
-improper use of the validation set during parameter selection.
+Questo modulo separa i periodi, ma NON impedisce da solo un utilizzo
+improprio della validation nella selezione dei parametri.
 """
 
 import pandas as pd
@@ -27,7 +28,7 @@ def _parse_boundary(
     *,
     required: bool,
 ) -> pd.Timestamp | None:
-    """Parse a date from the YAML file and validate its format."""
+    """Converte una data del file YAML e ne controlla il formato."""
     value = validation.get(name)
 
     if value is None:
@@ -51,16 +52,16 @@ def _parse_boundary(
 
 
 def get_time_windows(config: dict) -> dict[str, pd.Timestamp | None]:
-    """Read and validate all time boundaries, including the start dates.
+    """Legge e valida tutti i confini temporali, incluse le date iniziali.
 
-    For compatibility with the previous configuration:
-    - ``train_start`` is optional: if absent, training covers every
-      observation available up to ``train_end``;
-    - ``validation_start`` is optional: if absent, it is the first
-      calendar day after ``train_end``.
+    Per compatibilita' con la configurazione precedente:
+    - ``train_start`` e' facoltativa: se assente, il training comprende
+      tutte le osservazioni disponibili fino a ``train_end``;
+    - ``validation_start`` e' facoltativa: se assente, coincide con il
+      primo giorno di calendario successivo a ``train_end``.
 
-    Boundaries are inclusive. Days are not assumed to be trading sessions:
-    filters are applied to the actual dates present in the dataset.
+    I confini sono inclusivi. Non si presume che i giorni siano sedute
+    di borsa: i filtri si applicano alle date effettive del dataset.
     """
     validation = config.get("validation", {})
     if not isinstance(validation, dict):
@@ -101,7 +102,7 @@ def get_time_windows(config: dict) -> dict[str, pd.Timestamp | None]:
 def get_time_boundaries(
     config: dict,
 ) -> tuple[pd.Timestamp, pd.Timestamp, pd.Timestamp]:
-    """Return the three historical boundaries, preserving the existing interface."""
+    """Restituisce i tre confini storici, mantenendo l'interfaccia esistente."""
     windows = get_time_windows(config)
     return (
         windows["train_end"],
@@ -111,11 +112,11 @@ def get_time_boundaries(
 
 
 def is_oos_enabled(config: dict) -> bool:
-    """Authorise the OOS period only once development is complete.
+    """Autorizza l'OOS solo al termine dello sviluppo.
 
-    Access requires ``evaluation.evaluate_oos: true`` and, when present,
-    ``validation.development_only: false``. A contradictory configuration
-    raises an error instead of unlocking the final test.
+    L'accesso richiede ``evaluation.evaluate_oos: true`` e, se presente,
+    ``validation.development_only: false``. Una configurazione
+    contraddittoria genera un errore anziche' sbloccare il test finale.
     """
     evaluation = config.get("evaluation", {})
     validation = config.get("validation", {})
@@ -140,7 +141,7 @@ def is_oos_enabled(config: dict) -> bool:
 
 
 def _validate_time_index(df: pd.DataFrame) -> None:
-    """Check that the dates can be used without ambiguity."""
+    """Controlla che le date siano utilizzabili senza ambiguita'."""
     if not isinstance(df.index, pd.DatetimeIndex):
         raise TypeError("Il dataset deve utilizzare un DatetimeIndex.")
     if df.index.hasnans:
@@ -157,14 +158,14 @@ def restrict_to_allowed_period(
     df: pd.DataFrame,
     config: dict,
 ) -> pd.DataFrame:
-    """Exclude OOS data until it is explicitly authorised.
+    """Esclude i dati OOS fino alla loro autorizzazione esplicita.
 
-    During development, observations up to ``validation_end`` are kept.
-    Dates before ``train_start`` remain available to compute indicators
-    with a look-back window, without entering the training metrics
-    computed by ``split_time_periods``.
+    Durante lo sviluppo conserva le osservazioni fino a ``validation_end``.
+    Le date antecedenti a ``train_start`` rimangono disponibili per
+    calcolare indicatori con una finestra storica, senza entrare nelle
+    metriche di training calcolate da ``split_time_periods``.
 
-    This function does not perform the train/validation split.
+    Questa funzione non applica la suddivisione train/validation.
     """
     windows = get_time_windows(config)
     _validate_time_index(df)
@@ -185,12 +186,12 @@ def split_time_periods(
     df: pd.DataFrame,
     config: dict,
 ) -> dict[str, pd.DataFrame]:
-    """Split the dataset into training, validation and, optionally, OOS.
+    """Suddivide il dataset in training, validation ed eventuale OOS.
 
-    The periods follow the start and end dates defined in the YAML file.
-    No observation can belong to two periods. Dates falling in an unassigned
-    interval are left out of every split. The OOS set is returned only when
-    explicitly authorised.
+    I periodi rispettano le date iniziali e finali definite nel YAML.
+    Nessuna osservazione puo' appartenere a due periodi. Eventuali date
+    comprese in un intervallo non assegnato restano fuori dagli split.
+    L'OOS viene restituito soltanto se autorizzato esplicitamente.
     """
     windows = get_time_windows(config)
     data = restrict_to_allowed_period(df, config)
@@ -220,15 +221,15 @@ def split_time_periods(
 
 
 def build_weekly_decision_dates(market_daily: pd.DataFrame) -> pd.DataFrame:
-    """Identify the LAST actual trading session of each week.
+    """Individua l'ULTIMA seduta effettiva di ciascuna settimana.
 
-    A week with a market holiday may end on Thursday. Signals are computed
-    after that session closes and can be executed at the open of the next
-    available session.
+    Una settimana con festività può terminare di giovedi'. I segnali
+    vengono calcolati dopo la chiusura di quella seduta e possono essere
+    eseguiti all'apertura della prima seduta successiva disponibile.
     """
     session_dates = pd.Series(market_daily.index, index=market_daily.index)
     dates = session_dates.resample("W-FRI").last().dropna()
     decisions = pd.DataFrame({"decision_date": pd.to_datetime(dates.values)})
     decisions.index = pd.DatetimeIndex(decisions["decision_date"], name="Date")
-    # Unlike W-FRI labels, the index always refers to an actual trading session.
+    # A differenza delle etichette W-FRI, l'indice indica sempre una seduta reale.
     return decisions

@@ -1,0 +1,18 @@
+{
+  "sample": "2022+ signals; no OOS backtest executed",
+  "model_fit_after_2021": false,
+  "finbert_included": false,
+  "macro_point_in_time_verified": false,
+  "first_signal": "2022-01-07",
+  "last_signal": "2026-10-09",
+  "signals_per_asset": 249,
+  "inference_code_sha256": "65b01299ba5eb7e83fa543140c1f025beaf877907a29b2e1290148bbac995a9f",
+  "frozen_manifest_sha256": "1a0ab55434f132f392e6f8249a03c658393b262244cdf59de8076c796d011f7f",
+  "input_audit_sha256": "269e729b75a1844bdc1c213cc83fe6c9b812b39899dea2f3e0fe2c74341af7a8",
+  "output_sha256": {
+    "SPY": "db372b2a790b879a9e1dcbf3eac82b08090ca80f3d388689bd6d6fed0b0b2d9e",
+    "IEF": "723c3ca85fad4395a0329c0119dca33981679e91ac50024c875af6f48bec8b50",
+    "GLD": "536b66777e3f649ebe51cd2ceab6576e193a18708476c00f3aeee9394ebf15ef",
+    "SHY": "a67d3c41a0d9610138d80518287cd0d2570536a81f4ccd16b7a38b65a3491110"
+  }
+}

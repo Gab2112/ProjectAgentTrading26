@@ -1,23 +1,23 @@
-"""Trading agents of ProjectAgentTrading26.
+"""
+Modulo agenti per ProjectAgentTrading26.
 
-Exports:
-- BaseAgent: common abstract class with the standard ``predict()`` interface and the {-1, 0, 1} signal convention.
-- SMAEMAAgent (alias EMA_EMW_Agent): trend-following agent based on an SMA/EMA crossover.
-- SMAEMAOptimizer, WalkForwardTrainer: optimisation components for the SMA/EMA agent.
-- ZScoreAgent: mean-reversion agent with hysteresis-based exit logic.
-- ZScoreOptimizer, ZScoreWalkForwardTrainer: optimisation components for the Z-Score agent.
-- MacroYieldCurveAgent: macroeconomic agent based on the 10Y-2Y curve slope, regimes and inflation.
-- FinBERTAgent: sentiment agent based on the FinBERT transformer (lazily loaded).
-- download_news_dataset: acquisition and structuring of the financial news dataset.
-- SVMAgent: Support Vector Machine agent (annual walk-forward with purging, standardised decision function).
-- SVMOptimizer, SVMWalkForwardTrainer: hyperparameter selection with temporal CV and out-of-fold signals.
-- OrchestratorAgent: quantitative orchestrator that combines the agent signals.
-- OrchestratorOptimizer: optimisation of the Orchestrator weights and decision thresholds.
-- WalkForwardOrchestrator: rolling walk-forward validation of the Orchestrator.
+Esporta:
+- BaseAgent: classe astratta comune con interfaccia standard predict() e convenzione segnali {-1, 0, 1}
 
-Data, features and metrics are not defined here: see ``src/data_loader.py``,
-``src/features.py`` and ``src/evaluator.py`` (``calculate_performance_metrics``,
-``compute_objective_score``).
+Dati, feature e metriche NON stanno qui: vedi src/data_loader.py, src/features.py
+e src/evaluator.py (calculate_performance_metrics, compute_objective_score).
+- SMAEMAAgent (e alias EMA_EMW_Agent): Agente Trend-Following basato su crossover SMA / EMA
+- SMAEMAOptimizer, WalkForwardTrainer: Moduli di ottimizzazione per SMA/EMA
+- ZScoreAgent: Agente Mean-Reversion con logica di uscita a isteresi
+- ZScoreOptimizer, ZScoreWalkForwardTrainer: Moduli di ottimizzazione per Z-Score
+- MacroYieldCurveAgent: Agente macroeconomico basato su pendenza di curva (10Y-2Y), regimi e inflazione
+- FinBERTAgent: Agente sentiment basato su transformer FinBERT (lazy loaded)
+- download_news_dataset: Funzione per acquisire e strutturare il database delle notizie finanziarie
+- SVMAgent: Agente Support Vector Machine (walk-forward annuale con purge, decision_function standardizzata)
+- SVMOptimizer, SVMWalkForwardTrainer: scelta degli iperparametri con CV temporale e segnali out-of-fold
+- OrchestratorAgent: Agente Orchestratore quantitativo per la sintesi e combinazione ottima di segnali
+- OrchestratorOptimizer: Modulo di ottimizzazione dei pesi e delle soglie decisionali per l'Orchestratore
+- WalkForwardOrchestrator: Modulo per la validazione walk-forward rolling dell'Orchestratore
 """
 
 from .base_agent import BaseAgent
@@ -33,8 +33,7 @@ from .orchestrator_agent import (
 
 
 def __getattr__(name: str):
-    """Lazily import components with a high import overhead (e.g. torch / transformers).
-    """
+    """Lazy loading per componenti ad alto overhead di import (es. torch / transformers)."""
     if name in ("FinBERTAgent", "download_news_dataset"):
         try:
             from .FinBERT_agent import FinBERTAgent as _FBAgent, download_news_dataset as _dn_dataset

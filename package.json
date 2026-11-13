@@ -1,0 +1,15 @@
+{
+  "name": "luiss-group9-final-presentation",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Reproducible source for the final Group 9 PowerPoint deck",
+  "scripts": {
+    "build:slides": "node scripts/build_presentation.js"
+  },
+  "devDependencies": {
+    "pptxgenjs": "4.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

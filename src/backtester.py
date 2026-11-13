@@ -1,24 +1,24 @@
-"""Execution and recording of the multi-asset backtests.
+"""Esecuzione e registrazione dei backtest del progetto Multi-Asset.
 
-The module coordinates strategies A1 and A2 through a SINGLE simulation
-engine, ``simula_portafoglio`` in ``execution_engine.py``. It does not
-implement a second portfolio valuation algorithm.
+Il modulo coordina le strategie A1 e A2 utilizzando un UNICO motore di
+simulazione, ``simula_portafoglio`` in ``execution_engine.py``.
+Non implementa un secondo algoritmo di valorizzazione del portafoglio.
 
-Responsibilities:
-1. read adjusted Open/Close prices from the daily panel;
-2. read the target weights produced by ``portfolio.py``;
-3. prevent validation and OOS data from entering the training backtest;
-4. execute orders at the first open after each decision;
-5. save NAV, returns, turnover, costs and effective weights per strategy.
+Responsabilita':
+1. leggere prezzi Open/Close rettificati dal pannello giornaliero;
+2. leggere i pesi target prodotti da ``portfolio.py``;
+3. impedire che validation e OOS entrino nel backtest di training;
+4. eseguire gli ordini alla prima apertura successiva alla decisione;
+5. salvare NAV, rendimenti, turnover, costi e pesi effettivi per strategia.
 
-Financial metrics (CAGR, Sharpe, drawdown) are computed in ``evaluator.py``.
-The strategy is selected through ``level`` or ``pipeline.active_level``.
+Le metriche finanziarie (CAGR, Sharpe, drawdown) spettano a ``evaluator.py``.
+La scelta della strategia avviene tramite ``level`` o ``pipeline.active_level``.
 
-Public interface:
+Interfaccia pubblica:
     run_backtest(config, root_dir, level=None, portfolios=None)
 
-Only levels A1 and A2 are executed here, on the training period only.
-Levels B, C and the OOS period are never run by this module.
+Durante questa fase sono implementati soltanto i livelli A1 e A2,
+esclusivamente sul training. Non vengono mai eseguiti B, C o OOS.
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ SAFE_NAME = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def _select_level(config: dict, level: str | None) -> str:
-    """Identify the requested level and reject levels that are not implemented."""
+    """Identifica il livello richiesto e impedisce esecuzioni non implementate."""
     selected = str(
         level if level is not None else config.get("pipeline", {}).get("active_level", "A1")
     ).upper()
@@ -63,7 +63,7 @@ def _select_level(config: dict, level: str | None) -> str:
 
 
 def _strategy_names(config: dict, level: str) -> list[str]:
-    """Derive the strategy names without depending on files already present."""
+    """Ricava i nomi delle strategie, senza dipendere dai file gia' presenti."""
     if level == "A1":
         benchmarks = config.get("benchmarks", {})
         if not isinstance(benchmarks, dict) or not benchmarks:
@@ -85,7 +85,7 @@ def _strategy_names(config: dict, level: str) -> list[str]:
 
 
 def _execution_parameters(config: dict) -> dict[str, float]:
-    """Read costs and initial capital and validate the execution convention."""
+    """Legge costi e capitale iniziale, validando la convenzione esecutiva."""
     execution = config.get("execution", {})
     if not isinstance(execution, dict):
         raise TypeError("La sezione 'execution' deve essere un dizionario.")
@@ -116,7 +116,7 @@ def _execution_parameters(config: dict) -> dict[str, float]:
 
 
 def _validate_index(frame: pd.DataFrame, label: str) -> None:
-    """Validate the dates before applying any sorting or time filter."""
+    """Verifica le date prima di applicare ordinamenti o filtri temporali."""
     index = frame.index
     if not isinstance(index, pd.DatetimeIndex):
         raise TypeError(f"{label}: e' richiesto un DatetimeIndex.")
@@ -129,17 +129,18 @@ def _validate_index(frame: pd.DataFrame, label: str) -> None:
 def load_market_prices(
     config: dict, root_dir: Path,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Read prices and select training sessions only.
+    """Legge i prezzi e seleziona esclusivamente le sedute di training.
 
-    Data before ``train_start`` is used by ``portfolio.py`` for indicators but
-    does NOT enter the accounting period of the backtest. Validation and OOS
-    observations are removed before the simulation engine is called.
+    I dati precedenti a ``train_start`` servono a ``portfolio.py`` per gli
+    indicatori, ma NON entrano nel periodo contabile del backtest.
+    Le osservazioni di validation e OOS vengono escluse prima della
+    chiamata al motore di simulazione.
     """
     tickers = get_tickers(config)
     if len(tickers) != 4 or set(tickers) != set(ASSETS):
         raise ValueError("Il backtest A1/A2 richiede SPY, IEF, GLD e SHY.")
 
-    # Prevent the final test from being unlocked accidentally at this stage.
+    # Impedisci lo sblocco accidentale del test finale in questa fase.
     if is_oos_enabled(config):
         raise ValueError("Backtest OOS non autorizzato: questa pipeline e' limitata al training.")
 
@@ -183,7 +184,7 @@ def load_market_prices(
 def load_target_weights(
     config: dict, root_dir: Path, level: str, name: str,
 ) -> pd.DataFrame:
-    """Load the weights generated by ``portfolio.py`` for a single strategy."""
+    """Carica i pesi generati da ``portfolio.py`` per una singola strategia."""
     path = (
         Path(root_dir)
         / config["paths"]["signals"]
@@ -205,7 +206,7 @@ def _validate_targets(
     config: dict,
     name: str,
 ) -> pd.DataFrame:
-    """Validate weights, calendar and compliance with the training boundaries."""
+    """Convalida pesi, calendario e rispetto dei confini di training."""
     if not isinstance(targets, pd.DataFrame):
         raise TypeError(f"{name}: i pesi target devono essere un DataFrame.")
     _validate_index(targets, f"Target {name}")
@@ -222,7 +223,7 @@ def _validate_targets(
     if not targets.index.isin(prices.index).all():
         raise ValueError(f"{name}: alcune decisioni non corrispondono a sedute di mercato.")
 
-    # Weights are not silently reordered: the canonical order is that of the prices.
+    # Non riordinare silenziosamente i pesi: l'ordine canonico e' quello dei prezzi.
     ordered = targets.loc[:, tickers].copy()
     for ticker in tickers:
         ordered[ticker] = pd.to_numeric(ordered[ticker], errors="raise")
@@ -235,7 +236,7 @@ def _validate_targets(
     ):
         raise ValueError(f"{name}: pesi non validi (richiesti long-only e somma 100%).")
 
-    # The engine only processes decisions followed by at least one session.
+    # Il motore gestira' soltanto le decisioni con almeno una seduta successiva.
     return ordered
 
 
@@ -245,7 +246,7 @@ def _validate_simulation(
     targets: pd.DataFrame,
     name: str,
 ) -> dict:
-    """Check the essential accounting invariants after the backtest."""
+    """Verifica gli invarianti contabili essenziali dopo il backtest."""
     if not result.index.equals(opens.index):
         raise RuntimeError(f"{name}: il motore ha alterato il calendario delle sedute.")
 
@@ -269,8 +270,8 @@ def _validate_simulation(
     if (result["rendimento_netto"] <= -1).any():
         raise RuntimeError(f"{name}: rendimento giornaliero minore o uguale a -100%.")
 
-    # A signal at the last training close is NOT executed inside the validation
-    # period: this omission is deliberate and recorded in the report.
+    # Un segnale all'ultima chiusura del training NON viene eseguito nella
+    # validation: questa omissione e' deliberata e contabilizzata nel report.
     executable = int(targets.index.isin(opens.index[:-1]).sum())
     trades = int(result["operazione_eseguita"].sum())
     if executable == 0 or trades != executable:
@@ -293,10 +294,10 @@ def run_backtest(
     level: str | None = None,
     portfolios: dict[str, pd.DataFrame] | None = None,
 ) -> tuple[dict[str, pd.DataFrame], dict[str, dict]]:
-    """Run the backtests of one level and save one output per strategy.
+    """Esegue i backtest di un livello e salva un output per strategia.
 
-    If ``portfolios`` is provided, the DataFrames produced by ``run_portfolio``
-    are used directly; otherwise the ``target_weights.csv`` files are read.
+    Se ``portfolios`` e' fornito, usa i DataFrame gia' prodotti da
+    ``run_portfolio``. Altrimenti legge i file ``target_weights.csv``.
 
     Output:
         data/results/A1/<benchmark>/backtest_daily.csv
@@ -304,8 +305,8 @@ def run_backtest(
         data/results/A2/volatility_control/backtest_daily.csv
         data/results/A2/volatility_control/execution_summary.json
 
-    Returns two dictionaries: daily results and execution summaries.
-    Financial performance ratios are computed by the evaluator.
+    Restituisce due dizionari: risultati giornalieri e riepiloghi operativi.
+    Non calcola indici di performance finanziaria: li produrra' l'evaluator.
     """
     root_dir = Path(root_dir)
     selected = _select_level(config, level)
@@ -328,7 +329,7 @@ def run_backtest(
         )
         targets = _validate_targets(targets, opens, config, name)
 
-        # All accounting is delegated to the single shared engine.
+        # Tutta la contabilità e' demandata a un unico motore gia' esistente.
         result = simula_portafoglio(
             aperture=opens,
             chiusure=closes,
@@ -353,8 +354,8 @@ def run_backtest(
             **checks,
         }
 
-        # Each strategy has its own path, so no strategy overwrites another
-        # or the results of the earlier Treasury pipeline.
+        # Ogni strategia ha un percorso distinto, senza sovrascrivere altre
+        # strategie o i risultati della vecchia pipeline Treasury.
         output_dir = root_dir / config["paths"]["results"] / selected / name
         output_dir.mkdir(parents=True, exist_ok=True)
         result.to_csv(output_dir / "backtest_daily.csv", index_label="Date")

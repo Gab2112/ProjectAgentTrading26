@@ -1,337 +1,239 @@
-"""In-sample (training) comparison of the Equal Active allocation (2005-05-20 to 2020-12-30).
-
-Objective:
-- Compare the Equal Active strategy on four assets (SPY, IEF, GLD and SHY,
-  the latter as a cash proxy / short-term Treasury) with the buy-and-hold
-  benchmark (100% SPY) and the defensive buy-and-hold benchmark (100% SHY).
-- Apply a fixed maximum weight (cap) of 50% per asset.
-- Set transaction costs to zero (tc = 0.0).
-- Compute risk/return metrics, the number of position changes and turnover.
-"""
-
-from __future__ import annotations
-
-import json
-import os
-import sys
-import warnings
-from pathlib import Path
-from typing import Tuple, List, Dict, Optional
-
-# Temporary directory for matplotlib.
-os.environ["MPLCONFIGDIR"] = str(Path(os.environ.get("TEMP", "/tmp")) / "matplotlib_pat")
-
-# Project path resolution.
-CURRENT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = CURRENT_DIR if (CURRENT_DIR / "config.yaml").exists() else CURRENT_DIR.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
 import numpy as np
 import pandas as pd
-import yaml
-
-from src.agents.orchestrator_agent import OrchestratorAgent
-from src.data_loader import load_agent_macro_data, load_daily_market_data
-from src.features import build_decision_feature_panel
-from src.time_split import build_weekly_decision_dates
-
-warnings.filterwarnings("ignore")
+import os
 
 
-# =====================================================================
-# INTEGRATED MULTI-ASSET AGGREGATOR
-# =====================================================================
-
-class MultiAssetSignalAggregator:
-    """Quantitative engine for signal aggregation and dynamic multi-asset allocation."""
-
-    def __init__(
-        self,
-        assets: Optional[List[str]] = None,
-        min_conf: float = 0.20,
-        rebalance_threshold: float = 0.05,
-        transaction_cost: float = 0.0,
-        vol_window: int = 26,
-    ):
-        self.assets = assets or ["SPY", "IEF", "GLD", "SHY"]
-        self.min_conf = float(min_conf)
-        self.rebalance_threshold = float(rebalance_threshold)
-        self.transaction_cost = float(transaction_cost)
-        self.vol_window = int(vol_window)
-
-    def determine_active_mask(
-        self,
-        signals_df: pd.DataFrame,
-        confidences_df: pd.DataFrame,
-    ) -> pd.DataFrame:
-        """Determine the active state (True/False) of each asset.
-
-        SPY follows an asymmetric rule (long unless a confirmed short signal);
-        the other assets require a long signal with sufficient confidence.
-        """
-        active_mask = pd.DataFrame(False, index=signals_df.index, columns=self.assets)
-
-        for asset in self.assets:
-            if asset not in signals_df.columns:
-                continue
-            s = signals_df[asset]
-            c = confidences_df[asset] if asset in confidences_df.columns else pd.Series(1.0, index=s.index)
-
-            if asset == "SPY":
-                # SPY: long by default; deactivated only on a confirmed short signal.
-                short_signal = (s < 0) & (c >= self.min_conf)
-                active_mask[asset] = ~short_signal
-            else:
-                # IEF, GLD, SHY: active only with a long signal (+1) and sufficient confidence.
-                active_mask[asset] = (s == 1) & (c >= self.min_conf)
-
-        return active_mask
-
-    def build_target_weights(
-        self,
-        signals_df: pd.DataFrame,
-        confidences_df: pd.DataFrame,
-        returns_df: pd.DataFrame,
-        method: str = "equal_active",
-        base_budgets: Optional[Dict[str, float]] = None,
-        max_weight_per_asset: float = 0.50,
-    ) -> pd.DataFrame:
-        """Generate target weights by allocating capital equally across the active assets, subject to the per-asset cap.
-        """
-        common_idx = signals_df.index.intersection(returns_df.index)
-        sig = signals_df.loc[common_idx]
-        conf = confidences_df.loc[common_idx]
-
-        active_mask = self.determine_active_mask(sig, conf)
-        target_weights = pd.DataFrame(0.0, index=common_idx, columns=self.assets)
-
-        for t in common_idx:
-            active_assets_t = [a for a in self.assets if active_mask.loc[t, a]]
-
-            if not active_assets_t:
-                continue
-
-            if method == "equal_active":
-                w_each = 1.0 / len(active_assets_t)
-                for a in active_assets_t:
-                    target_weights.loc[t, a] = min(w_each, max_weight_per_asset)
-
-                tot = target_weights.loc[t].sum()
-                if 0 < tot < 1.0 and len(active_assets_t) > 1:
-                    target_weights.loc[t] = target_weights.loc[t] / tot
-            else:
-                raise ValueError(f"Metodo {method} non supportato in questa configurazione.")
-
-        return target_weights
-
-
-# =====================================================================
-# BACKTEST ENGINE WITHOUT COMMISSIONS, WITH POSITION-CHANGE COUNT
-# =====================================================================
-
-def run_backtest_no_costs(
-    positions_matrix: pd.DataFrame,
-    returns_matrix: pd.DataFrame,
-    rebalance_threshold: float = 0.05,
-    periods_per_year: int = 52,
-) -> Tuple[pd.DataFrame, pd.Series]:
-    """Run the portfolio backtest without transaction costs (tc = 0.0).
-
-    The number of effective position changes and the cumulative turnover are
-    tracked explicitly.
-    """
-    common_idx = positions_matrix.index.intersection(returns_matrix.index)
-    pos_target = positions_matrix.loc[common_idx]
-    rets = returns_matrix.loc[common_idx]
-
-    executed_positions = pd.DataFrame(0.0, index=common_idx, columns=pos_target.columns)
-    current_pos = pd.Series(0.0, index=pos_target.columns)
-
-    for t in common_idx:
-        target = pos_target.loc[t]
-        weight_changes = (target - current_pos).abs()
-
-        if (weight_changes >= rebalance_threshold).any():
-            current_pos = target.copy()
-
-        executed_positions.loc[t] = current_pos
-
-    # Gross returns (equal to net returns since tc = 0.0).
-    shifted_pos = executed_positions.shift(1).fillna(0.0)
-    pos_diff = executed_positions.diff().abs().fillna(0.0)
-    turnover = pos_diff.sum(axis=1) / 2.0
-
-    net_returns = (shifted_pos * rets).sum(axis=1)
-    equity_curve = (1.0 + net_returns).cumprod()
-
-    # Compute the metrics.
-    total_return = equity_curve.iloc[-1] - 1.0
-    ann_return = (equity_curve.iloc[-1]) ** (periods_per_year / len(equity_curve)) - 1.0
-    ann_volatility = net_returns.std() * np.sqrt(periods_per_year)
-    sharpe_ratio = ann_return / ann_volatility if ann_volatility != 0 else 0.0
-
-    drawdown = (equity_curve - equity_curve.cummax()) / equity_curve.cummax()
-    max_drawdown = drawdown.min()
-    calmar_ratio = abs(ann_return / max_drawdown) if max_drawdown != 0 else 0.0
-
-    # Count every week in which the portfolio composition actually changed.
-    rebalance_weeks_count = int((pos_diff.sum(axis=1) > 1e-5).sum())
-
-    metrics = pd.Series({
-        "Rendimento Totale (%)": total_return * 100,
-        "Rendimento Ann. (%)": ann_return * 100,
-        "Volatilità Ann. (%)": ann_volatility * 100,
-        "Sharpe Ratio": sharpe_ratio,
-        "Max Drawdown (%)": max_drawdown * 100,
-        "Calmar Ratio": calmar_ratio,
-        "N° Variazioni di Posizione": float(rebalance_weeks_count),
-        "Turnover Cumulato": turnover.sum(),
-    })
-
-    bt_dataframe = pd.DataFrame({
-        "Return": net_returns,
-        "Equity": equity_curve,
-        "Turnover": turnover,
-    })
-
-    return bt_dataframe, metrics
-
-
-# =====================================================================
-# DATA LOADING AND SIGNAL GENERATION WITH THE TRAINED PARAMETERS
-# =====================================================================
-
-def build_full_dataset(project_root: Path, assets: List[str]) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Load the daily market data and build the weekly panel for the requested assets.
-    """
-    with open(project_root / "config.yaml", "r", encoding="utf-8") as f:
-        config = yaml.safe_load(f)
-
-    daily_market, _ = load_daily_market_data(config, project_root)
-    decision_dates = build_weekly_decision_dates(daily_market).index
-
-    df_panel = build_decision_feature_panel(daily_market, decision_dates)
-    macro_df = load_agent_macro_data(decision_dates=df_panel.index, root_dir=project_root)
-    df_full = df_panel.join(macro_df, how="left")
-
+def process_features_to_market_data(df_features, asset_names, vol_window=20):
     returns_dict = {}
-    for asset in assets:
-        returns_dict[asset] = df_full[f"{asset}_close"].pct_change()
-    returns_df = pd.DataFrame(returns_dict).dropna()
+    volatilities_dict = {}
 
-    return df_full, returns_df
+    for asset in asset_names:
+        if f'{asset}_return' in df_features.columns:
+            rets = df_features[f'{asset}_return']
+        elif f'{asset}_Close' in df_features.columns:
+            rets = df_features[f'{asset}_Close'].pct_change()
+        elif f'{asset}_close' in df_features.columns:
+            rets = df_features[f'{asset}_close'].pct_change()
+        else:
+            raise ValueError(
+                f"Attenzione: Impossibile trovare una colonna di prezzo o rendimento per l'asset '{asset}'.")
 
+        returns_dict[asset] = rets
 
-def generate_orchestrator_signals(
-    assets: List[str],
-    df_features: pd.DataFrame,
-    project_root: Path,
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Generate the in-sample signals using the models and weights defined during training.
-    """
-    signals_dict, confs_dict = {}, {}
-    cfg_dir = project_root / "src/agents/config"
+        if f'{asset}_volatility' in df_features.columns:
+            vols = df_features[f'{asset}_volatility']
+        else:
+            vols = rets.rolling(window=vol_window).std()
 
-    for asset in assets:
-        cfg_file = cfg_dir / f"orchestrator_params_{asset.lower()}.json"
-        with open(cfg_file, "r", encoding="utf-8") as f:
-            cfg_data = json.load(f)
+        volatilities_dict[asset] = vols
 
-        orch = OrchestratorAgent(target_asset=asset)
-        orch._apply_params(cfg_data.get("best_params", {}))
+    returns_df = pd.DataFrame(returns_dict)
+    volatilities_df = pd.DataFrame(volatilities_dict)
 
-        pool = orch._build_signals_pool_from_df(df_features)
-        combined = orch.combine(pool)
+    returns_df = returns_df.dropna()
+    volatilities_df = volatilities_df.reindex(returns_df.index).bfill()
 
-        signals_dict[asset] = combined["signal"]
-        confs_dict[asset] = combined["confidence"]
-
-    return pd.DataFrame(signals_dict), pd.DataFrame(confs_dict)
+    return returns_df, volatilities_df
 
 
-def run_comparison_3vs4_assets_is():
-    """Run the in-sample comparison of the Equal Active strategy with the buy-and-hold benchmarks and print the metrics.
-    """
-    all_assets = ["SPY", "IEF", "GLD", "SHY"]
-    assets_4 = ["SPY", "IEF", "GLD", "SHY"]
+def generate_dynamic_growth_matrix(
+        asset_dfs,
+        df_features=None,
+        signal_col='signal',
+        conf_col='confidence',
+        vol_col='volatility',
+        default_vol=0.01,
+        min_confidence=0.35,
+        hysteresis_buffer=0.015
+):
+    signals_dict = {}
+    confidences_dict = {}
+    volatilities_dict = {}
 
-    # Explicit in-sample (training) date range.
-    is_start_date = "2005-05-20"
-    is_end_date = "2020-12-30"
-    cap = 0.50  # Fixed 50% cap per asset
+    for asset, df in asset_dfs.items():
+        if signal_col not in df.columns or conf_col not in df.columns:
+            raise ValueError(f"Il DataFrame per '{asset}' deve contenere le colonne '{signal_col}' e '{conf_col}'.")
 
-    print("=" * 115)
-    print("      COMPARAZIONE DIRETTA: EQUAL ACTIVE (3 VS 4 ASSET) VS BENCHMARK (SPY E SHY)")
-    print(f"                             VALIDAZIONE IN-SAMPLE / TRAIN ({is_start_date} -> {is_end_date})")
-    print("=" * 115)
+        sig = df[signal_col].copy()
 
-    # 1. Load the full dataset.
-    print("\n[1/3] Caricamento dati e feature settimanali per la finestra In-Sample...")
-    df_features, returns_full = build_full_dataset(PROJECT_ROOT, all_assets)
+        # Filtro Long-Only per SPY
+        if asset == 'SPY' and df_features is not None:
+            close_col = 'SPY_Close' if 'SPY_Close' in df_features.columns else 'SPY_close'
+            if close_col in df_features.columns:
+                sma_trend = df_features[close_col].rolling(window=30).mean()
+                bullish_trend = df_features[close_col] > sma_trend
+                sig[(sig == -1) & bullish_trend] = 0
 
-    # 2. Generate the signals for the four assets.
-    print(f"[2/3] Generazione segnali IS per gli asset: {all_assets}...")
-    signals_full, confidences_full = generate_orchestrator_signals(all_assets, df_features, PROJECT_ROOT)
+        signals_dict[asset] = sig
+        confidences_dict[asset] = df[conf_col]
 
-    common_idx = signals_full.index.intersection(returns_full.index)
+        if vol_col in df.columns:
+            volatilities_dict[asset] = df[vol_col]
+        else:
+            volatilities_dict[asset] = pd.Series(default_vol, index=df.index)
 
-    # Exact in-sample filter between the specified start and end dates.
-    is_idx = common_idx[(common_idx >= is_start_date) & (common_idx <= is_end_date)]
+    signals_df = pd.DataFrame(signals_dict).dropna(how='all')
+    confidences_df = pd.DataFrame(confidences_dict).reindex(signals_df.index).fillna(0)
+    volatilities_df = pd.DataFrame(volatilities_dict).reindex(signals_df.index).fillna(default_vol)
 
-    signals_is = signals_full.loc[is_idx]
-    confs_is = confidences_full.loc[is_idx]
-    returns_is = returns_full.loc[is_idx]
+    assets = list(asset_dfs.keys())
+    positions_matrix = pd.DataFrame(0.0, index=signals_df.index, columns=assets)
 
-    print(f"  * Periodo IS Effettivo: {is_idx.min():%Y-%m-%d} -> {is_idx.max():%Y-%m-%d} ({len(is_idx)} settimane)")
+    current_holding = None
 
-    results = {}
+    for t in signals_df.index:
+        S = signals_df.loc[t]
+        C = confidences_df.loc[t]
+        V = volatilities_df.loc[t]
 
-    # ------------------------------------------------------------------
-    # 2. Equal Active strategy - 4 assets (SPY, IEF, GLD, SHY)
-    # ------------------------------------------------------------------
-    agg_4 = MultiAssetSignalAggregator(
-        assets=assets_4,
-        min_conf=0.20,
-        rebalance_threshold=0.05,
-        transaction_cost=0.0,
-    )
-    weights_4 = agg_4.build_target_weights(
-        signals_df=signals_is[assets_4],
-        confidences_df=confs_is[assets_4],
-        returns_df=returns_is[assets_4],
-        method="equal_active",
-        max_weight_per_asset=cap,
-    )
-    _, m_quant_4 = run_backtest_no_costs(weights_4, returns_is[assets_4], rebalance_threshold=0.05)
-    results["Equal Active (4 Asset: incl. SHY)"] = m_quant_4
+        valid_mask = (S != 0) & (C >= min_confidence)
 
-    # ------------------------------------------------------------------
-    # 3. Buy-and-hold benchmark (100% SPY)
-    # ------------------------------------------------------------------
-    pos_spy = pd.DataFrame(0.0, index=is_idx, columns=all_assets)
-    pos_spy["SPY"] = 1.0
-    _, m_spy = run_backtest_no_costs(pos_spy, returns_is[all_assets], rebalance_threshold=0.0)
-    results["Buy & Hold (100% SPY)"] = m_spy
+        if not valid_mask.any():
+            current_holding = None
+            continue
 
-    # ------------------------------------------------------------------
-    # 4. Buy-and-hold benchmark (100% SHY)
-    # ------------------------------------------------------------------
-    pos_shy = pd.DataFrame(0.0, index=is_idx, columns=all_assets)
-    pos_shy["SHY"] = 1.0
-    _, m_shy = run_backtest_no_costs(pos_shy, returns_is[all_assets], rebalance_threshold=0.0)
-    results["Buy & Hold (100% SHY)"] = m_shy
+        scores = (S * C) / (V + 1e-8)
 
-    df_results = pd.DataFrame(results)
+        # Boost dinamico su SPY basato sul trend
+        if 'SPY' in scores.index and valid_mask['SPY'] and df_features is not None:
+            close_col = 'SPY_Close' if 'SPY_Close' in df_features.columns else 'SPY_close'
+            try:
+                price = df_features.loc[t, close_col]
+                sma = df_features[close_col].rolling(window=30).mean().loc[t]
+                if price > sma:
+                    trend_strength = min(2.5, max(1.2, price / sma))
+                    scores['SPY'] *= trend_strength
+            except KeyError:
+                scores['SPY'] *= 1.5
 
-    # 3. Final output.
-    print("\n[3/3] Risultati della comparazione IS (Train):")
-    print("\n" + "=" * 115)
-    print("                                TABELLA COMPARATIVA METRICHE IS")
-    print("=" * 115)
-    print(df_results.round(2).to_string())
-    print("-" * 115)
+        abs_scores = scores.abs()
+        candidate_best = abs_scores[valid_mask].idxmax()
+        candidate_score = abs_scores[valid_mask][candidate_best]
+
+        chosen_asset = candidate_best
+
+        if current_holding is not None and current_holding in abs_scores.index:
+            if valid_mask[current_holding]:
+                prev_score = abs_scores[current_holding]
+                required_score = prev_score * (1.0 + hysteresis_buffer)
+
+                if candidate_score < required_score:
+                    chosen_asset = current_holding
+
+        positions_matrix.loc[t, chosen_asset] = np.sign(S[chosen_asset])
+        current_holding = chosen_asset
+
+    return positions_matrix
 
 
+def run_backtest(positions_matrix, returns_df, transaction_cost_pct=0.001):
+    common_index = positions_matrix.index.intersection(returns_df.index)
+    pos = positions_matrix.loc[common_index]
+    rets = returns_df.loc[common_index]
+
+    executed_positions = pos.shift(1).fillna(0)
+
+    position_changes = pos.diff().abs().fillna(0)
+    turnover = position_changes.sum(axis=1) / 2.0
+    transaction_costs = turnover * transaction_cost_pct
+
+    strategy_gross_returns = (executed_positions * rets).sum(axis=1)
+    strategy_net_returns = strategy_gross_returns - transaction_costs
+    equity_curve = (1.0 + strategy_net_returns).cumprod()
+
+    return pd.DataFrame({
+        'Gross_Return': strategy_gross_returns,
+        'Net_Return': strategy_net_returns,
+        'Transaction_Costs': transaction_costs,
+        'Equity_Curve': equity_curve
+    })
+
+
+def calculate_performance_metrics(backtest_results, periods_per_year=52):
+    net_returns = backtest_results['Net_Return']
+    equity = backtest_results['Equity_Curve']
+
+    total_return = equity.iloc[-1] - 1.0
+    n_periods = len(equity)
+    annualized_return = (equity.iloc[-1]) ** (periods_per_year / n_periods) - 1.0
+    annualized_vol = net_returns.std() * np.sqrt(periods_per_year)
+    sharpe_ratio = annualized_return / annualized_vol if annualized_vol != 0 else 0.0
+
+    rolling_max = equity.cummax()
+    drawdown = (equity - rolling_max) / rolling_max
+    max_drawdown = drawdown.min()
+
+    total_trades = (backtest_results['Transaction_Costs'] > 0).sum()
+
+    return pd.Series({
+        "Rendimento Totale (%)": total_return * 100,
+        "Rendimento Annualizzato (%)": annualized_return * 100,
+        "Volatilità Annualizzata (%)": annualized_vol * 100,
+        "Sharpe Ratio": sharpe_ratio,
+        "Maximum Drawdown (%)": max_drawdown * 100,
+        "Numero di Trade": total_trades
+    })
+
+
+# --- ESECUZIONE FINALE: CORE 35% & SATELLITE 65% ---
 if __name__ == "__main__":
-    run_comparison_3vs4_assets_is()
+    folder_path = "../data/signals/"
+    asset_names = ['SHY', 'IEF', 'GLD', 'SPY']
+    asset_dfs = {}
+
+    for asset in asset_names:
+        file_name = f"signals_orchestrator_{asset.lower()}.csv"
+        file_path = os.path.join(folder_path, file_name)
+        df = pd.read_csv(file_path, parse_dates=['Date'], index_col='Date')
+        asset_dfs[asset] = df
+
+    features_path = "../data/processed/features_weekly.csv"
+    df_features = pd.read_csv(features_path, parse_dates=['Date'], index_col='Date')
+
+    print("--- Generazione Matrice Satellite Dinamica ---")
+    satellite_raw = generate_dynamic_growth_matrix(
+        asset_dfs=asset_dfs,
+        df_features=df_features,
+        signal_col='signal',
+        conf_col='confidence',
+        vol_col='volatility',
+        default_vol=0.1,
+        min_confidence=0.35,
+        hysteresis_buffer=0.015
+    )
+
+    returns_df, _ = process_features_to_market_data(df_features, asset_names=asset_names)
+
+    # Configurazione Fissa Ottimale: Core 35% / Satellite 65%
+    core_pct = 0.35
+    satellite_pct = 0.65
+
+    print(f"\n--- ESECUZIONE PORTAFOGLIO FINALE (Core {int(core_pct * 100)}% / Sat {int(satellite_pct * 100)}%) ---")
+
+    core_matrix = pd.DataFrame(0.0, index=satellite_raw.index, columns=asset_names)
+    core_matrix['SPY'] = core_pct
+
+    scaled_satellite = satellite_raw * satellite_pct
+    final_portfolio_matrix = core_matrix + scaled_satellite
+
+    # Backtest della strategia ottimizzata
+    bt_res = run_backtest(final_portfolio_matrix, returns_df, transaction_cost_pct=0.001)
+    metrics_strategy = calculate_performance_metrics(bt_res, periods_per_year=52)
+
+    # Benchmark SPY Puro (Buy & Hold 100%)
+    spy_benchmark_matrix = pd.DataFrame(0.0, index=satellite_raw.index, columns=asset_names)
+    spy_benchmark_matrix['SPY'] = 1.0
+    spy_bt_res = run_backtest(spy_benchmark_matrix, returns_df, transaction_cost_pct=0.001)
+    metrics_spy = calculate_performance_metrics(spy_bt_res, periods_per_year=52)
+
+    # Tabella di confronto finale
+    final_comparison = pd.DataFrame({
+        f"Core {int(core_pct * 100)}% + Satellite": metrics_strategy,
+        "Benchmark (SPY 100%)": metrics_spy
+    })
+
+    print("\n" + "=" * 70)
+    print("--- RISULTATI FINALI A CONFRONTO ---")
+    print("=" * 70)
+    print(final_comparison.round(2).to_string())
+    print("=" * 70)

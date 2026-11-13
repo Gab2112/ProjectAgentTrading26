@@ -11,19 +11,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def digest(path: Path) -> str:
-    """Return the SHA-256 hex digest of a file."""
     if not path.is_file():
         raise FileNotFoundError(path)
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def read_json(path: Path) -> dict:
-    """Read a UTF-8 JSON file."""
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 def verify_hashes(mapping: dict, root: Path, label: str) -> None:
-    """Verify that every listed file exists and matches its recorded SHA-256 hash."""
     for relative, expected in mapping.items():
         actual = digest(root / relative)
         if actual != expected:
@@ -71,13 +68,6 @@ def verify_package_manifest(root: Path) -> int | None:
 
 
 def audit_release(root: Path = ROOT) -> dict:
-    """Verify the integrity of the frozen release without training or backtesting.
-
-    Checks the development freeze record, the frozen code and model hashes, the
-    raw input hashes, the archived release artifacts, the OOS signal and
-    evaluation provenance, the optional submission manifest and the weekly
-    decision calendars. Returns the release artifact index.
-    """
     reports = root / "reports"
 
     freeze_path = reports / "development_freeze_2021.json"
@@ -177,7 +167,6 @@ def audit_release(root: Path = ROOT) -> dict:
 
 
 def show_frozen_results(root: Path = ROOT) -> None:
-    """Audit the release and print the archived final OOS metrics (read-only)."""
     import pandas as pd
 
     audit_release(root)
@@ -226,7 +215,6 @@ def show_frozen_results(root: Path = ROOT) -> None:
 
 
 def main() -> None:
-    """Command-line entry point for the audit and the archived results viewer."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "action",

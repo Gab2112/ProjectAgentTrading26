@@ -1,71 +1,36 @@
-# ProjectAgentTrading26 | Group 9
+# Group 9 | ProjectAgentTrading26
 
-**LUISS Guido Carli — Data-Driven Models for Investment**
-**Research system:** multi-asset systematic trading with quantitative agents
-**Scientific documentation review:** 10 November 2026 · **Code reference:** branch `integrazione-finale`; the frozen experiment is identified by `reports/development_freeze_2021.json`
+**LUISS Guido Carli · Data-Driven Models for Investment**
 
-> **Reading guide.** The archived **Core35–Satellite65** strategy is the official, pre-2022-frozen candidate. Temporal-slice statistics and the **Regime-Adaptive SMA200** extension are subsequent research diagnostics. They are not replacements for, or independent new out-of-sample validations of, the official candidate.
+**Python 3.11 · Scientific freeze 7 November 2026 · Final submission edition 13 November 2026**
 
-## 1. At a glance
+This submission documents the selected **Core35-Satellite65** systematic
+strategy on four investable ETFs: SPY, IEF, GLD and SHY. A 35% SPY core is
+combined with a dynamically selected 65% long or short satellite, using weekly
+signals from a frozen ensemble of technical, macro and ML agents.
 
-This project studies whether quantitative, macroeconomic and machine-learning signals can improve portfolio performance after costs. The research progressed from Treasury timing to an investable four-ETF universe (**SPY, IEF, GLD, SHY**), through static and risk-controlled baselines (**A**), macro/momentum allocations (**B**), an agent-consensus layer (**C**), and a selected **Core35–Satellite65** implementation.
+**Empirical conclusion:** the final strategy **did not outperform** either
+SPY Buy & Hold or SPY/IEF 60/40 in the protected 2022–2026 test. The negative
+finding has been preserved. There has been **no model selection or retuning
+using the OOS result**.
 
-The final candidate allocates a nominal **+35% to SPY** and **±65% to one dynamically selected ETF**. An ensemble of technical, macro, Random Forest and SVM agents supplies signals and confidence through a **frozen genetic-algorithm Orchestrator**. Decisions occur at weekly closes; orders execute at the next available trading open. Cash, positions, transaction costs and short-borrowing expenses are accounted for daily.
+## Final OOS results (7 Jan 2022 through 9 Oct 2026)
 
-The official 2022–2026 evaluation is an informative **negative benchmark result**. Later diagnostics identify temporal sensitivity and possible defensive improvements; they do **not** retroactively change the original evaluation.
+| Portfolio | CAGR | Annual volatility | Sharpe | Max drawdown |
+|:--|--:|--:|--:|--:|
+| **Core35-Satellite65** | 5.872% | 11.566% | 0.551 | -26.543% |
+| SPY Buy & Hold | 13.116% | 17.294% | 0.799 | -23.424% |
+| 60/40 SPY-IEF | 7.388% | 11.174% | 0.694 | -19.840% |
 
-## 2. Registered final comparison
+Risk-free rate for diagnostic metrics = 0; annualization = 252 trading days.
+The earliest OOS decision is 7 Jan 2022, with first executed orders at the
+next available Open (10 Jan). The 2022 and 2026 calendar-year figures therefore
+represent partial-year observation windows. All figures are net of the stated
+transaction and short-borrow assumptions, not a live trading record.
 
-**Official final evaluation: 7 January 2022–9 October 2026; 1,193 daily observations, 249 weekly decisions.**
+## 1. Installation (no remote data downloads)
 
-| Portfolio | CAGR | Annualized volatility | Sharpe | Max drawdown |
-|---|---:|---:|---:|---:|
-| **Core35–Satellite65, official** | **5.872%** | 11.566% | **0.551** | **−26.543%** |
-| SPY buy and hold | 13.116% | 17.294% | 0.799 | −23.424% |
-| 60% SPY / 40% IEF, weekly rebalanced | 7.388% | 11.174% | 0.694 | −19.840% |
-
-These results use **$100,000 initial capital**, **2 bps commissions + 1 bp slippage on traded notional**, **1% annualized short borrow**, unremunerated cash, 252 trading days/year and a zero assumed risk-free rate for Sharpe. The official candidate underperformed both benchmarks on CAGR, Sharpe and drawdown. Its 2022–2026 ending NAV is **$131,013.46**.
-
-Source of truth: `reports/oos_final_2022_2026/comparison_metrics.csv` and `reports/oos_final_2022_2026/evaluation_provenance.json` in the complete release archive. The Git checkout alone may not contain these binary/data/report artifacts.
-
-## 3. Further analyses (not a new independent holdout)
-
-### Temporal robustness
-
-The archived NAVs were also summarized separately for 2022 and **3 January 2023–9 October 2026**. The latter is a descriptive subset of the **same continuing simulation**: positions are **not reset**, signals are **not retrained**, and no new test sample is created.
-
-| Portfolio | 2023–2026 CAGR | Sharpe | Max drawdown |
-|---|---:|---:|---:|
-| Core35–Satellite65 | **14.343%** | 1.234 | −10.035% |
-| SPY buy and hold | 22.381% | 1.431 | −18.755% |
-| 60/40 SPY–IEF | 14.061% | 1.428 | −10.505% |
-
-The archived Core lost **20.787% cumulatively in the 2022 portion** (2022 segment CAGR **−21.160%**). The 2023–2026 values are a retrospective slice; they do **not** justify excluding 2022 from the official comparison or claiming a newly trained 2023-start OOS experiment.
-
-### Regime-Adaptive SMA200 research extension
-
-The extension combines the **same 35% SPY core** with one of two satellite-selection rules:
-
-1. **Normal regime:** SPY close at or above its trailing **200-trading-session SMA** → original Core-Satellite targets.
-2. **Defensive regime:** SPY close below SMA200 → only ETFs with **positive 21- and 63-session momentum** and **Orchestrator signal +1** are eligible for the satellite. If none qualifies, the satellite is flat. The original selector then ranks eligible ETFs using its frozen confidence, fallback-volatility and hysteresis conventions.
-
-The SMA200 uses information observable at the decision close and the result is executed at the next trading open. The extension is economically motivated, but was evaluated on already-inspected historical samples; treat the outcomes as **retrospective**.
-
-| Policy | Development 2010–2021 CAGR | 2022–2026 CAGR | 2022–2026 Sharpe | 2022–2026 Max DD |
-|---|---:|---:|---:|---:|
-| Original Core35–Satellite65 | 12.064% | 5.872% | 0.551 | −26.543% |
-| B/C-inspired Long/Flat filter, always enabled | 8.928% | 11.280% | 1.166 | −8.506% |
-| **Regime-Adaptive SMA200** | **10.599%** | **9.805%** | **0.912** | **−12.802%** |
-
-The adaptive strategy underperformed the original in development. Exploratory daily-return **regression-intercept alpha** tests (Newey–West HAC, 5 lags; intercept × 252, zero risk-free assumption) are not significant at 5%: SPY **+2.55% annualized, p≈0.344**; weekly 60/40 **+3.66%, p≈0.200**; frozen Core **+5.01%, p≈0.055**. These results come from a **separate supplemental analysis**, not the frozen release manifest, and are not adjusted for searching multiple variants. The alternative is **not a statistically validated alpha generator**.
-
-**Important architecture distinction:** the historical `C_v1`/`C_v2` modules include **B_v2 macro budgets** and a **126-session covariance-based 8% ex-ante volatility cap**. The Regime-Adaptive *Core* strategy reuses the **B/C idea of momentum-plus-agent agreement**, **not** those macro budgets or the 8% cap. It is not identical to standalone Level C.
-
-Detailed policy: [`docs/regime_adaptive_exploratory_2026.md`](docs/regime_adaptive_exploratory_2026.md).
-
-## 4. Reproducible environment
-
-Use **Python 3.11** and the complete submission `project/` tree, including verified input data and model artifacts. The source-only GitHub tree may be insufficient for a full replay.
+Extract this ZIP, enter its **`project/`** directory, and create an environment:
 
 ```bash
 python3.11 -m venv .venv
@@ -73,111 +38,176 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-### Read and verify the official release
+On Windows activate `.venv` with the corresponding shell command. Raw data,
+processed market data, eight frozen RF/SVM binaries, weekly signals and final
+OOS outputs are included. No API keys or data downloads are required.
+
+## 2. Main interface and execution order
 
 ```bash
-python main.py                              # display frozen final metrics
-python main.py --release-action audit       # scientific freeze, data and release integrity
+python main.py                              # Final frozen OOS results, read-only
+python main.py --release-action audit       # Scientific + ZIP integrity audit
 python main.py --release-action verify-models
-python main.py --release-action replay      # exact locked OOS replay in an isolated temporary copy
-python main.py --release-action charts      # archived equity/drawdown visuals
+python main.py --level CORE                # Re-run the development-period comparison
+python main.py --release-action replay      # Full locked OOS backtest replay in isolated temp copy
+python main.py --release-action charts      # Generate equity and drawdown charts
 ```
 
-The original OOS replay reconstructs **the same frozen candidate** and compares the archived results. It performs **no fitting or post-hoc selection**.
+The **`replay`** command reruns the already-selected and frozen strategy on the
+**same** OOS inputs in a disposable temporary project, compares the original
+metrics, target weights and three daily NAV files, then discards the copy. It
+does **not** refit models, re-run GA optimization or alter archived results.
+OOS observation is **never** used to select new strategy parameters.
 
-### Historical development experiments
+Historical A/B/C development experiments remain available separately:
 
 ```bash
 python main.py --level A1
 python main.py --level A2
 python main.py --level B --b-version v1
 python main.py --level B --b-version v2
-python main.py --level C
-python main.py --level CORE
-python main.py --level ALL
+python main.py --level C         # Matched B_v1/B_v2/C_v1/C_v2 development comparison
+python main.py --level ALL       # All historical development experiments + CORE
+python -m unittest discover -s tests -p 'test_*.py' -q
 ```
 
-These modes are **development-only** and run in disposable working copies when they can generate files. The historical 2005–2021 model/indicator history and the **2010–2021 matched portfolio development** window have different meanings; never label development comparison results as independent OOS.
+A/B/C development commands generate derived inputs **only inside temporary
+copies** to prevent overwriting the frozen submission. The C experiments are
+**not** aliases for the final Core-Satellite strategy and are **in-sample**
+for the GA Orchestrator. All development tests remain restricted to information
+through 2021. The submission includes a focused smoke-test suite; the original
+repository's 275-test checkpoint is documented separately and is **not**
+reproduced by the reduced test suite.
 
-### Additional diagnostics
+
+### Optional reproduction of the presentation
+
+The final editable PowerPoint is included at the ZIP root. To rebuild it from
+its **included source code**, use Node.js 20 or newer and the pinned
+`pptxgenjs` version from `package.json`:
 
 ```bash
-python main.py --analysis temporal-robustness
-python main.py --analysis regime-adaptive
-python main.py --analysis regime-adaptive --output-dir exploratory_outputs
-python -m unittest discover -s tests -p 'test_*.py' -v
+npm install --ignore-scripts
+GROUP9_SLIDES_OUTPUT=../group9_presentation_rebuilt.pptx npm run build:slides
 ```
 
-The research commands do **not** overwrite frozen output. Optional research CSV export must not target `data/`, `reports/`, `src/`, `docs/`, `tests/` or `figures/`. Avoid committing `exploratory_outputs/` unless deliberately curating an appendix. For complete ZIP restoration and the distinction between Git source and the submission, consult [`docs/reproducibility_release_2026.md`](docs/reproducibility_release_2026.md).
+Specify an output outside `project/` as above: the signed submission manifest
+covers the published `project/presentation.pptx`, and an ordinary visual
+rebuild should not overwrite those audited bytes. Regeneration is optional
+for grading; no Node.js dependency is needed for Python research execution.
 
-## 5. Architecture: how B, C and the Core relate
+## 3. Frozen methodology and actual selection rules
 
-```text
-Adjusted ETF prices + macro series
-           |
-           +--> A1 static portfolios / A2 risk control
-           |
-           +--> B: macro regimes, budgets and 21/63 momentum
-           |                   |
-           +--> Technical / macro / RF / SVM agents
-                               |
-                     GA Orchestrator
-                               |
-                     direction + confidence
-                               |
-                     +---------+---------+
-                     |                   |
-             C_v1 / C_v2           Official Core35/65
-          B budgets + momentum     Core + direct agent
-          + agent consensus        satellite selection
-          + portfolio vol cap               |
-                                           +--> SMA200 research extension
-                                                conditional Long/Flat gate
+- Weekly close signal, **next trading-day Open** execution, daily NAV/cash and
+  short-borrow accounting; USD 100k initial capital, 2 bps commission, 1 bp
+  slippage, 1% annual borrow on shorts, unremunerated cash.
+- The 35% SPY core is combined with one 65% satellite; the satellite can
+  offset the core, generating a **-30% net SPY target** when short SPY is
+  selected. The target gross exposure is <=100%, but actual exposure can drift.
+- Satellite confidence cutoff **0.35**, asset-switch hysteresis **0.015**.
+  The saved Orchestrator signals contain **no per-asset volatility column**:
+  the selector uses the constant fallback **0.10** for all assets, so the
+  ordering normally follows absolute confidence, not estimated volatilities.
+- SPY shorts are blocked above its 30-week SMA. Above that SMA, SPY's
+  selection score receives a multiplier from **1.2 to 2.5**. The hysteresis
+  keys on asset identity, not necessarily a sign reversal in that asset.
+- The chosen weights, thresholds and GA parameters are **pre-OOS snapshots**.
+  `config.yaml` and frozen source modules remain byte-identical. The read-only
+  `release_config.yaml` states the effective rules and checks consistency;
+  changing it does not retune historical models.
+
+## 4. Directory map
+
+- `main.py`: unified entry point, safe default and explicit modes.
+- `config.yaml`: original frozen legacy training configuration.
+- `release_config.yaml`: effective final-strategy release contract.
+- `src/`: reusable data, agent, strategy, simulation, integrity and plotting code.
+- `src/orchestrator_loader.py`: official compatible loader for nested GA
+  `best_params`, including separate long/short thresholds.
+- `data/raw/`: original market and macro snapshots, no network calls.
+- `data/processed/`: development market input needed for exact replay.
+- `data/signals/`: frozen development Orchestrator signals.
+- `reports/`: 47-file scientific freeze, raw-input hashes, OOS provenance,
+  249 decision signals and benchmark results.
+- `figures/`: pre-generated OOS equity and drawdown images.
+- `docs/core_satellite_final_2026.md`: detailed design, risks and findings.
+- `tests/test_submission.py`: targeted submission-interface tests.
+- `PACKAGE_MANIFEST.json`: integrity index for *every distributed file*.
+
+**Why are TLT and FinBERT source present?** TLT.csv is retained solely to
+satisfy the original 16-input historical audit: TLT is **not invested**.
+The FinBERT agent source remains as a non-operative transitive import in the
+frozen modules. FinBERT is **not part of the final ensemble**.
+
+## 5. Scientific cautions and scope
+
+The 2005-2021 fitting window and 2010-2021 matched development comparison are
+**not equivalent**. Development results involve model selection and must not
+be described as independent final validation. The GA optimizer uses a
+single-asset weekly surrogate fitness, not the exact net portfolio objective
+of the final daily Core-Satellite backtest. FRED macro observation vintages
+and historical release timestamps have **not** been completely verified as
+point-in-time. Fixed execution costs are research assumptions.
+
+The original Git collaboration history documents research decisions beyond
+the fully reproducible scientific snapshot distributed in this submission. **The completed `group_9.zip` contains `presentation.pptx` at its outer ZIP root as required by LUISS**, while the protected historical results remain unchanged.
+
+## 6. Final 13 November 2026 supplemental comparison (post-selection)
+
+This package also includes a **separate, optional** research experiment comparing
+Gabriele Di Raimondo's **Equal Active** policy (3 and 4 ETFs) and Gianluca
+Addorisio's **Regime-Adaptive SMA200** extension on the **same 2022-2026 daily
+execution engine**, archived frozen Orchestrator signals and 2 bps + 1 bp costs.
+**These policies were considered after observing the original OOS**. Their
+metrics are retrospective and must **not** be presented as an independent new
+final OOS or as a replacement for the selected Core35-Satellite65 candidate.
+
+| Strategy | Status | CAGR | Sharpe | Maximum drawdown |
+|:--|:--|--:|--:|--:|
+| Core35-Satellite65 | Frozen registered OOS | 5.872% | 0.551 | -26.543% |
+| Equal Active 3 ETFs | Retrospective, matched replay | 5.391% | 0.678 | -13.432% |
+| Equal Active 4 ETFs | Retrospective, matched replay | 4.587% | 0.692 | -13.432% |
+| Regime-Adaptive SMA200 | Retrospective, matched replay | 9.805% | 0.912 | -12.802% |
+| SPY Buy & Hold | Frozen benchmark | 13.116% | 0.799 | -23.424% |
+| Weekly 60/40 SPY/IEF | Frozen benchmark | 7.388% | 0.694 | -19.840% |
+
+The new comparisons **independently reconcile the original Core and benchmark
+NAV histories with archived daily results**, but reproduce only Gabriele's
+allocation *concept*, not his original 2021-start weekly zero-fee backtest.
+His original full implementation is preserved in the documented Git
+history (collaboration snapshot `4f53268`), distinct from the scientific
+contents of this final ZIP. In particular, neither 2021 rows nor his older
+Sharpe calculations are included in the common-window comparison.
+
+```bash
+python scripts/run_strategy_comparison.py    # Read-only matched replay; prints current metrics
+python scripts/run_strategy_comparison.py --output-dir ../group9_research_replay  # Optional CSV/plot export outside project
 ```
 
-The **official Core35/65 does not run standalone C**. The newer regime extension reintroduces the *consensus principle* conditionally, without changing the registered historical Core candidate.
+See [`docs/research_extensions_2026.md`](docs/research_extensions_2026.md)
+for exact eligibility rules, execution conventions, limitations and provenance,
+and [`docs/release_architecture_2026.md`](docs/release_architecture_2026.md)
+for Git/release boundaries. The original temporal-robustness analysis is **retained
+in the technical report**, but omitted as a standalone slide in the oral deck.
 
-## 6. Frozen strategy specifics
+## 7. Final submission package
 
-- Weekly signal, next-open execution; no same-close execution after observing a close.
-- Confidence threshold **0.35**; asset-switch hysteresis **0.015**.
-- Saved Orchestrator signals contain **no ETF volatility column**. The selector uses the common fallback **0.10** for all ETFs; do not claim ETF-specific volatility-based ranking.
-- SPY-short filter and preference use an additional **30-week SMA**. This is distinct from the extension's **200-daily-session SMA**.
-- The Core can be outweighed by a short satellite: **+35% SPY −65% SPY = −30% net SPY**.
-- The target gross exposure is at most 100%, though realized exposure can drift between rebalances.
-- FinBERT code exists historically but was **not used** in final frozen inference; TLT is retained for earlier Treasury data audit, **not traded** in the four-ETF final candidate.
+The ZIP root contains `project/` and `presentation.pptx`. The `project/` tree
+contains exact frozen code/model sources, raw/processed data, original signals,
+13 protected OOS release artefacts, 47-file freeze record, reproducible research
+code and CSV/plots, documentation, supplementary full report, and final package
+manifest. Historical scientific manifests were **never rewritten**. Only the
+submission `PACKAGE_MANIFEST.json` was rebuilt after the final editorial additions.
 
-## 7. Files and provenance
+Recommended verification:
 
-| Path | Role |
-|---|---|
-| `main.py` | Safe command-line interface |
-| `src/agents/`, `src/agent_backtest.py` | Agent research and frozen-compatible selector |
-| `src/level_c_allocator.py`, `src/level_c_strategy.py` | Historical C and additional regime extension |
-| `src/core_satellite.py` | Frozen Core target construction |
-| `src/submission_runner.py` | Isolated development and research summaries |
-| `src/execution_engine.py` | Shared next-open execution, cash and NAV |
-| `config.yaml` | Original historical research settings; **not** final strategy override |
-| `release_config.yaml` | Read-only assertions of the frozen candidate |
-| `data/` | Source, processed data and agent signals (may require release archive) |
-| `reports/` | Freeze/verification evidence, official NAVs and provenance (may be untracked in Git) |
-| `docs/research_design.md` | Hypotheses, design, methods, validation and limitations |
-| `docs/decision_log.md` | Chronological decisions, rationale and reproducibility boundaries |
-| `docs/core_satellite_final_2026.md` | Detailed archived Core strategy report |
-| `docs/regime_adaptive_exploratory_2026.md` | Retrospective SMA200 extension contract |
-| `tests/` | Repository and exploratory regression checks |
-| `PACKAGE_MANIFEST.json` | Full **submission ZIP** file integrity index (rebuild when packaging) |
+```bash
+python main.py --release-action audit
+python main.py --release-action verify-models
+python main.py --release-action replay
+python -m unittest discover -s tests -p 'test_*.py' -q
+```
 
-The historical **47-file scientific freeze** and **13-file release artifact index** must remain unchanged when editing ordinary documentation. `PACKAGE_MANIFEST.json` is a separate checksum index for the final files **inside `project/`**: generate it only after these files, including any copies of slides/report placed inside the project root, are finalized. The submitted ZIP also requires `presentation.pdf` or `.pptx` at its **outer root**, beside `project/`. Do not conflate these integrity layers.
-
-## 8. Integrity, limitations and submission
-
-- The FRED macro input **publication vintages are not completely point-in-time verified**, even where the code uses deliberate lags.
-- Chronological RF/SVM out-of-fold signals do not make a GA-selected ensemble independent of the development-period selection process.
-- Fixed commission/slippage and annual borrow are assumptions, not executable broker guarantees.
-- Empirical superiority on an inspected sample is not proof of future alpha; the exploratory SMA200 result has **no demonstrated statistically significant alpha** at 5% using the cited diagnostics.
-- A clean Git checkout may need separate binary/model/report artifacts; `python main.py --release-action audit` is the final authority for restored release inputs.
-
-**Submission requirement:** package a `group_9.zip` containing `project/` with reproducible scripts, data, models and outputs, and **`presentation.pdf` or `presentation.pptx` at the ZIP root**. Presentation is prepared last; the optional academic report can be packaged separately if the group chooses.
-
-See [`docs/research_design.md`](docs/research_design.md) for methods, [`docs/decision_log.md`](docs/decision_log.md) for the decision trail and [`docs/reproducibility_release_2026.md`](docs/reproducibility_release_2026.md) for the submission-specific verification procedure.
+The GitHub repository is a collaboration record. The reproducible scientific
+submission is the separately packaged ZIP, which must also be extracted and
+audited from a clean folder.

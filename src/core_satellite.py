@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.frozen_satellite_selector import generate_dynamic_growth_matrix
+from src.agent_backtest import generate_dynamic_growth_matrix
 from src.data_loader import load_dataset
 from src.evaluator import calculate_metrics
 from src.execution_engine import simulate_longshort_daily
@@ -14,7 +14,7 @@ from src.time_split import build_weekly_decision_dates
 from src.utils import ASSETS, ROOT_DIR, load_config
 
 
-# Tie-breaking order of the original satellite selector.
+# Preserve Gabriele's original tie-breaking order.
 SATELLITE_ORDER = ("SHY", "IEF", "GLD", "SPY")
 
 
@@ -125,8 +125,7 @@ def build_core_satellite_targets(
 
 
 def run_core_satellite_training(config, root_dir=ROOT_DIR):
-    """Development-only comparison of Core-Satellite with SPY and a 60/40 portfolio on matched dates.
-    """
+    """Matched development-only comparison with SPY and 60/40."""
 
     start, end = _guard_training(config)
 
