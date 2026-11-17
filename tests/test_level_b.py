@@ -1,11 +1,11 @@
-"""Audit di equivalenza A/B e invarianti del Level B (solo dati sintetici).
+"""A/B equivalence audit and Level B invariants (synthetic data only).
 
-Inserire questo file in tests/test_level_b.py nel repository ProjectAgentTrading26.
-Non legge CSV raw, non scrive output e non accede a validation/OOS.
+No raw CSV files are read, no outputs are written and validation/OOS data is
+never accessed.
 
-La comparazione A/B e' valida SOLO per pesi long-only che sommano esattamente
-al 100%, stessi prezzi, stessi costi e nessun costo di prestito titoli.
-Il motore A non supporta cash intenzionale ne' posizioni short.
+The A/B comparison is valid ONLY for long-only weights that sum exactly to
+100%, with identical prices and costs and no securities-borrowing costs.
+Engine A supports neither intentional cash nor short positions.
 """
 
 import unittest
@@ -21,7 +21,7 @@ from src.utils import ASSETS
 
 
 class SyntheticMarket:
-    """Prezzi Open/Close deterministici, senza accesso a dati reali."""
+    """Deterministic Open/Close prices, without access to real data."""
 
     @staticmethod
     def make(n=48):
@@ -48,7 +48,7 @@ class SyntheticMarket:
 
     @staticmethod
     def target_panel(dates):
-        # Un target iniziale, successivi ribilanciamenti e uno NON eseguibile.
+        # An initial target, subsequent rebalances and one NON-executable decision.
         at = [0, 5, 14, 27, 40, len(dates) - 1]
         weights = [
             [0.25, 0.25, 0.25, 0.25],
@@ -62,7 +62,7 @@ class SyntheticMarket:
 
 
 class TestEquivalenceAB(unittest.TestCase):
-    """Confronto numerico dei due motori nella loro zona comune."""
+    """Numerical comparison of the two engines within their common domain."""
 
     def setUp(self):
         self.opens, self.closes = SyntheticMarket.make()
@@ -105,7 +105,7 @@ class TestEquivalenceAB(unittest.TestCase):
                 rtol=1e-9, atol=1e-9,
                 err_msg=f"Pesi effettivi differenti per {asset}",
             )
-        # Anche le metriche devono coincidere quando il motore e' equivalente.
+        # The metrics must also coincide when the engines are equivalent.
         for metric in (
             "cumulative_return", "cagr", "annualized_volatility",
             "sharpe_ratio", "sortino_ratio", "max_drawdown",
@@ -114,7 +114,7 @@ class TestEquivalenceAB(unittest.TestCase):
             ma = calculate_metrics(a["rendimento_netto"], 0.0, 252)
             mb = calculate_metrics(b["daily_return"], 0.0, 252)
             self.assertAlmostEqual(ma[metric], mb[metric], places=9, msg=metric)
-        # La serie NAV deve concordare anche con l'identita' dei rendimenti.
+        # The NAV series must also agree with the return identity.
         np.testing.assert_allclose(
             np.prod(1 + b["daily_return"].to_numpy()),
             b["nav"].iloc[-1] / 100_000.0,
@@ -131,9 +131,9 @@ class TestEquivalenceAB(unittest.TestCase):
         self.check_equivalent(8.0, 3.0)
 
     def test_zero_notional_execution_flag_differs_but_not_nav(self):
-        # Diagnostica di audit: A conta una decisione programmata come operazione;
-        # B registra executed solo se il nozionale negoziato e' > 0.
-        # Questa differenza NON modifica NAV, costi o rendimenti.
+        # Audit diagnostics: A counts a scheduled decision as a trade;
+        # B records executed only if the traded notional is > 0.
+        # This difference does NOT change NAV, costs or returns.
         dates = pd.bdate_range("2015-01-05", periods=6, name="Date")
         p = pd.DataFrame(100.0, index=dates, columns=ASSETS)
         targets = pd.DataFrame([[.25] * 4, [.25] * 4],

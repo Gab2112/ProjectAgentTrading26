@@ -1,0 +1,8 @@
+{
+    "window": 60,
+    "threshold": 2.0,
+    "exit_threshold": 0.0,
+    "stop_threshold": null,
+    "mode": "momentum",
+    "price_col": "GLD_close"
+}

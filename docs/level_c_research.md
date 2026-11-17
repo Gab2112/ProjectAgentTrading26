@@ -1,6 +1,14 @@
 # Level C: consenso tra momentum e agenti AI
 
-**Studio sperimentale, 4 novembre 2026.** Universo SPY/IEF/GLD/SHY. Solo training 2010–2016, senza utilizzo della validation C né del test finale dal 2022. Questa nota estende il disegno della ricerca A/B documentato in `research_design.md`; non ne riscrive retroattivamente le decisioni.
+**Historical research snapshot, 4 November 2026.** This file retains the original
+2010–2016 in-sample Level C experiment and its historical Italian discussion.
+The original final OOS Core-Satellite evaluation was subsequently completed for
+2022–2026. Therefore references below to a still-locked final test or pending
+work are **statements of the historical November 4 status, not current tasks**.
+For the registered candidate and subsequent SMA200 extension see
+[`core_satellite_final_2026.md`](core_satellite_final_2026.md) and
+[`regime_adaptive_exploratory_2026.md`](regime_adaptive_exploratory_2026.md).
+These later results must not be inserted into the old nine-portfolio table.
 
 ## Ipotesi
 

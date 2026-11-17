@@ -1,22 +1,22 @@
-"""Acquisizione e verifica dei dati grezzi per il progetto Multi-Asset.
+"""Acquisition and validation of raw data for the multi-asset project.
 
-Il modulo gestisce due fonti indipendenti:
+The module handles two independent sources:
 
-- Yahoo Finance: prezzi OHLCV giornalieri rettificati di SPY, IEF, GLD e SHY.
-- FRED: serie macroeconomiche candidate per i successivi livelli B e C.
+- Yahoo Finance: adjusted daily OHLCV prices for SPY, IEF, GLD and SHY.
+- FRED: candidate macroeconomic series for levels B and C.
 
-I CSV vengono salvati in ``data/raw/market`` e ``data/raw/macro``.
-Non vengono calcolati rendimenti, indicatori o segnali di trading.
+CSV files are saved in ``data/raw/market`` and ``data/raw/macro``.
+No returns, indicators or trading signals are computed here.
 
-Per proteggere la riproducibilità degli esperimenti, i CSV esistenti
-non vengono sovrascritti a meno che la configurazione non imposti
+To protect the reproducibility of the experiments, existing CSV files are
+not overwritten unless the configuration sets
 ``pipeline.overwrite_raw_data: true``.
 
-Durante A1 e A2 il download macroeconomico è disattivato, salvo richiesta
-esplicita mediante ``pipeline.download_macro_data: true``.
+During A1 and A2 the macroeconomic download is disabled unless it is
+explicitly requested through ``pipeline.download_macro_data: true``.
 
-ATTENZIONE: le serie FRED ordinarie possono contenere revisioni storiche.
-Il download, da solo, non garantisce disponibilità point-in-time dei dati.
+WARNING: ordinary FRED series may contain historical revisions. Downloading
+them does not, on its own, guarantee point-in-time data availability.
 """
 
 from pathlib import Path
@@ -29,13 +29,13 @@ import pandas as pd
 from src.utils import get_tickers
 
 
-# Sono ammessi esclusivamente identificativi utilizzabili come nomi di file.
+# Only identifiers that are valid file names are accepted.
 _VALID_ID = re.compile(r"^[A-Za-z0-9._-]+$")
 _MARKET_PRICE_COLUMNS = ("Open", "High", "Low", "Close")
 
 
 def _parse_date(value: object, name: str) -> pd.Timestamp:
-    """Converte una data di configurazione e ne verifica il formato."""
+    """Parse a configuration date and validate its format."""
     try:
         date = pd.Timestamp(value)
     except (TypeError, ValueError) as exc:
@@ -47,10 +47,10 @@ def _parse_date(value: object, name: str) -> pd.Timestamp:
 
 
 def _resolve_end_date(config: dict) -> str:
-    """Restituisce l'ultima data inclusa nell'acquisizione.
+    """Return the last date included in the acquisition.
 
-    Se ``data.end_date`` è null, usa il giorno UTC precedente, per evitare
-    di includere una seduta corrente potenzialmente incompleta.
+    If ``data.end_date`` is null, the previous UTC day is used to avoid
+    including a current, possibly incomplete, session.
     """
     configured = config["data"].get("end_date")
     if configured is None:
@@ -66,7 +66,7 @@ def _resolve_end_date(config: dict) -> str:
 
 
 def _normalize_dates(df: pd.DataFrame, source: str) -> pd.DataFrame:
-    """Normalizza l'indice delle date senza introdurre osservazioni future."""
+    """Normalise the date index without introducing future observations."""
     if df.empty:
         raise ValueError(f"Nessun dato disponibile: {source}")
 
@@ -77,7 +77,7 @@ def _normalize_dates(df: pd.DataFrame, source: str) -> pd.DataFrame:
         raise ValueError(f"Indice temporale non valido: {source}") from exc
 
     if index.tz is not None:
-        # Mantiene la data locale riportata dal mercato, senza spostarla in UTC.
+        # Keep the local date reported by the exchange instead of converting it to UTC.
         index = index.tz_localize(None)
     index = index.normalize()
 
@@ -89,10 +89,10 @@ def _normalize_dates(df: pd.DataFrame, source: str) -> pd.DataFrame:
 
 
 def _normalize_market_data(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
-    """Controlla i prezzi rettificati Open/Close e conserva le colonne OHLCV."""
+    """Validate adjusted Open/Close prices and keep the OHLCV columns."""
     data = df.copy()
 
-    # yfinance può restituire colonne MultiIndex anche per un solo ETF.
+    # yfinance may return MultiIndex columns even for a single ETF.
     if isinstance(data.columns, pd.MultiIndex):
         for level in range(data.columns.nlevels):
             labels = data.columns.get_level_values(level)
@@ -122,7 +122,7 @@ def _normalize_market_data(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
     if not np.isfinite(prices).all() or np.any(prices <= 0):
         raise ValueError(f"{ticker}: prezzi assenti, non finiti o non positivi")
 
-    # Il volume è informativo, ma non necessario al backtest A1/A2.
+    # Volume is informative but not required by the A1/A2 backtest.
     if "Volume" in data and data["Volume"].notna().any():
         volume = data["Volume"].dropna().to_numpy(dtype=float)
         if not np.isfinite(volume).all() or (volume < 0).any():
@@ -132,7 +132,7 @@ def _normalize_market_data(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
 
 
 def _normalize_macro_data(df: pd.DataFrame, series_id: str) -> pd.DataFrame:
-    """Conserva la frequenza originale FRED, senza riempire valori mancanti."""
+    """Keep the original FRED frequency without filling missing values."""
     data = _normalize_dates(df, series_id)
     if series_id not in data.columns:
         if len(data.columns) != 1:
@@ -149,7 +149,7 @@ def _normalize_macro_data(df: pd.DataFrame, series_id: str) -> pd.DataFrame:
 
 
 def _save_csv(df: pd.DataFrame, path: Path) -> None:
-    """Scrive il CSV tramite un file temporaneo nella stessa directory."""
+    """Write the CSV through a temporary file in the same directory."""
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(f"{path.name}.tmp")
     try:
@@ -161,7 +161,7 @@ def _save_csv(df: pd.DataFrame, path: Path) -> None:
 
 
 def _overwrite_enabled(config: dict) -> bool:
-    """Verifica l'autorizzazione esplicita a sostituire i dati grezzi."""
+    """Check for explicit permission to replace raw data."""
     enabled = config.get("pipeline", {}).get("overwrite_raw_data", False)
     if not isinstance(enabled, bool):
         raise ValueError("pipeline.overwrite_raw_data deve essere booleano")
@@ -169,14 +169,14 @@ def _overwrite_enabled(config: dict) -> bool:
 
 
 def download_market_data(config: dict, root_dir: Path) -> Dict[str, pd.DataFrame]:
-    """Acquisisce o riutilizza i dati giornalieri degli ETF configurati.
+    """Download or reuse daily data for the configured ETFs.
 
-    Le date di configurazione sono INCLUSIVE. Yahoo Finance considera invece
-    esclusiva la data ``end``: per questo viene aggiunto un giorno.
+    Configuration dates are INCLUSIVE, whereas Yahoo Finance treats ``end``
+    as exclusive: one day is therefore added.
 
-    I dati nuovi sono richiesti con ``auto_adjust=True`` per ottenere prezzi
-    Open e Close rettificati in modo coerente. La rettifica non rende i prezzi
-    automaticamente eseguibili sul mercato reale.
+    New data is requested with ``auto_adjust=True`` to obtain consistently
+    adjusted Open and Close prices. Adjustment does not make prices
+    automatically executable in a real market.
     """
     source = config["data"].get("market_source", {})
     if source.get("provider", "yfinance") != "yfinance":
@@ -204,7 +204,7 @@ def download_market_data(config: dict, root_dir: Path) -> Dict[str, pd.DataFrame
             print(f"  {ticker}: CSV esistente conservato ({len(existing)} sedute)")
             continue
 
-        # Import differito: yfinance non serve se tutti i CSV esistono già.
+        # Deferred import: yfinance is not needed when all CSV files already exist.
         try:
             import yfinance as yf
         except ImportError as exc:
@@ -232,7 +232,7 @@ def download_market_data(config: dict, root_dir: Path) -> Dict[str, pd.DataFrame
 
 
 def _get_fred_series(config: dict) -> Dict[str, str]:
-    """Associa i nomi logici alle serie FRED presenti in configurazione."""
+    """Map logical names to the FRED series listed in the configuration."""
     series: Dict[str, str] = {}
     for section in ("rates", "inflation", "stress"):
         for name, series_id in config["data"].get(section, {}).items():
@@ -246,10 +246,10 @@ def _get_fred_series(config: dict) -> Dict[str, str]:
 
 
 def download_macro_data(config: dict, root_dir: Path) -> Dict[str, pd.DataFrame]:
-    """Acquisisce le serie FRED conservandone date e valori originali.
+    """Download FRED series, preserving their original dates and values.
 
-    Non esegue forward fill, non stima date di pubblicazione e non tenta
-    di ricostruire le vintage storiche dei dati macroeconomici.
+    No forward filling is applied, publication dates are not estimated and
+    historical data vintages are not reconstructed.
     """
     source = config["data"].get("macro_source", {})
     if source.get("provider", "FRED").upper() != "FRED":
@@ -273,7 +273,7 @@ def download_macro_data(config: dict, root_dir: Path) -> Dict[str, pd.DataFrame]
             print(f"  {series_id}: CSV esistente conservato")
             continue
 
-        # Import differito: pandas_datareader non serve nei livelli A1/A2.
+        # Deferred import: pandas_datareader is not needed for levels A1/A2.
         try:
             from pandas_datareader import data as web
         except ImportError as exc:
@@ -299,14 +299,14 @@ def download_macro_data(config: dict, root_dir: Path) -> Dict[str, pd.DataFrame]
 
 
 def run_data_acquisition(config: dict, root_dir: Path) -> dict:
-    """Coordina le acquisizioni per il livello attualmente selezionato."""
+    """Coordinate data acquisition for the currently selected level."""
     level = str(config.get("pipeline", {}).get("active_level", "A1")).upper()
     if level not in {"A1", "A2", "B", "C"}:
         raise ValueError(f"Livello di ricerca sconosciuto: {level}")
 
     market_data = download_market_data(config, root_dir)
 
-    # Nel Level A i benchmark non devono dipendere da serie macroeconomiche.
+    # In Level A, the benchmarks must not depend on macroeconomic series.
     macro_flag = config.get("pipeline", {}).get("download_macro_data")
     if macro_flag is not None and not isinstance(macro_flag, bool):
         raise ValueError("pipeline.download_macro_data deve essere booleano")

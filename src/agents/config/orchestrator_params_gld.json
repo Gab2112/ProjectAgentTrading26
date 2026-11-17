@@ -1,0 +1,61 @@
+{
+    "best_params": {
+        "weights": {
+            "SMA_EMA_Agent": 0.8,
+            "ZScore_Agent": 0.8,
+            "Macro_YieldCurve_Agent": 0.8,
+            "RandomForest_Agent": 0.8,
+            "SVM_Agent": 0.8,
+            "FinBERT_Agent": 0.8
+        },
+        "alphas": {
+            "SMA_EMA_Agent": 1.1850037158529203,
+            "ZScore_Agent": 0.1,
+            "Macro_YieldCurve_Agent": 0.2762166717280574,
+            "RandomForest_Agent": 2.955599352583794,
+            "SVM_Agent": 2.986184576114257,
+            "FinBERT_Agent": 0.1433226506489357
+        },
+        "threshold_long": 0.8498858580792914,
+        "threshold_short": 0.5741702046246591,
+        "threshold": 0.7120280313519752,
+        "objective_score": 0.3536,
+        "sharpe_ratio": 0.5976,
+        "max_drawdown": 0.087,
+        "cumulative_return": 0.4462,
+        "annualized_return": 0.034,
+        "profit_factor": 1.7026,
+        "trades": 135
+    },
+    "in_sample_metrics": {
+        "weights": {
+            "SMA_EMA_Agent": 0.8,
+            "ZScore_Agent": 0.8,
+            "Macro_YieldCurve_Agent": 0.8,
+            "RandomForest_Agent": 0.8,
+            "SVM_Agent": 0.8,
+            "FinBERT_Agent": 0.8
+        },
+        "alphas": {
+            "SMA_EMA_Agent": 1.1850037158529203,
+            "ZScore_Agent": 0.1,
+            "Macro_YieldCurve_Agent": 0.2762166717280574,
+            "RandomForest_Agent": 2.955599352583794,
+            "SVM_Agent": 2.986184576114257,
+            "FinBERT_Agent": 0.1433226506489357
+        },
+        "threshold_long": 0.8498858580792914,
+        "threshold_short": 0.5741702046246591,
+        "threshold": 0.7120280313519752,
+        "objective_score": 0.3536,
+        "sharpe_ratio": 0.5976,
+        "max_drawdown": 0.087,
+        "cumulative_return": 0.4462,
+        "annualized_return": 0.034,
+        "profit_factor": 1.7026,
+        "trades": 135
+    },
+    "objective_metric": "sharpe_mdd",
+    "max_train_year": 2020,
+    "annualization_factor": 52
+}

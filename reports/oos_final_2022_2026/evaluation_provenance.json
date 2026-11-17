@@ -1,0 +1,38 @@
+{
+  "status": "FINAL_OOS_EVALUATED_ONCE",
+  "selected_strategy": "Core35_Satellite65",
+  "training_end": "2021-12-31",
+  "first_decision": "2022-01-07",
+  "last_decision": "2026-10-09",
+  "first_accounted_session": "2022-01-07",
+  "last_accounted_session": "2026-10-09",
+  "last_signal_without_next_open": true,
+  "number_of_weekly_decisions": 249,
+  "number_of_daily_sessions": 1193,
+  "execution_dates": {
+    "Core35_Satellite65": {
+      "first": "2022-01-10",
+      "last": "2026-10-05"
+    },
+    "SPY_buy_hold": {
+      "first": "2022-01-10",
+      "last": "2022-01-10"
+    },
+    "Sixty_Forty": {
+      "first": "2022-01-10",
+      "last": "2026-10-05"
+    }
+  },
+  "model_retrained": false,
+  "strategy_retuned_on_oos": false,
+  "finbert_used": false,
+  "macro_point_in_time_verified": false,
+  "price_data": "Auto-adjusted ETF Open/Close",
+  "accounting": "Shared daily next-open engine",
+  "commission_bps": 2.0,
+  "slippage_bps": 1.0,
+  "annual_short_borrow_rate": 0.01,
+  "frozen_manifest_sha256": "1a0ab55434f132f392e6f8249a03c658393b262244cdf59de8076c796d011f7f",
+  "signal_provenance_sha256": "5d4b3754ea5081bbb7a75cf9e132c04f32d2a9b93ee90270a397ebbfe4478de5",
+  "backtest_code_sha256": "2f2ba6c41130c47df02506c4d489bfc9653080e8c44a8e1502b1b4d30861140d"
+}

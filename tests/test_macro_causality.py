@@ -1,10 +1,10 @@
-"""Audit causale sintetico delle feature macro e dell'interfaccia regimi.
+"""Synthetic causality audit of the macro features and of the regime interface.
 
-Da collocare in tests/test_macro_causality.py. Non legge dati reali,
-non usa validation/OOS, non genera o modifica alcun output del progetto.
+No real data is read, validation/OOS data is not used and no project output
+is generated or modified.
 
-NOTA: i test verificano causalita' computazionale e interfacce.
-NON certificano la disponibilita' storica point-in-time dei dati FRED.
+NOTE: the tests verify computational causality and interfaces. They do NOT
+certify the historical point-in-time availability of FRED data.
 """
 
 import unittest

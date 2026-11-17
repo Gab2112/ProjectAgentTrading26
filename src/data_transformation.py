@@ -1,20 +1,20 @@
-"""Preparazione dei dati di mercato e macroeconomici per il progetto Multi-Asset.
+"""Preparation of market and macroeconomic data for the multi-asset project.
 
-Responsabilità
----------------
-1. Orchestrare la preparazione dei dati: la lettura dei file avviene in
-   ``src/data_loader.py``, il calcolo delle feature in ``src/features.py``.
-2. Conservare un pannello GIORNALIERO allineato dei prezzi Open/Close rettificati
-   per i backtest dei livelli A1 e A2.
-3. Conservare il pannello W-FRI di ricerca e, separatamente, le feature
-   con indice sulle VERE date di decisione (ultima seduta della settimana).
-4. Escludere i dati macroeconomici durante A1/A2, rendendo i benchmark
-   indipendenti dalle serie FRED.
-5. Escludere le osservazioni OOS dai file elaborati finché non sono autorizzate.
-6. Esportare feature market-only TRAINING sulle vere date di decisione.
-   Serie macro opzionali richiedono un allineamento esplicito per data.
+Responsibilities
+----------------
+1. Orchestrate data preparation: files are read in ``src/data_loader.py``
+   and features are computed in ``src/features.py``.
+2. Store an aligned DAILY panel of adjusted Open/Close prices for the
+   Level A1 and A2 backtests.
+3. Store the W-FRI research panel and, separately, the features indexed
+   on the ACTUAL decision dates (last trading session of each week).
+4. Exclude macroeconomic data during A1/A2, so that the benchmarks are
+   independent of FRED series.
+5. Exclude OOS observations from processed files until they are authorised.
+6. Export market-only TRAINING features on the actual decision dates.
+   Optional macro series require explicit date alignment.
 
-Input:  data/raw/market/<TICKER>.csv; facoltativamente data/raw/macro/*.csv
+Input:  data/raw/market/<TICKER>.csv; optionally data/raw/macro/*.csv
 Output: data/processed/market_daily.csv
         data/processed/weekly_decision_dates.csv
         data/processed/market_daily_quality.csv
@@ -22,13 +22,12 @@ Output: data/processed/market_daily.csv
         data/processed/data_quality_summary.csv
         data/processed/decision_features_training.csv
 
-Nota: i prezzi Open e Close devono essere rettificati in maniera coerente,
-come nei download Yahoo con ``auto_adjust=True``. I prezzi di apertura
-rettificati sono una proxy per il backtest, non quotazioni storiche
-necessariamente eseguibili.
+Note: Open and Close prices must be adjusted consistently, as in Yahoo
+downloads with ``auto_adjust=True``. Adjusted opening prices are a proxy
+for the backtest, not necessarily executable historical quotes.
 
-Questo modulo NON genera pesi di portafoglio e NON calcola rendimenti:
-queste responsabilità appartengono ai moduli di strategia e backtesting.
+This module does NOT generate portfolio weights and does NOT compute
+returns: those responsibilities belong to the strategy and backtesting modules.
 """
 
 from pathlib import Path
@@ -54,11 +53,11 @@ def transform_market_data(
     config: dict,
     root_dir: Path,
 ) -> Dict[str, pd.DataFrame]:
-    """Aggrega i dati OHLCV giornalieri nel pannello settimanale storico.
+    """Aggregate daily OHLCV data into the historical weekly panel.
 
-    Le serie OHLCV settimanali servono per le analisi, NON per eseguire
-    ordini all'apertura successiva o stimare la covarianza su 126 sedute.
-    A1 e A2 devono utilizzare invece market_daily.csv.
+    Weekly OHLCV series are used for analysis, NOT for executing orders at the
+    next open or estimating the 126-session covariance. A1 and A2 must use
+    market_daily.csv instead.
     """
     market_dir = root_dir / config["paths"]["raw_data"] / "market"
     weekly_market: Dict[str, pd.DataFrame] = {}
@@ -89,7 +88,7 @@ def transform_market_data(
 
 
 def _macro_series_mapping(config: dict) -> Dict[str, str]:
-    """Mantiene la corrispondenza tra nomi logici e identificativi delle serie FRED."""
+    """Map logical names to FRED series identifiers."""
     mapping: Dict[str, str] = {}
     for section in ("rates", "inflation", "stress"):
         for name, series_id in config.get("data", {}).get(section, {}).items():
@@ -106,12 +105,11 @@ def transform_macro_data(
     config: dict,
     root_dir: Path,
 ) -> Dict[str, pd.DataFrame]:
-    """Prepara le serie macroeconomiche storiche per il futuro livello B.
+    """Prepare historical macroeconomic series for Level B.
 
-    ATTENZIONE: i ritardi di pubblicazione fissi sono soltanto approssimazioni.
-    Non ricostruiscono le versioni storiche dei dati (vintage) né gli istanti
-    esatti di pubblicazione. Il livello B non deve trattare queste variabili
-    come feature verificate point-in-time.
+    WARNING: fixed publication lags are only approximations. They do not
+    reconstruct historical data vintages or exact release times. Level B must
+    not treat these variables as verified point-in-time features.
     """
     raw_dir = root_dir / config["paths"]["raw_data"] / "macro"
     transformed: Dict[str, pd.DataFrame] = {}
@@ -140,7 +138,7 @@ def build_master_dataset(
     market_data: Dict[str, pd.DataFrame],
     macro_data: Dict[str, pd.DataFrame],
 ) -> pd.DataFrame:
-    """Unisce i dati settimanali di mercato alle eventuali variabili macroeconomiche."""
+    """Merge weekly market data with the optional macroeconomic variables."""
     frames = list(market_data.values()) + list(macro_data.values())
     if not frames:
         raise ValueError("No transformed datasets available")
@@ -163,7 +161,7 @@ def build_master_dataset(
 
 
 def build_data_quality_summary(master: pd.DataFrame) -> pd.DataFrame:
-    """Riepiloga copertura, valori mancanti e date valide del dataset settimanale."""
+    """Summarise coverage, missing values and valid dates of the weekly dataset."""
     return pd.DataFrame(
         {
             "non_null": master.notna().sum(),
@@ -179,11 +177,10 @@ def run_data_transformation(
     config: dict,
     root_dir: Path,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Prepara i dati giornalieri per il backtest e il dataset settimanale.
+    """Prepare the daily backtest data and the weekly dataset.
 
-    Restituisce la stessa coppia (weekly_master, quality_summary) della
-    versione precedente, mantenendo invariata l'interfaccia pubblica
-    durante la migrazione graduale.
+    Returns the pair ``(weekly_master, quality_summary)``, keeping the public
+    interface unchanged.
     """
     out_dir = root_dir / config["paths"]["processed_data"]
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -192,8 +189,8 @@ def run_data_transformation(
     if level not in {"A1", "A2", "B", "C"}:
         raise ValueError(f"Unknown pipeline level: {level}")
 
-    # I livelli B/C richiedono un'integrazione esplicita successiva.
-    # La trasformazione macro attuale usa ritardi stimati, non vintage storiche verificate.
+    # Levels B/C require a separate, explicit integration step.
+    # The current macro transformation uses estimated lags, not verified historical vintages.
     if level in {"B", "C"}:
         raise NotImplementedError(
             "Level B/C data preparation is not implemented yet. "

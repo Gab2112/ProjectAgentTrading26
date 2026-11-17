@@ -72,15 +72,19 @@ def get_time_windows(config: dict) -> dict[str, pd.Timestamp | None]:
     validation_start = _parse_boundary(
         validation, "validation_start", required=False
     )
-    validation_end = _parse_boundary(validation, "validation_end", required=True)
+    validation_end = _parse_boundary(validation, "validation_end", required=False)
     oos_start = _parse_boundary(validation, "oos_start", required=True)
 
-    if validation_start is None:
+    if validation_start is not None and validation_end is None:
+        raise ValueError("validation_start requires validation_end")
+    if validation_end is not None and validation_start is None:
         validation_start = train_end + pd.Timedelta(days=1)
 
     if train_start is not None and train_start > train_end:
         raise ValueError("'train_start' deve precedere o coincidere con 'train_end'.")
-    if not (train_end < validation_start <= validation_end < oos_start):
+    if not train_end < oos_start:
+        raise ValueError("train_end must precede oos_start")
+    if validation_end is not None and not (train_end < validation_start <= validation_end < oos_start):
         raise ValueError(
             "Ordine delle date non valido: e' necessario "
             "train_end < validation_start <= validation_end < oos_start."
@@ -102,7 +106,7 @@ def get_time_boundaries(
     windows = get_time_windows(config)
     return (
         windows["train_end"],
-        windows["validation_end"],
+        windows["validation_end"] if windows["validation_end"] is not None else windows["train_end"],
         windows["oos_start"],
     )
 
@@ -169,7 +173,8 @@ def restrict_to_allowed_period(
     if is_oos_enabled(config):
         allowed = df.copy()
     else:
-        allowed = df.loc[df.index <= windows["validation_end"]].copy()
+        cutoff = windows["validation_end"] if windows["validation_end"] is not None else windows["train_end"]
+        allowed = df.loc[df.index <= cutoff].copy()
 
     if allowed.empty:
         raise ValueError("Nessuna osservazione nel periodo autorizzato.")
@@ -195,15 +200,13 @@ def split_time_periods(
     if windows["train_start"] is not None:
         train_mask &= data.index >= windows["train_start"]
 
-    validation_mask = (
-        (data.index >= windows["validation_start"])
-        & (data.index <= windows["validation_end"])
-    )
-
-    periods = {
-        "train": data.loc[train_mask].copy(),
-        "validation": data.loc[validation_mask].copy(),
-    }
+    periods = {"train": data.loc[train_mask].copy()}
+    if windows["validation_end"] is not None:
+        validation_mask = (
+            (data.index >= windows["validation_start"])
+            & (data.index <= windows["validation_end"])
+        )
+        periods["validation"] = data.loc[validation_mask].copy()
 
     if is_oos_enabled(config):
         periods["oos"] = data.loc[

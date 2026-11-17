@@ -1,12 +1,11 @@
-"""
-test_plots.py
+"""Unit tests for the visualisation module src/plots.py.
 
-Test unitari per il modulo di visualizzazione src/plots.py.
-Verifica:
-1. Caricamento dei segnali per un asset tramite load_all_signals_for_asset.
-2. Generazione del grafico di distribuzione segnali (plot_agent_signal_distributions).
-3. Salvataggio su file e controllo dimensioni/integrita del plot generato.
-4. Funzionamento sia con input dizionario esplicito che con caricamento automatico da cartella signals.
+Checks:
+1. Loading the signals of an asset with load_all_signals_for_asset.
+2. Generating the signal distribution chart (plot_agent_signal_distributions).
+3. Saving the chart to file and checking its size and integrity.
+4. Operation with both an explicit dictionary input and automatic loading
+   from the signals folder.
 """
 
 import os
@@ -30,7 +29,7 @@ class TestPlotsModule(unittest.TestCase):
         dates = pd.date_range("2020-01-01", "2021-12-31", freq="W-FRI")
         n = len(dates)
 
-        # Genera segnali sintetici per 4 agenti fittizi
+        # Generate synthetic signals for 4 dummy agents.
         cls.dummy_signals = {
             "Agent_Trend": pd.DataFrame({
                 "signal": np.random.choice([-1, 0, 1], size=n, p=[0.2, 0.3, 0.5]),

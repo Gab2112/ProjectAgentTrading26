@@ -1,0 +1,8 @@
+{
+    "window": 60,
+    "threshold": 1.5,
+    "exit_threshold": 0.0,
+    "stop_threshold": null,
+    "mode": "momentum",
+    "price_col": "SPY_close"
+}

@@ -1,22 +1,22 @@
-"""Test dell'agente SVM (src/agents/SVM_agent.py).
+"""Tests of the SVM agent (src/agents/SVM_agent.py).
 
-I test usano soltanto dati sintetici. Non leggono dati di mercato reali e
-non consultano validation o OOS.
+The tests use synthetic data only. They do not read real market data and do
+not consult validation or OOS data.
 
-Invarianti controllati:
-- le variabili usano solo informazioni passate;
-- l'etichetta usa il futuro ma è assente dove il futuro non è disponibile;
-- walk-forward: modificare i dati successivi a un anno non cambia le
-  previsioni fino a quell'anno;
-- purge: le etichette che "toccano" l'anno da prevedere non entrano
-  nell'allenamento di quell'anno;
-- segnali in {-1, 0, +1}, confidenza in [0, 1], opzione long-only;
-- risultati riproducibili;
-- trainer: segnali out-of-fold solo dal primo anno di test, cutoff applicato
-  prima di costruire le etichette, modello finale salvabile e ricaricabile;
-- nessun riempimento all'indietro: righe incomplete -> segnale neutro.
+Invariants checked:
+- the variables use past information only;
+- the label uses the future but is missing where the future is not available;
+- walk-forward: changing data after a given year does not change the
+  predictions up to that year;
+- purge: labels that overlap the year being predicted are excluded from
+  that year's training;
+- signals in {-1, 0, +1}, confidence in [0, 1], long-only option;
+- reproducible results;
+- trainer: out-of-fold signals only from the first test year, cutoff
+  applied before building the labels, final model can be saved and reloaded;
+- no backward filling: incomplete rows -> neutral signal.
 
-Esecuzione dalla radice del repository:
+Run from the repository root:
     python3 -m unittest discover -s tests -p 'test_*.py' -v
 """
 
@@ -58,7 +58,7 @@ def make_settings(**overrides) -> dict:
 
 
 def make_weekly_close(seed: int = 0, end: str = "2016-12-30") -> pd.DataFrame:
-    """Prezzi sintetici settimanali con un leggero drift positivo."""
+    """Synthetic weekly prices with a slight positive drift."""
     rng = np.random.default_rng(seed)
     dates = pd.date_range("2005-01-07", end, freq="W-FRI")
     drifts = {"SPY": 0.0015, "IEF": 0.0008, "GLD": 0.0005, "SHY": 0.0002}
@@ -86,10 +86,10 @@ class TestFeaturesAndTarget(unittest.TestCase):
         close = pd.Series([100.0, 110.0, np.nan, 90.0, 120.0, 130.0], index=dates)
         label = build_direction_target(close, horizon=1)
         self.assertEqual(label.iloc[0], 1.0)            # 110 > 100
-        self.assertTrue(pd.isna(label.iloc[1]))         # prezzo futuro mancante
-        self.assertTrue(pd.isna(label.iloc[2]))         # prezzo attuale mancante
+        self.assertTrue(pd.isna(label.iloc[1]))         # missing future price
+        self.assertTrue(pd.isna(label.iloc[2]))         # missing current price
         self.assertEqual(label.iloc[3], 1.0)            # 120 > 90
-        self.assertTrue(pd.isna(label.iloc[-1]))        # futuro non disponibile
+        self.assertTrue(pd.isna(label.iloc[-1]))        # future not available
 
     def test_target_is_missing_where_future_is_unknown(self):
         label = build_direction_target(make_weekly_close()["SPY"], horizon=4)
@@ -132,7 +132,7 @@ class TestWalkForward(unittest.TestCase):
     def test_labels_overlapping_the_predicted_year_are_purged(self):
         first_2014 = self.label.loc["2014"].index[0]
         position = self.label.index.get_loc(first_2014)
-        overlapping = self.label.index[position - 3: position]  # orizzonte 4: etichette che finiscono nel 2014
+        overlapping = self.label.index[position - 3: position]  # horizon 4: labels ending in 2014
 
         flipped = self.label.copy()
         flipped.loc[overlapping] = 1.0 - flipped.loc[overlapping]
@@ -171,7 +171,8 @@ class TestSignals(unittest.TestCase):
 
 
 def make_panel(close: pd.DataFrame) -> pd.DataFrame:
-    """Pannello come quello di train.py: colonne <ETF>_close sulle date di decisione."""
+    """Panel shaped like the one used in train.py: <ETF>_close columns on the decision dates.
+    """
     return close.rename(columns=lambda t: f"{t}_close")
 
 
@@ -199,7 +200,7 @@ class TestTrainerAndFinalModel(unittest.TestCase):
 
     def test_cutoff_precedes_target_generation(self):
         full = make_panel(make_weekly_close(end="2017-12-29"))
-        full.loc[full.index.year >= 2017, "SPY_close"] += 500.0  # salto estremo dopo il cutoff
+        full.loc[full.index.year >= 2017, "SPY_close"] += 500.0  # extreme jump after the cutoff
         from_full = self.run_trainer(full, max_year=2016)
         from_cut = self.run_trainer(full.loc[full.index.year <= 2016], max_year=2016)
         pd.testing.assert_frame_equal(from_full.oof_signals, from_cut.oof_signals)
@@ -228,7 +229,7 @@ class TestTrainerAndFinalModel(unittest.TestCase):
         trainer = self.run_trainer(self.panel)
         query = self.panel.loc["2015"].copy()
         signals, confidence = trainer.final_agent.predict_with_confidence(query)
-        # Con meno di 52 settimane di storia le variabili mancano: segnale neutro.
+        # With less than 52 weeks of history the variables are missing: neutral signal.
         self.assertTrue((signals == 0).all())
         self.assertTrue((confidence == 0).all())
         full_signals, _ = trainer.final_agent.predict_with_confidence(self.panel)

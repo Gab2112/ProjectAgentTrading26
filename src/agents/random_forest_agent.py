@@ -1,22 +1,21 @@
-"""
-random_forest_agent.py
+"""Quantitative machine-learning agent based on a Random Forest (an ensemble of decision trees).
 
-Agente quantitativo di Machine Learning basato su Random Forest (Ensemble di Decision Trees).
-Eredita da BaseAgent per garantire piena conformità e coerenza architetturale
-con gli altri agenti di ProjectAgentTrading26 (SMA/EMA, Z-Score, Macro Yield Curve, FinBERT).
+The agent inherits from BaseAgent for full architectural consistency with the
+other agents of ProjectAgentTrading26 (SMA/EMA, Z-Score, Macro Yield Curve, FinBERT).
 
-Razionale Quantitativo e Metodologico:
-- Risolve il limite delle relazioni puramente lineari estraendo pattern non lineari
-  e interazioni tra feature macroeconomiche (pendenza curva, variazioni tassi, inflazione)
-  e dinamiche di prezzo (rendimenti ritardati, volatilità).
-- Grazie al Bagging (Bootstrap Aggregation) e al Feature Subsampling (max_features='sqrt'),
-  riduce drasticamente la varianza e previene l'overfitting, risultando ideale per il
-  dataset a frequenza settimanale (campione In-Sample di ~940 osservazioni).
-- Genera nativamente probabilità calibrate di rialzo/ribasso (predict_proba), che si
-  mappano in modo naturale nella stima di confidenza continua [0.0, 1.0] e nei segnali
-  discreti ammessi {-1, 0, 1}.
-- Fornisce la Feature Importance (MDI / Gini Importance), garantendo trasparenza
-  ed interpretabilità economica (fondamentale per tesi/ricerche quantitative).
+Quantitative and methodological rationale:
+- It overcomes the limits of purely linear relationships by capturing
+  non-linear patterns and interactions between macroeconomic features
+  (curve slope, rate changes, inflation) and price dynamics (lagged returns,
+  volatility).
+- Bagging (bootstrap aggregation) and feature subsampling
+  (``max_features='sqrt'``) strongly reduce variance and limit overfitting,
+  which suits the weekly dataset (an in-sample sample of about 940 observations).
+- It natively produces up/down probabilities (``predict_proba``) that map
+  naturally to a continuous confidence in [0.0, 1.0] and to the allowed
+  discrete signals {-1, 0, 1}.
+- It provides feature importances (MDI / Gini importance), supporting
+  transparency and economic interpretability.
 """
 
 from collections import Counter
@@ -29,7 +28,7 @@ import pandas as pd
 import joblib
 from sklearn.ensemble import RandomForestClassifier
 
-# Risoluzione robusta dei percorsi per esecuzione diretta o come modulo
+# Robust path resolution for direct execution or execution as a module.
 CURRENT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = CURRENT_DIR.parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -43,7 +42,7 @@ from src.evaluator import calculate_performance_metrics, compute_objective_score
 
 
 # =====================================================================
-# FEATURE MACRO E DI MERCATO DI DEFAULT
+# DEFAULT MACRO AND MARKET FEATURES
 # =====================================================================
 DEFAULT_FEATURE_COLS = [
     "curve_10y_2y",
@@ -57,24 +56,24 @@ DEFAULT_FEATURE_COLS = [
 
 
 # =====================================================================
-# 1. AGENTE INFERENZIALE RANDOM FOREST
+# 1. RANDOM FOREST INFERENCE AGENT
 # =====================================================================
 class RandomForestAgent(BaseAgent):
-    """
-    Agente inferenziale basato su Random Forest Classifier.
+    """Inference agent based on a Random Forest classifier.
 
-    Flusso Operativo:
-    1. Riceve in input le feature macroeconomiche e di mercato (features_weekly.csv).
-    2. Utilizza un ensemble di alberi decisionali poco profondi (shallow trees: max_depth 2-4)
-       e foglie ampie (min_samples_leaf >= 15) per prevenire il memorization noise.
-    3. Predice a tempo t la probabilità direzionale a t+1: P(Up) = P(R_{t+1} > 0).
-    4. Mappa la probabilità nei segnali di trading discreti {-1, 0, 1}:
-       - P(Up) >= prob_threshold               -> BUY (+1)
-       - P(Up) <= 1.0 - prob_threshold          -> SELL (-1)
+    Workflow:
+    1. Receives the macroeconomic and market features (features_weekly.csv).
+    2. Uses an ensemble of shallow decision trees (max_depth 2-4) with large
+       leaves (min_samples_leaf >= 15) to avoid fitting noise.
+    3. At time t, predicts the directional probability for t+1:
+       P(Up) = P(R_{t+1} > 0).
+    4. Maps the probability to discrete trading signals {-1, 0, 1}:
+       - P(Up) >= prob_threshold              -> BUY (+1)
+       - P(Up) <= 1.0 - prob_threshold         -> SELL (-1)
        - (1 - prob_threshold) < P < threshold  -> HOLD / FLAT (0)
-    5. Calcola la confidenza continua [0.0, 1.0]:
-       - Confidenza proporzionale alla distanza dal baricentro neutrale (0.50):
-         c = min(1.0, max(0.50, 0.50 + 2.0 * |P(Up) - 0.50|)) se attivo, 0.0 se FLAT.
+    5. Computes a continuous confidence in [0.0, 1.0], proportional to the
+       distance from the neutral point (0.50):
+       c = min(1.0, max(0.50, 0.50 + 2.0 * |P(Up) - 0.50|)) when active, 0.0 when FLAT.
     """
 
     def __init__(
@@ -89,7 +88,7 @@ class RandomForestAgent(BaseAgent):
         max_features: Union[str, float] = "sqrt",
         random_state: int = 42,
         name: Optional[str] = None,
-        output_format: str = "numeric",  # 'numeric' (-1, 0, 1) o 'string' ('SELL', 'HOLD', 'BUY')
+        output_format: str = "numeric",  # 'numeric' (-1, 0, 1) or 'string' ('SELL', 'HOLD', 'BUY')
     ):
         agent_name = name or f"RandomForestAgent_{target_asset.upper()}"
         super().__init__(
@@ -126,7 +125,7 @@ class RandomForestAgent(BaseAgent):
         }
 
     def _apply_params(self, params: Dict[str, Any]) -> None:
-        """Aggiorna i parametri dell'agente dopo il caricamento da JSON."""
+        """Update the agent parameters after loading them from JSON."""
         if "target_asset" in params:
             self.target_asset = str(params["target_asset"]).upper()
         if "price_col" in params:
@@ -160,12 +159,12 @@ class RandomForestAgent(BaseAgent):
         self,
         df: pd.DataFrame,
     ) -> Tuple[pd.DataFrame, pd.Series, pd.Series]:
+        """Extract the feature matrix X and the binary directional target y.
+
+        y_t = 1 if the return at t+1 is positive (R_{t+1} > 0), otherwise 0.
+        Features use only information available at t, so no look-ahead bias is introduced.
         """
-        Estrae la matrice delle feature X e il target binario direzionale y:
-        y_t = 1 se il rendimento a t+1 è positivo (R_{t+1} > 0), altrimenti 0.
-        Garantisce assenza totale di look-ahead bias.
-        """
-        # Verifica ed eventuale arricchimento con feature macro da BaseAgent
+        # Check the input and, if needed, enrich it with macro features through BaseAgent.
         missing_macro = [c for c in self.feature_cols if c not in df.columns]
         if missing_macro:
             try:
@@ -178,9 +177,9 @@ class RandomForestAgent(BaseAgent):
 
         price_col_resolved = self.resolve_price_col(df, price_col=self.price_col, target_asset=self.target_asset)
 
-        # Selezione feature disponibili nel DataFrame
+        # Select the features available in the DataFrame.
         active_features = [col for col in self.feature_cols if col in df.columns]
-        # Inclusione automatica di rendimento e momentum dell'asset target se presenti
+        # Automatically include the target asset's return and momentum when present.
         for candidate in [
             f"{self.target_asset}_return_1w",
             f"{self.target_asset}_momentum_21d",
@@ -189,7 +188,7 @@ class RandomForestAgent(BaseAgent):
             if candidate in df.columns and candidate not in active_features:
                 active_features.append(candidate)
 
-        # Supporto a colonne canoniche senza prefisso
+        # Support canonical columns without an asset prefix.
         if not any(c.startswith(f"{self.target_asset}_") for c in active_features):
             for candidate in ["return_1w", "momentum_21d", "momentum_63d"]:
                 if candidate in df.columns and candidate not in active_features:
@@ -202,7 +201,7 @@ class RandomForestAgent(BaseAgent):
 
         X = df[active_features].copy()
 
-        # Calcolo rendimenti futuri a t+1 (shift(-1) sul rendimento o prezzo)
+        # Compute the t+1 forward returns (shift(-1) of the return or price).
         price_series = df[price_col_resolved].astype(float)
         future_returns = price_series.shift(-1).div(price_series).sub(1.0)
         future_returns = future_returns.replace([np.inf, -np.inf], np.nan)
@@ -215,9 +214,10 @@ class RandomForestAgent(BaseAgent):
         df: pd.DataFrame,
         max_year: Optional[int],
     ) -> "RandomForestAgent":
-        """
-        Addestra il modello Random Forest sui dati In-Sample (fino a max_year).
-        Rispetta rigorosamente l'OOS lock del progetto (es. dati >= 2022 mai visti in fase di fit).
+        """Train the Random Forest on in-sample data (up to ``max_year``).
+
+        The project OOS lock is strictly respected: data from 2022 onwards is never
+        used during fitting.
         """
         if (
             not isinstance(df.index, pd.DatetimeIndex)
@@ -257,7 +257,7 @@ class RandomForestAgent(BaseAgent):
         self.model.fit(X_train, y_train)
         self.trained_features = list(X_train.columns)
 
-        # Estrazione feature importances
+        # Extract the feature importances.
         importances = self.model.feature_importances_
         sorted_idx = np.argsort(importances)[::-1]
         self.feature_importances = {
@@ -270,9 +270,9 @@ class RandomForestAgent(BaseAgent):
         return self
 
     def predict_proba(self, df: pd.DataFrame) -> pd.Series:
-        """
-        Calcola la serie delle probabilità di rialzo P(R_{t+1} > 0).
-        Gestisce opportunamente i periodi di warm-up iniziale assegnando probabilità neutrale 0.50.
+        """Compute the series of upside probabilities P(R_{t+1} > 0).
+
+        During the initial warm-up period a neutral probability of 0.50 is assigned.
         """
         if self.model is None:
             raise ValueError(
@@ -291,18 +291,18 @@ class RandomForestAgent(BaseAgent):
         proba_series = pd.Series(0.50, index=df.index, dtype=float)
         if valid_mask.any():
             X_valid = X.loc[valid_mask]
-            # Probabilità della classe positiva (1 = Rialzo)
+            # Probability of the positive class (1 = up move).
             preds_proba = self.model.predict_proba(X_valid)[:, 1]
             proba_series.loc[valid_mask] = preds_proba
 
         return proba_series
 
     def predict(self, df: pd.DataFrame) -> pd.Series:
-        """
-        Calcola i segnali di trading discreti {-1, 0, 1} a partire dalle probabilità stimate.
-        - P(Up) >= prob_threshold              -> BUY (+1)
-        - P(Up) <= 1.0 - prob_threshold         -> SELL (-1)
-        - altrimenti                            -> HOLD (0)
+        """Compute the discrete trading signals {-1, 0, 1} from the estimated probabilities.
+
+        - P(Up) >= prob_threshold      -> BUY (+1)
+        - P(Up) <= 1.0 - prob_threshold -> SELL (-1)
+        - otherwise                    -> HOLD (0)
         """
         proba = self.predict_proba(df)
 
@@ -317,18 +317,17 @@ class RandomForestAgent(BaseAgent):
         return self._format_signals(signals)
 
     def predict_with_confidence(self, df: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
-        """
-        Calcola sia i segnali operativi discreti {-1, 0, 1} sia la stima di confidenza continua [0.0, 1.0].
+        """Compute both the discrete signals {-1, 0, 1} and a continuous confidence in [0.0, 1.0].
 
-        La confidenza è funzione della convinzione probabilistica rispetto alla soglia neutrale:
-        - Segnale HOLD (0) -> confidenza 0.0
-        - Segnale BUY (+1) o SELL (-1) -> confidenza calibrata tra 0.50 e 1.00:
+        Confidence reflects the probabilistic conviction relative to the neutral level:
+        - HOLD signal (0) -> confidence 0.0;
+        - BUY (+1) or SELL (-1) signal -> confidence between 0.50 and 1.00:
             c = min(1.0, max(0.50, 0.50 + 2.0 * |P - 0.50|))
         """
         proba = self.predict_proba(df)
         signals = self.predict(df)
 
-        # Distanza dalla neutralità
+        # Distance from neutrality.
         distance = (proba - 0.50).abs()
         conf_scaled = (0.50 + 2.0 * distance).clip(0.50, 1.0).round(4)
 
@@ -338,33 +337,30 @@ class RandomForestAgent(BaseAgent):
         return signals, confidence
 
     def get_feature_importances(self) -> pd.Series:
-        """Restituisce la serie ordinata decrescente della Feature Importance (Gini Importance)."""
+        """Return the feature importances (Gini importance) sorted in descending order.
+        """
         if not self.feature_importances:
             return pd.Series(dtype=float)
         return pd.Series(self.feature_importances).sort_values(ascending=False)
 
     def save_params(self, filepath: Union[str, Path]) -> None:
-        """
-        Salva i parametri e le metriche dell'agente in un file JSON,
-        e serializza il modello Random Forest addestrato (.joblib) nel medesimo percorso.
+        """Save the agent parameters and metrics to JSON and the trained model to a .joblib file alongside it.
         """
         path = Path(filepath)
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Salvataggio del modello scikit-learn in .joblib
+        # Save the scikit-learn model as .joblib.
         model_filename = path.with_suffix(".joblib")
         if self.model is not None:
             joblib.dump(self.model, model_filename)
             self.params["model_joblib_file"] = model_filename.name
 
-        # Salvataggio metadati e parametri in JSON
+        # Save metadata and parameters as JSON.
         with open(path, "w", encoding="utf-8") as f:
             json.dump(self.params, f, indent=4)
 
     def load_params(self, filepath: Union[str, Path]) -> "RandomForestAgent":
-        """
-        Carica i parametri ottimali dal file JSON e il modello serializzato (.joblib).
-        """
+        """Load the optimal parameters from JSON and the serialised model (.joblib)."""
         path = Path(filepath)
         if not path.exists():
             raise FileNotFoundError(f"File parametri non trovato: {path}")
@@ -374,7 +370,7 @@ class RandomForestAgent(BaseAgent):
 
         self._apply_params(params)
 
-        # Caricamento del modello serializzato .joblib se presente
+        # Load the serialised .joblib model, if present.
         joblib_file = path.with_suffix(".joblib")
         if joblib_file.exists():
             self.model = joblib.load(joblib_file)
@@ -383,18 +379,18 @@ class RandomForestAgent(BaseAgent):
 
 
 # =====================================================================
-# 2. OTTIMIZZATORE SU SINGOLA FINESTRA (Train IS + Val OOS)
+# 2. SINGLE-WINDOW OPTIMISER (in-sample training + out-of-sample validation)
 # =====================================================================
 class RandomForestOptimizer:
-    """
-    Ottimizzatore su singolo blocco temporale per l'agente Random Forest.
+    """Single-block optimiser for the Random Forest agent.
 
-    Principi metodologici:
-    - Ottimizza i parametri chiave (max_depth, min_samples_leaf, prob_threshold, n_estimators)
-      RIGOROSAMENTE sul blocco di Train (In-Sample).
-    - Valuta la qualità del segnale tramite compute_objective_score ('profit_oriented' o 'sharpe_mdd').
-    - Testa i parametri ottimali In-Sample sul blocco di Validation (Out-Of-Sample) per misurare
-      l'overfitting drop (is_sharpe - oos_sharpe).
+    Methodological principles:
+    - Optimises the key parameters (max_depth, min_samples_leaf, prob_threshold,
+      n_estimators) STRICTLY on the training block (in-sample).
+    - Assesses signal quality with ``compute_objective_score``
+      (``'profit_oriented'`` or ``'sharpe_mdd'``).
+    - Tests the optimal in-sample parameters on the validation block
+      (out-of-sample) to measure the overfitting gap (is_sharpe - oos_sharpe).
     """
 
     def __init__(
@@ -429,9 +425,7 @@ class RandomForestOptimizer:
         val_df: Optional[pd.DataFrame] = None,
         warmup_df: Optional[pd.DataFrame] = None,
     ) -> Dict[str, Any]:
-        """
-        Esegue la grid search sui soli dati di Train (In-Sample) e valuta la performance
-        sia su Train che su Validation (Out-Of-Sample).
+        """Run the grid search on the training data only and evaluate it in and out of sample.
         """
         dfs_to_concat = [df for df in [warmup_df, train_df, val_df] if df is not None and not df.empty]
         if not dfs_to_concat:
@@ -443,7 +437,7 @@ class RandomForestOptimizer:
         train_indices = train_df.index
         val_indices = val_df.index if (val_df is not None and not val_df.empty) else pd.DatetimeIndex([])
 
-        # Rendimenti dell'asset per backtesting rapido con SHIFT(1)
+        # Asset returns for a fast backtest with SHIFT(1).
         close_series = full_df[self.price_col].astype(float)
         full_returns = close_series.pct_change().fillna(0.0)
 
@@ -452,11 +446,11 @@ class RandomForestOptimizer:
         best_agent: Optional[RandomForestAgent] = None
         best_is_metrics: Dict[str, float] = {}
 
-        # Grid search su iperparametri parsimoniosi
+        # Grid search over a parsimonious set of hyperparameters.
         for depth in self.depth_candidates:
             for min_leaf in self.min_leaf_candidates:
                 for n_est in self.n_estimators_candidates:
-                    # Addestra l'agente Random Forest sui soli dati di Train
+                    # Train the Random Forest agent on the training data only.
                     agent = RandomForestAgent(
                         target_asset=self.target_asset,
                         price_col=self.price_col,
@@ -472,7 +466,7 @@ class RandomForestOptimizer:
                     except Exception:
                         continue
 
-                    # Ottimizza la soglia di probabilità per questo modello addestrato
+                    # Optimise the probability threshold for the trained model.
                     proba_full = agent.predict_proba(full_df)
 
                     for th in self.threshold_candidates:
@@ -480,10 +474,10 @@ class RandomForestOptimizer:
                         raw_sig[proba_full >= th] = 1
                         raw_sig[proba_full <= (1.0 - th)] = -1
 
-                        # Regola cardine: shift(1) per evitare look-ahead bias
+                        # Key rule: shift(1) to avoid look-ahead bias.
                         pos_series = pd.Series(raw_sig, index=full_df.index).shift(1)
 
-                        # Valutazione su In-Sample
+                        # In-sample evaluation.
                         train_pos = pos_series.reindex(train_indices).fillna(0.0)
                         train_ret = train_pos * full_returns.reindex(train_indices).fillna(0.0)
 
@@ -505,7 +499,7 @@ class RandomForestOptimizer:
         if best_combo is None or best_agent is None:
             raise RuntimeError(f"[{self.target_asset}] Nessuna combinazione valida trovata in grid search.")
 
-        # Valutazione Out-Of-Sample (Validation)
+        # Out-of-sample (validation) evaluation.
         oos_metrics = None
         if val_df is not None and not val_df.empty:
             sig_opt = best_agent.predict(full_df)
@@ -552,7 +546,7 @@ class RandomForestOptimizer:
         return self.best_params
 
     def save_params(self, filepath: Union[str, Path]) -> None:
-        """Salva i parametri ottimali su file JSON."""
+        """Save the optimal parameters to a JSON file."""
         if self.best_params is None:
             raise ValueError("Nessun parametro trovato. Esegui prima .fit().")
         path = Path(filepath)
@@ -562,15 +556,15 @@ class RandomForestOptimizer:
 
 
 # =====================================================================
-# 3. TRAINER WALK-FORWARD (5 Anni Train IS -> 1 Anno Val OOS)
+# 3. WALK-FORWARD TRAINER (5-year in-sample training -> 1-year out-of-sample validation)
 # =====================================================================
 class RandomForestWalkForwardTrainer:
-    """
-    Gestisce il ciclo di Walk-Forward per Random Forest:
-    - Finestra mobile: 5 anni di training In-Sample -> 1 anno di test Validation.
-    - Evidenzia l'overfitting confrontando In-Sample e Out-Of-Sample.
-    - Seleziona la combinazione di iperparametri più frequente (moda statistica).
-    - Addestra il modello finale consolidato su tutto l'In-Sample (fino a max_year).
+    """Run the walk-forward cycle for the Random Forest agent.
+
+    - Rolling window: 5 years of in-sample training -> 1 validation year.
+    - Highlights overfitting by comparing in-sample and out-of-sample results.
+    - Selects the most frequent hyperparameter combination (statistical mode).
+    - Trains the final model on the full in-sample period (up to ``max_year``).
     """
 
     def __init__(
@@ -588,7 +582,7 @@ class RandomForestWalkForwardTrainer:
         self.oof_signals = pd.DataFrame(columns=["signal", "confidence"])
 
     def run(self, df: pd.DataFrame, max_year: int) -> Dict[str, Any]:
-        """Esegue il ciclo completo di Walk-Forward."""
+        """Run the complete walk-forward cycle."""
         if not isinstance(df.index, pd.DatetimeIndex):
             raise TypeError("L'indice del DataFrame deve essere di tipo DatetimeIndex.")
 
@@ -661,7 +655,7 @@ class RandomForestWalkForwardTrainer:
         if not self.oof_signals.index.is_unique:
             raise ValueError("Date OOF RF duplicate.")
 
-        # Selezione dei parametri più frequenti (moda statistica)
+        # Select the most frequent parameters (statistical mode).
         param_tuples = [
             (h["max_depth"], h["min_samples_leaf"], h["prob_threshold"], h["n_estimators"])
             for h in self.history
@@ -671,7 +665,7 @@ class RandomForestWalkForwardTrainer:
 
         sel_depth, sel_leaf, sel_th, sel_nest = best_tuple
 
-        # Addestramento finale consolidato su tutto il periodo In-Sample
+        # Final training on the full in-sample period.
         is_df = df[df.index.year <= max_year] if max_year else df
         final_agent = RandomForestAgent(
             target_asset=self.target_asset,
@@ -686,7 +680,7 @@ class RandomForestWalkForwardTrainer:
         final_agent.fit(is_df, max_year=max_year)
         self.final_agent = final_agent
 
-        # Calcolo metriche su tutto l'In-Sample
+        # Compute metrics on the full in-sample period.
         sig_is = final_agent.predict(is_df)
         pos_is = sig_is.shift(1).fillna(0.0)
         ret_is = is_df[self.optimizer.price_col].pct_change().fillna(0.0)
@@ -718,14 +712,14 @@ class RandomForestWalkForwardTrainer:
         return self.selected_params
 
     def save_final_agent_config(self, filepath: Union[str, Path]) -> None:
-        """Salva i parametri consolidati e serializza il modello finale."""
+        """Save the consolidated parameters and serialise the final model."""
         if self.final_agent is None or self.selected_params is None:
             raise ValueError("Nessun agente finale addestrato. Esegui prima .run().")
 
         path = Path(filepath)
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Serializzazione modello con joblib
+        # Serialise the model with joblib.
         joblib_file = path.with_suffix(".joblib")
         joblib.dump(self.final_agent.model, joblib_file)
         self.selected_params["model_joblib_file"] = joblib_file.name

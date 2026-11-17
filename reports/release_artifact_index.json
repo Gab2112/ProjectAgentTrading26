@@ -1,0 +1,27 @@
+{
+  "record_type": "POST_OOS_RELEASE_ARCHIVE",
+  "date": "2026-11-07",
+  "git_commit": "14ac63fa3aa2cdc46be60ae23ddc543e3fe138cd",
+  "selected_strategy": "Core35_Satellite65",
+  "training_end": "2021-12-31",
+  "oos_end": "2026-10-09",
+  "oos_evaluated_once": true,
+  "macro_point_in_time_verified": false,
+  "backup_archive": "ProjectAgentTrading26_frozen_20261107.zip",
+  "backup_sha256": "f3379c0486c309318a12f22e7cfd2b9eea4777b7f8dc74cc25b441795d8e14f9",
+  "artifacts": {
+    "reports/development_freeze_2021.json": "1a0ab55434f132f392e6f8249a03c658393b262244cdf59de8076c796d011f7f",
+    "reports/oos_input_audit.json": "269e729b75a1844bdc1c213cc83fe6c9b812b39899dea2f3e0fe2c74341af7a8",
+    "reports/oos_signals/inference_provenance.json": "5d4b3754ea5081bbb7a75cf9e132c04f32d2a9b93ee90270a397ebbfe4478de5",
+    "reports/oos_final_2022_2026/evaluation_provenance.json": "76993c5d2d6d9a3520427dcfd8367878be962438d334f28b8aff355bbd29a5b5",
+    "reports/oos_final_2022_2026/comparison_metrics.csv": "957a5ba01c0958da14303ab8efd34cfe1e3cbaff6ced559f8777b849953f9f55",
+    "reports/oos_final_2022_2026/core_satellite_targets.csv": "e35999b4fcb46a062102978918fb4627c09ab40c233fea4274475cc4ef6b7205",
+    "reports/oos_signals/signals_orchestrator_spy.csv": "db372b2a790b879a9e1dcbf3eac82b08090ca80f3d388689bd6d6fed0b0b2d9e",
+    "reports/oos_signals/signals_orchestrator_ief.csv": "723c3ca85fad4395a0329c0119dca33981679e91ac50024c875af6f48bec8b50",
+    "reports/oos_signals/signals_orchestrator_gld.csv": "536b66777e3f649ebe51cd2ceab6576e193a18708476c00f3aeee9394ebf15ef",
+    "reports/oos_signals/signals_orchestrator_shy.csv": "a67d3c41a0d9610138d80518287cd0d2570536a81f4ccd16b7a38b65a3491110",
+    "reports/oos_final_2022_2026/Core35_Satellite65_daily.csv": "536564716ab61c75c464cb8e86aec0c7a55535d605a6603959691e361beccf7d",
+    "reports/oos_final_2022_2026/SPY_buy_hold_daily.csv": "9cc24efff9e904f48f7a13512475799097a3c83d38a0c8f2a876a3d79a40041a",
+    "reports/oos_final_2022_2026/Sixty_Forty_daily.csv": "6f1b43fae51cc1adcb2f5514f1294897759a3a29bfc9d2185acd16ed28634946"
+  }
+}
