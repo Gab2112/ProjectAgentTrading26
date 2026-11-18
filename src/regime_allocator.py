@@ -1,17 +1,17 @@
-"""Level B regime logic (experimental).
+"""Rule-based macro-regime baseline strategies.
 
 Contents:
-- macro regime classification (``classify_macro_regimes``);
-- regime budgets and weights (``REGIME_WEIGHTS``, ``build_regime_weight_panel``);
-- trend signals and macro filter (``build_trend_signal_panel``,
-  ``apply_macro_regime_filter``);
-- validation of external regime labels (e.g. from clustering).
+- regime classification from the VIX and the 10-year breakeven inflation rate,
+  each compared with its trailing median (``classify_macro_regimes``);
+- fixed risk budgets per regime (``REGIME_WEIGHTS``, ``build_regime_weight_panel``);
+- 21/63-session momentum signals and a macro filter on those signals
+  (``build_trend_signal_panel``, ``apply_macro_regime_filter``);
+- conversion of signals and budgets into signed weights (``build_signed_weight_panel``).
 
-The volatility cap is implemented in ``src/portfolio.py`` and the macro
-features in ``src/features.py``.
+The budgets in ``REGIME_WEIGHTS`` are fixed by economic reasoning and were not
+estimated from returns. The volatility cap applied afterwards is implemented
+in ``src/portfolio.py``; the macro features in ``src/features.py``.
 """
-
-from collections.abc import Mapping
 
 import numpy as np
 import pandas as pd
@@ -119,143 +119,6 @@ def build_signed_weight_panel(
     return signed_weights, unused_budget
 
 
-def remaining_allocation_weight(
-    target_weights: pd.DataFrame,
-    *,
-    long_only: bool,
-) -> pd.Series:
-    """Return the idle allocation after the cap; for long-only portfolios this is the cash weight.
-
-    With short positions, the remainder is the *unused gross risk budget*, not
-    accounting cash (short-sale proceeds and collateral are tracked separately).
-    """
-    if not isinstance(target_weights, pd.DataFrame) or target_weights.empty:
-        raise ValueError("Expected nonempty target weights")
-    if list(target_weights.columns) != list(ASSETS):
-        raise ValueError("Invalid target-weight asset order")
-    values = target_weights.to_numpy(dtype=float)
-    if not np.isfinite(values).all():
-        raise ValueError("Non-finite target weights")
-    if long_only and (values < -1e-10).any():
-        raise ValueError("Cash weight is defined only for Long-only weights")
-    gross = np.abs(values).sum(axis=1)
-    if (gross > 1.0 + 1e-10).any():
-        raise ValueError("Gross target exposure exceeds 100%")
-
-    unused = (1.0 - gross).clip(min=0.0)
-    name = "cash_weight_final" if long_only else "unused_gross_budget_final"
-    return pd.Series(unused, index=target_weights.index, name=name, dtype=float)
-
-
-# Regime label validation and explicit cluster-budget contract.
-
-def validate_regime_series(
-    regimes: pd.Series,
-    decision_dates: pd.DatetimeIndex,
-    train_start: pd.Timestamp,
-    train_end: pd.Timestamp,
-) -> pd.Series:
-    """Validate one regime label, known at decision time, for every training decision.
-
-    Labels must be non-empty strings, e.g. ``'low_low'`` or ``'cluster_0'``.
-    Matching dates enforce alignment, not point-in-time data provenance.
-    """
-    if not isinstance(regimes, pd.Series):
-        raise TypeError("regimes must be a pandas Series")
-    if not isinstance(decision_dates, pd.DatetimeIndex):
-        raise TypeError("decision_dates must be a DatetimeIndex")
-
-    for name, index in (
-        ("regimes.index", regimes.index),
-        ("decision_dates", decision_dates),
-    ):
-        if not isinstance(index, pd.DatetimeIndex):
-            raise TypeError(f"{name} must be a DatetimeIndex")
-        if (
-            len(index) == 0
-            or index.hasnans
-            or index.has_duplicates
-            or not index.is_monotonic_increasing
-            or index.tz is not None
-            or not index.equals(index.normalize())
-        ):
-            raise ValueError(f"{name} contains invalid, unordered or duplicated dates")
-
-    if not regimes.index.equals(decision_dates):
-        raise ValueError("regimes and decision_dates must match exactly")
-
-    start = pd.Timestamp(train_start)
-    end = pd.Timestamp(train_end)
-    if (
-        pd.isna(start)
-        or pd.isna(end)
-        or start.tzinfo is not None
-        or end.tzinfo is not None
-        or start != start.normalize()
-        or end != end.normalize()
-        or start > end
-    ):
-        raise ValueError("Invalid training boundaries")
-    if decision_dates.min() < start or decision_dates.max() > end:
-        raise ValueError("Regime decisions must stay inside training")
-
-    values = regimes.tolist()
-    if any(
-        not isinstance(value, str)
-        or not value
-        or value != value.strip()
-        for value in values
-    ):
-        raise ValueError("Regime labels must be nonempty, trimmed strings")
-
-    return pd.Series(values, index=decision_dates, name="regime", dtype="object")
-
-
-def build_regime_budget_panel(
-    regimes: pd.Series,
-    decision_dates: pd.DatetimeIndex,
-    train_start: pd.Timestamp,
-    train_end: pd.Timestamp,
-    budget_policy: Mapping[str, Mapping[str, float]],
-) -> pd.DataFrame:
-    """Map dated regime labels to non-negative, fully allocated *risk budgets*.
-
-    ``budget_policy`` is explicit and fixed before any held-out evaluation.
-    It is NOT inferred from labels or from future portfolio returns.
-    Downstream trend signals may subsequently leave part of the budget in cash.
-    """
-    validated = validate_regime_series(
-        regimes, decision_dates, train_start, train_end
-    )
-    if not isinstance(budget_policy, Mapping) or not budget_policy:
-        raise ValueError("budget_policy must be a nonempty mapping")
-
-    missing_labels = set(validated.unique()) - set(budget_policy)
-    if missing_labels:
-        raise ValueError(f"No budget policy for labels: {sorted(missing_labels)}")
-
-    normalized: dict[str, np.ndarray] = {}
-    for label, by_asset in budget_policy.items():
-        if not isinstance(label, str) or not label:
-            raise ValueError("Budget policy labels must be nonempty strings")
-        if not isinstance(by_asset, Mapping) or set(by_asset) != set(ASSETS):
-            raise ValueError(f"Invalid asset budget for regime {label!r}")
-        try:
-            weights = np.array([by_asset[asset] for asset in ASSETS], dtype=float)
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise ValueError(f"Non-numeric budgets for regime {label!r}") from exc
-        if (
-            not np.isfinite(weights).all()
-            or (weights < 0).any()
-            or not np.isclose(weights.sum(), 1.0, atol=1e-10, rtol=0)
-        ):
-            raise ValueError(f"Invalid or unallocated budgets for regime {label!r}")
-        normalized[label] = weights
-
-    matrix = np.vstack([normalized[label] for label in validated])
-    return pd.DataFrame(matrix, index=decision_dates, columns=list(ASSETS))
-
-
 # Weekly signal generation and validation.
 
 def validate_signal_panel(
@@ -347,7 +210,7 @@ def apply_macro_regime_filter(
     signals: pd.DataFrame,
     regimes: pd.Series,
 ) -> pd.DataFrame:
-    """Apply experimental macro filters to trading signals."""
+    """Suppress SPY longs under high stress and IEF longs under high breakeven inflation."""
 
     signals = validate_signal_panel(signals)
 
@@ -392,7 +255,11 @@ def classify_macro_regimes(
     min_history: int = 52,
     window_weeks: int | None = None,
 ) -> pd.DataFrame:
-    """Experimental macro regime classifier. Not point-in-time certified."""
+    """Classify each week by VIX and breakeven inflation relative to their trailing medians.
+
+    The thresholds use only past observations (shift by one week). FRED
+    series are not point-in-time certified.
+    """
 
     required = {"vix_level", "breakeven_10y"}
     if not required.issubset(features.columns):
