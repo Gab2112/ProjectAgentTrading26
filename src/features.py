@@ -3,7 +3,7 @@
 Every variable used by strategies, clustering and agents is computed here,
 so that all models share the same definitions:
 - market features on the actual decision dates (``build_decision_feature_panel``);
-- macro levels for Level B (``build_macro_feature_levels``);
+- macro levels for the macro-regime baseline (``build_macro_feature_levels``);
 - clustering variables (``build_cluster_features``);
 - per-asset features for the ML agents (``build_asset_features``);
 - derived macro features for the agents (``build_agent_macro_features``).
@@ -106,17 +106,13 @@ def build_training_decision_features(
     decision_dates: pd.DatetimeIndex,
     macro_daily: Mapping[str, pd.Series] | None = None,
 ) -> pd.DataFrame:
-    """Build a training-only research panel with historical indicator warm-up.
+    """Build the in-sample feature snapshot, with historical indicator warm-up.
 
-    The returned rows explicitly exclude the 2017+ validation period and the
-    2022+ final holdout. The input history may contain an earlier warm-up
-    period. Macro inputs must be requested explicitly and are NOT
+    The returned rows lie between ``train_start`` and ``train_end``; no
+    out-of-sample observation is read. Earlier history may be used as warm-up
+    for rolling indicators. Macro inputs are optional and are not
     point-in-time certified.
     """
-    if (config.get("evaluation", {}).get("evaluate_oos") is not False
-            or config.get("validation", {}).get("development_only") is not True):
-        raise ValueError("Development research features must stay train-only")
-
     windows = get_time_windows(config)
     start, end = windows["train_start"], windows["train_end"]
     if start is None or end is None:
@@ -218,7 +214,7 @@ def build_asset_features(
         13-week changes of the 2Y yield and of the curve, rate volatility.
     """
     if target not in weekly_close.columns:
-        raise KeyError(f"ETF '{target}' non presente nei prezzi settimanali.")
+        raise KeyError(f"ETF '{target}' is not present in the weekly prices.")
 
     close = weekly_close[target].astype(float)
     weekly_ret = close.pct_change()

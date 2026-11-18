@@ -1,34 +1,31 @@
-"""Shared utilities for the multi-asset pipeline.
+"""Shared utilities.
 
-This module centralises:
-- the investable universe (``ASSETS``, the single definition of the ETFs, and ``get_tickers``);
-- loading of ``config.yaml`` (``load_config``) and resolution of the project root;
-- the provisional publication lags of macroeconomic series;
-- protected writing of frozen artifacts, which are never overwritten.
+- ``ASSETS``: the investable universe, the single definition used by every module;
+- ``get_tickers``: tickers in the order declared in ``config.yaml``;
+- ``get_release_lag_days``: conventional publication lags of monthly FRED series;
+- ``load_config`` and ``get_project_root``: configuration and path resolution.
 """
 
-from pathlib import Path
+from __future__ import annotations
+
 import re
+from pathlib import Path
 from typing import Optional, Union
 
 import yaml
 
-
 ROOT_DIR = Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT_DIR / "config.yaml"
 
-# Universe of levels A/B/C, in the order used for weights, columns and orders.
-# This is the ONLY definition in the code base: every module imports it from here.
+# Investable universe, in the order used for weights, columns and orders.
 ASSETS = ("SPY", "IEF", "GLD", "SHY")
 
-# Allowed ticker characters: each ticker is also used as a CSV file name.
+# Admissible ticker characters: each ticker is also used as a file name.
 _VALID_TICKER = re.compile(r"^[A-Za-z0-9._-]+$")
 
-
-# Indicative publication lags, in calendar days, for selected FRED series.
-# They do NOT represent a historical release calendar nor the data vintages
-# available at each date. Actual release dates and revisions must be verified
-# before these series are used in Level B.
+# Conventional publication lags, in calendar days, used when a series has no
+# entry in ``data.release_lags_days``. They approximate release dates and do
+# not reconstruct historical data vintages.
 DEFAULT_RELEASE_LAGS_DAYS = {
     "CPIAUCSL": 45,
     "CPILFESL": 45,
@@ -37,136 +34,71 @@ DEFAULT_RELEASE_LAGS_DAYS = {
 
 
 def get_tickers(config: dict) -> list[str]:
-    """Return the investable tickers in the order defined in ``config.yaml``.
-
-    The project universe is SPY, IEF, GLD and SHY. This function does not
-    enforce those four instruments: checking the universe required by levels
-    A1/A2 is the responsibility of the strategy modules.
-
-    It verifies that the configuration entries are valid and that each ticker
-    appears only once, avoiding ambiguity between data, weights and orders.
-    """
+    """Return the investable tickers in the order defined in ``config.yaml``."""
     if not isinstance(config, dict):
-        raise TypeError("La configurazione deve essere un dizionario.")
+        raise TypeError("The configuration must be a dictionary.")
 
-    universe = config.get("universe")
-    if not isinstance(universe, dict):
-        raise ValueError("Manca la sezione 'universe' nella configurazione.")
-
-    assets = universe.get("traded_assets")
+    assets = config.get("universe", {}).get("traded_assets")
     if not isinstance(assets, dict) or not assets:
-        raise ValueError("La sezione 'universe.traded_assets' deve contenere asset.")
+        raise ValueError("The section 'universe.traded_assets' must list the traded assets.")
 
     tickers: list[str] = []
     for category, asset in assets.items():
-        if not isinstance(asset, dict):
-            raise ValueError(f"Configurazione non valida per l'asset '{category}'.")
-
-        ticker = asset.get("ticker")
+        ticker = asset.get("ticker") if isinstance(asset, dict) else None
         if not isinstance(ticker, str) or not ticker or ticker != ticker.strip():
-            raise ValueError(f"Ticker mancante o non valido per '{category}'.")
+            raise ValueError(f"Missing or invalid ticker for '{category}'.")
         if not _VALID_TICKER.fullmatch(ticker):
-            raise ValueError(f"Ticker non valido: {ticker!r}")
+            raise ValueError(f"Invalid ticker: {ticker!r}")
         if ticker != ticker.upper():
-            raise ValueError(f"Il ticker '{ticker}' deve essere scritto in maiuscolo.")
+            raise ValueError(f"The ticker '{ticker}' must be upper case.")
         if ticker in tickers:
-            raise ValueError(f"Ticker duplicato nell'universo investibile: {ticker}.")
-
+            raise ValueError(f"Duplicate ticker in the investable universe: {ticker}.")
         tickers.append(ticker)
-
     return tickers
 
 
 def get_release_lag_days(config: dict, series_id: str) -> int:
-    """Return the conventional publication lag of a FRED series, in days.
+    """Return the publication lag of a FRED series, in calendar days.
 
-    The value is read from ``data.release_lags_days`` in ``config.yaml``. If no
-    specific value is configured, ``DEFAULT_RELEASE_LAGS_DAYS`` is used; any
-    other series keeps the previous behaviour and returns zero.
-
-    A lag of zero does NOT certify that a series was available in real time.
-    The fixed 45- and 35-day lags are approximations as well: Level B must rely
-    on a verified point-in-time protocol.
-
-    Negative, fractional or boolean lags are rejected, since they could
-    otherwise introduce look-ahead errors that are hard to detect.
+    The value is read from ``data.release_lags_days``; otherwise the default
+    in ``DEFAULT_RELEASE_LAGS_DAYS`` is used, and zero for daily series.
+    Negative, fractional or boolean lags are rejected because they would
+    introduce look-ahead bias.
     """
     if not isinstance(config, dict):
-        raise TypeError("La configurazione deve essere un dizionario.")
+        raise TypeError("The configuration must be a dictionary.")
     if not isinstance(series_id, str) or not series_id.strip():
-        raise ValueError("L'identificativo della serie FRED non è valido.")
+        raise ValueError("Invalid FRED series identifier.")
 
-    data = config.get("data", {})
-    if not isinstance(data, dict):
-        raise TypeError("La sezione 'data' deve essere un dizionario.")
+    configured = config.get("data", {}).get("release_lags_days") or {}
+    if not isinstance(configured, dict):
+        raise TypeError("'data.release_lags_days' must be a dictionary.")
 
-    configured_lags = data.get("release_lags_days")
-    if configured_lags is None:
-        configured_lags = {}
-    if not isinstance(configured_lags, dict):
-        raise TypeError("'data.release_lags_days' deve essere un dizionario.")
-
-    lag = configured_lags.get(
-        series_id,
-        DEFAULT_RELEASE_LAGS_DAYS.get(series_id, 0),
-    )
+    lag = configured.get(series_id, DEFAULT_RELEASE_LAGS_DAYS.get(series_id, 0))
     if isinstance(lag, bool) or not isinstance(lag, int) or lag < 0:
         raise ValueError(
-            f"Ritardo di pubblicazione non valido per '{series_id}': {lag!r}. "
-            "È richiesto un numero intero di giorni maggiore o uguale a zero."
+            f"Invalid publication lag for '{series_id}': {lag!r}. "
+            "A non-negative integer number of days is required."
         )
-
     return lag
 
 
 def load_config(path: Path = CONFIG_PATH) -> dict:
-    """Load YAML without silently filling missing parameters."""
+    """Load ``config.yaml`` without filling missing parameters."""
     path = Path(path)
     if not path.is_file():
-        raise FileNotFoundError(f"File di configurazione non trovato: {path}")
-
+        raise FileNotFoundError(f"Configuration file not found: {path}")
     with path.open("r", encoding="utf-8") as file:
         config = yaml.safe_load(file)
-
     if not isinstance(config, dict):
-        raise ValueError("Il file di configurazione deve contenere un dizionario YAML.")
+        raise ValueError("The configuration file must contain a YAML mapping.")
     return config
 
 
-def write_frozen_outputs(files: dict[Path, str]) -> None:
-    """Create absent artifacts, never overwrite a frozen existing artifact.
-
-    Check ALL conflicts before creating ANY missing files, so an unexpected
-    difference cannot leave a half-updated version directory behind.
-    """
-    conflicts = []
-    for path, content in files.items():
-        if path.exists():
-            if not path.is_file() or path.read_bytes().replace(b"\r", b"") != content.encode("utf-8").replace(b"\r", b""):
-                conflicts.append(str(path))
-
-    if conflicts:
-        raise RuntimeError(
-            "Frozen Level B artifacts differ; no files were overwritten:\n"
-            + "\n".join(conflicts)
-        )
-
-    for path, content in files.items():
-        if not path.exists():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
-
-
 def get_project_root(start_path: Optional[Union[str, Path]] = None) -> Path:
-    """Robustly resolve the root directory of the ProjectAgentTrading repository."""
-    if start_path is not None:
-        current = Path(start_path).resolve()
-    else:
-        current = Path(__file__).resolve().parent
-
+    """Resolve the repository root (the directory containing config.yaml and src/)."""
+    current = Path(start_path).resolve() if start_path is not None else Path(__file__).resolve().parent
     for candidate in [current] + list(current.parents):
         if (candidate / "config.yaml").is_file() and (candidate / "src").is_dir():
             return candidate
-
-    # Standard fallback: the repository root that contains src/.
     return ROOT_DIR

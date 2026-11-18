@@ -1,35 +1,23 @@
-# Python 3.11: utilizzare un ambiente virtuale o l'interprete Conda.
-# Installazione: python -m pip install -r requirements.txt
+# Python 3.13 (tested with 3.13.5).
+# Installation: python -m pip install -r requirements.txt
 
-# Preparazione ed elaborazione dei dati
+# Data handling
 pandas==3.0.6
 numpy==2.4.6
 PyYAML==6.0.3
 
-# Ottimizzazione e backtesting dei portafogli A/B/C
+# Optimisation (volatility-control baseline) and numerical routines
 scipy==1.17.1
 cvxpy==1.9.3
 clarabel==0.11.1
 
-# Acquisizione dei dati, soltanto se abilitata esplicitamente
+# Machine-learning agents and model serialisation
+scikit-learn==1.8.0
+joblib==1.6.0
+
+# Charts
+matplotlib==3.11.2
+
+# Optional raw-data download (only if pipeline.download_data is true)
 yfinance==1.7.0
 pandas_datareader==0.11.1
-
-# Grafici e visualizzazioni
-matplotlib==3.11.2
-seaborn==0.13.2
-
-# Formati opzionali supportati da src/data_transformation.py
-openpyxl==3.1.5
-pyarrow==25.0.1
-
-# Modelli predittivi degli agenti e serializzazione
-scikit-learn==1.8.0
-joblib>=1.5,<2
-
-# Modelli deep learning e sentiment analysis (Agente FinBERT)
-torch>=2.0.0
-transformers>=4.35.0
-tokenizers>=0.14.0
-safetensors>=0.4.0
-huggingface_hub>=0.19.0

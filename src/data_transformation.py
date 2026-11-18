@@ -1,33 +1,29 @@
-"""Preparation of market and macroeconomic data for the multi-asset project.
+"""Data preparation and validation (step 2 of the pipeline).
 
-Responsibilities
-----------------
-1. Orchestrate data preparation: files are read in ``src/data_loader.py``
-   and features are computed in ``src/features.py``.
-2. Store an aligned DAILY panel of adjusted Open/Close prices for the
-   Level A1 and A2 backtests.
-3. Store the W-FRI research panel and, separately, the features indexed
-   on the ACTUAL decision dates (last trading session of each week).
-4. Exclude macroeconomic data during A1/A2, so that the benchmarks are
-   independent of FRED series.
-5. Exclude OOS observations from processed files until they are authorised.
-6. Export market-only TRAINING features on the actual decision dates.
-   Optional macro series require explicit date alignment.
+Input:  data/raw/market/<TICKER>.csv   daily OHLCV, split- and dividend-adjusted
+        data/raw/macro/<SERIES>.csv    FRED series
+Output: data/processed/market_daily.csv              aligned daily adjusted Open/Close
+        data/processed/market_daily_quality.csv      coverage report per ETF
+        data/processed/price_validation.csv          adjusted-price sanity checks
+        data/processed/weekly_decision_dates.csv     last trading session of each week
+        data/processed/master_weekly.csv             weekly market panel (OHLCV)
+        data/processed/macro_weekly.csv              weekly macro panel, after publication lags
+        data/processed/data_quality_summary.csv      coverage of the weekly panel
+        data/processed/decision_features_training.csv  in-sample feature snapshot
 
-Input:  data/raw/market/<TICKER>.csv; optionally data/raw/macro/*.csv
-Output: data/processed/market_daily.csv
-        data/processed/weekly_decision_dates.csv
-        data/processed/market_daily_quality.csv
-        data/processed/master_weekly.csv
-        data/processed/data_quality_summary.csv
-        data/processed/decision_features_training.csv
+Price validation. A backtest is meaningful only with prices adjusted for
+splits and dividends. ``validate_adjusted_prices`` rejects any daily adjusted
+return whose absolute value exceeds ``data.validation.max_abs_daily_return``,
+because an unadjusted split would appear as a jump of that kind. Open and
+Close must be adjusted consistently, as in Yahoo Finance downloads with
+``auto_adjust=True``; the adjusted Open is used as a proxy for the executable
+opening price.
 
-Note: Open and Close prices must be adjusted consistently, as in Yahoo
-downloads with ``auto_adjust=True``. Adjusted opening prices are a proxy
-for the backtest, not necessarily executable historical quotes.
+Macroeconomic series. Monthly series are shifted by their conventional
+publication lag before being aligned to weekly dates. The lags are
+approximations and do not reconstruct historical data vintages.
 
-This module does NOT generate portfolio weights and does NOT compute
-returns: those responsibilities belong to the strategy and backtesting modules.
+This module does not generate portfolio weights or strategy returns.
 """
 
 from pathlib import Path
@@ -42,26 +38,64 @@ from src.data_loader import (
     read_etf_prices,
 )
 from src.features import build_training_decision_features
-from src.time_split import build_weekly_decision_dates, restrict_to_allowed_period
+from src.time_split import build_weekly_decision_dates
 from src.utils import get_release_lag_days, get_tickers
 
 
 LOW_FREQUENCY_SERIES = frozenset({"CPIAUCSL", "CPILFESL", "FEDFUNDS"})
 
 
-def transform_market_data(
-    config: dict,
-    root_dir: Path,
-) -> Dict[str, pd.DataFrame]:
-    """Aggregate daily OHLCV data into the historical weekly panel.
+def validate_adjusted_prices(market_daily: pd.DataFrame, config: dict) -> pd.DataFrame:
+    """Check that daily adjusted prices contain no split-like discontinuities.
 
-    Weekly OHLCV series are used for analysis, NOT for executing orders at the
-    next open or estimating the 126-session covariance. A1 and A2 must use
-    market_daily.csv instead.
+    For every ETF the function reports the largest absolute close-to-close and
+    close-to-open return. A value above the configured threshold stops the
+    pipeline, since it would indicate an unadjusted corporate action or a data
+    error that would generate false signals.
+    """
+    threshold = float(config["data"]["validation"]["max_abs_daily_return"])
+    rows = []
+    for ticker in get_tickers(config):
+        close = market_daily[f"{ticker}_close"].astype(float)
+        open_ = market_daily[f"{ticker}_open"].astype(float)
+        close_to_close = close.pct_change(fill_method=None).dropna()
+        close_to_open = (open_ / close.shift(1) - 1.0).dropna()
+        worst_cc = close_to_close.abs().idxmax()
+        worst_co = close_to_open.abs().idxmax()
+        rows.append(
+            {
+                "ticker": ticker,
+                "max_abs_close_to_close": float(close_to_close.abs().max()),
+                "date_max_close_to_close": worst_cc.date().isoformat(),
+                "max_abs_close_to_open": float(close_to_open.abs().max()),
+                "date_max_close_to_open": worst_co.date().isoformat(),
+                "threshold": threshold,
+            }
+        )
+
+    report = pd.DataFrame(rows).set_index("ticker")
+    report["passed"] = (
+        (report["max_abs_close_to_close"] <= threshold)
+        & (report["max_abs_close_to_open"] <= threshold)
+    )
+    if not report["passed"].all():
+        failed = report.index[~report["passed"]].tolist()
+        raise ValueError(
+            f"Possible unadjusted prices for {failed}: a daily return exceeds "
+            f"{threshold:.0%}. Inspect data/raw/market before proceeding."
+        )
+    return report
+
+
+def transform_market_data(config: dict, root_dir: Path) -> Dict[str, pd.DataFrame]:
+    """Aggregate daily OHLCV data into a weekly (W-FRI) descriptive panel.
+
+    The weekly panel is used for descriptive analysis only; execution and
+    portfolio accounting always use the daily data in market_daily.csv.
     """
     market_dir = root_dir / config["paths"]["raw_data"] / "market"
     weekly_market: Dict[str, pd.DataFrame] = {}
-    print("\n[Data Transformation] Weekly market data")
+    print("\n[Data] Weekly market panel")
 
     for ticker in get_tickers(config):
         df = read_etf_prices(market_dir / f"{ticker}.csv", ticker)
@@ -76,11 +110,8 @@ def transform_market_data(
             }.items()
             if field in df.columns
         }
-        weekly = df.resample("W-FRI").agg(aggregation_rules)
-        weekly = weekly.dropna(subset=["Close"])
-        weekly = weekly.rename(
-            columns={col: f"{ticker}_{col.lower()}" for col in weekly.columns}
-        )
+        weekly = df.resample("W-FRI").agg(aggregation_rules).dropna(subset=["Close"])
+        weekly = weekly.rename(columns={col: f"{ticker}_{col.lower()}" for col in weekly.columns})
         weekly_market[ticker] = weekly
         print(f"  {ticker}: {len(weekly):,} weekly rows")
 
@@ -97,20 +128,8 @@ def _macro_series_mapping(config: dict) -> Dict[str, str]:
     return mapping
 
 
-def _is_low_frequency_macro(series_id: str) -> bool:
-    return series_id in LOW_FREQUENCY_SERIES
-
-
-def transform_macro_data(
-    config: dict,
-    root_dir: Path,
-) -> Dict[str, pd.DataFrame]:
-    """Prepare historical macroeconomic series for Level B.
-
-    WARNING: fixed publication lags are only approximations. They do not
-    reconstruct historical data vintages or exact release times. Level B must
-    not treat these variables as verified point-in-time features.
-    """
+def transform_macro_data(config: dict, root_dir: Path) -> Dict[str, pd.DataFrame]:
+    """Align FRED series to weekly dates after applying publication lags."""
     raw_dir = root_dir / config["paths"]["raw_data"] / "macro"
     transformed: Dict[str, pd.DataFrame] = {}
 
@@ -122,7 +141,9 @@ def transform_macro_data(
             df.columns = [series_id]
         series = df[[series_id]].copy()
 
-        if _is_low_frequency_macro(series_id):
+        if series_id in LOW_FREQUENCY_SERIES:
+            # A monthly value is dated at the start of the reference month but
+            # published several weeks later: shift it to its release date.
             lag = get_release_lag_days(config, series_id)
             series.index = series.index + pd.to_timedelta(lag, unit="D")
             series.index.name = "Date"
@@ -138,7 +159,7 @@ def build_master_dataset(
     market_data: Dict[str, pd.DataFrame],
     macro_data: Dict[str, pd.DataFrame],
 ) -> pd.DataFrame:
-    """Merge weekly market data with the optional macroeconomic variables."""
+    """Merge the weekly market panel with the lagged macroeconomic series."""
     frames = list(market_data.values()) + list(macro_data.values())
     if not frames:
         raise ValueError("No transformed datasets available")
@@ -154,14 +175,14 @@ def build_master_dataset(
 
     close_cols = [col for col in master if col.endswith("_close")]
     if not close_cols:
-        raise ValueError("No tradable close columns in weekly master")
+        raise ValueError("No tradable close columns in the weekly panel")
     master = master.dropna(subset=close_cols)
     master.index.name = "Date"
     return master
 
 
 def build_data_quality_summary(master: pd.DataFrame) -> pd.DataFrame:
-    """Summarise coverage, missing values and valid dates of the weekly dataset."""
+    """Summarise coverage, missing values and first/last valid dates."""
     return pd.DataFrame(
         {
             "non_null": master.notna().sum(),
@@ -173,58 +194,54 @@ def build_data_quality_summary(master: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def run_data_transformation(
-    config: dict,
-    root_dir: Path,
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Prepare the daily backtest data and the weekly dataset.
+def run_data_transformation(config: dict, root_dir: Path) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Validate raw data and write every processed dataset to data/processed.
 
-    Returns the pair ``(weekly_master, quality_summary)``, keeping the public
-    interface unchanged.
+    The processed files cover the full sample (IS and OOS). The separation of
+    periods is enforced downstream: training code truncates its inputs at
+    ``validation.train_end`` and the OOS period is evaluated only once.
     """
     out_dir = root_dir / config["paths"]["processed_data"]
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    level = str(config.get("pipeline", {}).get("active_level", "A1")).upper()
-    if level not in {"A1", "A2", "B", "C"}:
-        raise ValueError(f"Unknown pipeline level: {level}")
-
-    # Levels B/C require a separate, explicit integration step.
-    # The current macro transformation uses estimated lags, not verified historical vintages.
-    if level in {"B", "C"}:
-        raise NotImplementedError(
-            "Level B/C data preparation is not implemented yet. "
-            "Validate macro release dates/vintages and refactor this stage first."
-        )
-
     daily, daily_audit = load_daily_market_data(config, root_dir)
-    daily = restrict_to_allowed_period(daily, config)
-    decision_dates = build_weekly_decision_dates(daily)
-    weekly_market = transform_market_data(config, root_dir)
-    macros = transform_macro_data(config, root_dir) if level in {"B", "C"} else {}
+    end_date = config["data"].get("end_date")
+    if end_date is not None:
+        daily = daily.loc[:pd.Timestamp(end_date)]
 
-    weekly_master = build_master_dataset(weekly_market, macros)
-    weekly_master = restrict_to_allowed_period(weekly_master, config)
+    price_report = validate_adjusted_prices(daily, config)
+    decision_dates = build_weekly_decision_dates(daily)
+    weekly_master = build_master_dataset(transform_market_data(config, root_dir), {})
+    weekly_master = weekly_master.loc[:daily.index.max()]
+    macro_frames = list(transform_macro_data(config, root_dir).values())
+    macro_weekly = pd.concat(macro_frames, axis=1).sort_index() if macro_frames else pd.DataFrame(index=weekly_master.index)
+    macro_weekly = macro_weekly.loc[:daily.index.max()]
+    macro_weekly.index.name = "Date"
     weekly_quality = build_data_quality_summary(weekly_master)
-    decision_features = build_training_decision_features(
-        config, daily, decision_dates.index
-    )
+    decision_features = build_training_decision_features(config, daily, decision_dates.index)
 
     daily.to_csv(out_dir / "market_daily.csv")
-    decision_dates.to_csv(out_dir / "weekly_decision_dates.csv", index_label="Date")
     daily_audit.to_csv(out_dir / "market_daily_quality.csv")
+    price_report.to_csv(out_dir / "price_validation.csv")
+    decision_dates.to_csv(out_dir / "weekly_decision_dates.csv", index_label="Date")
     weekly_master.to_csv(out_dir / "master_weekly.csv")
+    macro_weekly.to_csv(out_dir / "macro_weekly.csv")
     weekly_quality.to_csv(out_dir / "data_quality_summary.csv")
     decision_features.to_csv(out_dir / "decision_features_training.csv", index_label="Date")
 
-    print("\n[Data Transformation] Multi-Asset data ready")
-    print(f"  Daily sessions:   {len(daily):,}")
-    print(f"  Weekly decisions: {len(decision_dates):,}")
-    print(f"  Weekly rows:      {len(weekly_master):,}")
-    print(f"  Daily output:     {out_dir / 'market_daily.csv'}")
-    print(f"  Weekly output:    {out_dir / 'master_weekly.csv'}")
-    print(f"  Decision features:{out_dir / 'decision_features_training.csv'}")
-    print("  OOS disabled:     " + str(not config.get("evaluation", {}).get("evaluate_oos", False)))
+    print("\n[Data] Processed datasets written to data/processed")
+    print(f"  Daily sessions:     {len(daily):,} ({daily.index.min().date()} -> {daily.index.max().date()})")
+    print(f"  Weekly decisions:   {len(decision_dates):,}")
+    print(f"  Largest daily move: {price_report['max_abs_close_to_close'].max():.2%} "
+          f"(threshold {price_report['threshold'].iloc[0]:.0%}); adjusted-price check passed")
     return weekly_master, weekly_quality
 
 
+__all__ = [
+    "build_data_quality_summary",
+    "build_master_dataset",
+    "run_data_transformation",
+    "transform_macro_data",
+    "transform_market_data",
+    "validate_adjusted_prices",
+]

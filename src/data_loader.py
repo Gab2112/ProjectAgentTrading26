@@ -4,7 +4,7 @@ Single entry point for reading files:
 - ``load_dataset``: generic reader (CSV, TSV, Excel, Parquet, Feather, JSON)
   with strict checks on the time index;
 - daily ETF prices (``load_daily_market_data``);
-- weekly Treasury yields for regime clustering (``load_weekly_yields``);
+- weekly Treasury yields for the rate features (``load_weekly_yields``);
 - the market and macro dataset used by the agents (``load_agent_*``).
 
 This module reads and aligns data but does NOT build model features:
@@ -43,16 +43,16 @@ def load_dataset(
     )
     if extension not in formats:
         raise ValueError(
-            f"Tipo di file non supportato: '{extension}'. "
-            f"Formati supportati: {', '.join(sorted(formats))}"
+            f"Unsupported file type: '{extension}'. "
+            f"Supported formats: {', '.join(sorted(formats))}"
         )
 
     if not isinstance(strict, bool):
-        raise TypeError("Il parametro 'strict' deve essere booleano.")
+        raise TypeError("The parameter 'strict' must be a boolean.")
     if date_column is not None and (not isinstance(date_column, str) or not date_column):
-        raise TypeError("'date_column' deve essere una stringa non vuota o None.")
+        raise TypeError("'date_column' must be a non-empty string or None.")
     if not path.is_file():
-        raise FileNotFoundError(f"File non trovato: {path}")
+        raise FileNotFoundError(f"File not found: {path}")
 
     try:
         if extension in {".csv", ".tsv", ".txt"}:
@@ -68,21 +68,21 @@ def load_dataset(
         else:
             frame = pd.read_json(path, **read_options)
     except Exception as exc:
-        raise RuntimeError(f"Errore durante la lettura del file {path}: {exc}") from exc
+        raise RuntimeError(f"Error while reading {path}: {exc}") from exc
 
     if not isinstance(frame, pd.DataFrame):
-        raise TypeError(f"Il file {path.name} non contiene un DataFrame.")
+        raise TypeError(f"The file {path.name} does not contain a DataFrame.")
     if frame.empty:
-        raise ValueError(f"Il file {path.name} non contiene osservazioni.")
+        raise ValueError(f"The file {path.name} contains no observation.")
     if frame.columns.has_duplicates:
-        raise ValueError(f"Colonne duplicate nel file {path.name}.")
+        raise ValueError(f"Duplicate columns in {path.name}.")
     if date_column is None:
         return frame
 
     if date_column not in frame.columns and frame.index.name == date_column:
         frame = frame.reset_index()
     if date_column not in frame.columns:
-        raise KeyError(f"Colonna '{date_column}' assente nel file {path.name}.")
+        raise KeyError(f"Column '{date_column}' is missing from {path.name}.")
 
     frame = frame.copy()
     frame[date_column] = pd.to_datetime(frame[date_column], errors="coerce")
@@ -90,23 +90,23 @@ def load_dataset(
     if invalid_dates.any():
         if strict:
             raise ValueError(
-                f"Rilevate {int(invalid_dates.sum())} date non valide "
-                f"nel file {path.name}."
+                f"{int(invalid_dates.sum())} invalid dates found "
+                f"in {path.name}."
             )
         frame = frame.loc[~invalid_dates].copy()
     if frame.empty:
-        raise ValueError(f"Nessuna osservazione con data valida nel file {path.name}.")
+        raise ValueError(f"No observation with a valid date in {path.name}.")
     duplicate_dates = frame.duplicated(subset=[date_column], keep=False)
     if duplicate_dates.any():
         if strict:
             raise ValueError(
-                f"Rilevate {int(duplicate_dates.sum())} righe con date "
-                f"duplicate nel file {path.name}."
+                f"{int(duplicate_dates.sum())} rows with duplicate dates found "
+                f"in {path.name}."
             )
         frame = frame.drop_duplicates(subset=[date_column], keep="last")
     result = frame.set_index(date_column).sort_index()
     if not isinstance(result.index, pd.DatetimeIndex):
-        raise TypeError(f"Impossibile costruire un indice temporale per {path.name}.")
+        raise TypeError(f"Unable to build a time index for {path.name}.")
     return result
 
 
@@ -290,8 +290,8 @@ def load_agent_market_data(
 
     if not csv_path.exists():
         raise FileNotFoundError(
-            f"File di dati di mercato non trovato in: {csv_path}. "
-            f"Esegui la data transformation o verifica la directory data/processed."
+            f"Market data file not found: {csv_path}. "
+            f"Run the data transformation step or check data/processed."
         )
 
     df = pd.read_csv(csv_path, index_col=0, parse_dates=True)
@@ -337,7 +337,7 @@ def load_agent_macro_data(
     config = load_config(root / "config.yaml")
 
     if not macro_dir.is_dir():
-        raise FileNotFoundError(f"Directory dati macro non trovata in: {macro_dir}")
+        raise FileNotFoundError(f"Macro data directory not found: {macro_dir}")
 
     macro_series: Dict[str, pd.Series] = {}
     for csv_file in macro_dir.glob("*.csv"):
@@ -398,9 +398,8 @@ def load_agent_dataset(
 ) -> pd.DataFrame:
     """Load the joint market dataset (SPY, IEF, GLD, SHY) with aligned macro features.
 
-    If ``save_features_weekly_csv=True`` or ``data/processed/features_weekly.csv``
-    does not exist, a copy can be saved for backward compatibility with
-    existing modules.
+    If ``save_features_weekly_csv=True`` the dataset is also written to
+    ``data/processed/features_weekly.csv``.
     """
     market_df = load_agent_market_data(
         frequency=frequency,
@@ -418,7 +417,7 @@ def load_agent_dataset(
             )
             complete_df = market_df.join(macro_df, how="left")
         except Exception as e:
-            print(f"[load_agent_dataset] Avviso: caricamento macro fallito ({e}), uso solo dati di mercato.")
+            print(f"[load_agent_dataset] Warning: macro data could not be loaded ({e}); market data only.")
             complete_df = market_df
     else:
         complete_df = market_df
@@ -428,7 +427,7 @@ def load_agent_dataset(
         target_path = root / "data" / "processed" / "features_weekly.csv"
         target_path.parent.mkdir(parents=True, exist_ok=True)
         complete_df.to_csv(target_path)
-        print(f"[data_loader] Esportato dataset compatibile in: {target_path}")
+        print(f"[data_loader] Dataset exported to: {target_path}")
 
     return complete_df
 

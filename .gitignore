@@ -1,4 +1,4 @@
-# File compilati Python, cache e artefatti di sviluppo
+# Python bytecode, caches and build artefacts
 __pycache__/
 *.py[cod]
 *$py.class
@@ -8,12 +8,11 @@ __pycache__/
 .coverage
 .coverage.*
 htmlcov/
-.tox/
 *.egg-info/
 build/
 dist/
 
-# Ambienti virtuali locali e configurazioni degli editor
+# Local virtual environments and editor settings
 .venv/
 venv/
 env/
@@ -21,21 +20,11 @@ env/
 .vscode/
 .ipynb_checkpoints/
 
-# Variabili d'ambiente private, log e file temporanei di sistema
+# Private environment variables, logs and operating-system files
 .env
 .env.*
-!.env.example
 *.log
 .DS_Store
 
-# Prodotti generati dalla pipeline: non versionare i risultati rigenerabili.
-# Restano tracciati soltanto gli snapshot sorgente in data/raw/.
-data/processed/
-data/signals/
-data/results/
-
-
-# Generated final charts, excluded from Git
-outputs/
-
-agents_presentation_guide.md
+# data/raw, data/processed, data/signals and data/results are versioned on
+# purpose: the results must be reproducible without downloading any data.

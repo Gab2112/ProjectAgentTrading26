@@ -1,0 +1,5 @@
+ticker,raw_rows,overlap_rows,aligned_rows,sessions_missing_within_overlap,first_raw_date,last_raw_date
+SPY,5747,5507,5507,0,2004-01-02,2026-11-04
+IEF,5729,5507,5507,0,2004-01-02,2026-10-09
+GLD,5525,5507,5507,0,2004-11-18,2026-11-04
+SHY,5729,5507,5507,0,2004-01-02,2026-10-09

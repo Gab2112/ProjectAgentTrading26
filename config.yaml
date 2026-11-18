@@ -1,63 +1,54 @@
-
-# ============================================================
-# PROJECT CONFIGURATION
-# Regime-Aware Multi-Asset Allocation
-# ============================================================
+# =============================================================================
+# ProjectAgentTrading26 - single configuration file
+#
+# Every setting that affects data, models, portfolio construction, execution
+# or evaluation is defined here. Modules read these values and do not hard-code
+# alternative values for them.
+# =============================================================================
 
 project:
   name: ProjectAgentTrading26
-  version: "0.2"
   random_seed: 42
 
-research:
-  working_candidate: regime_aware_multi_asset_allocation
-  market_scope: US
-  objective: risk_adjusted_performance_and_downside_protection
-
-# ------------------------------------------------------------
-# INVESTABLE UNIVERSE
-# ------------------------------------------------------------
-
+# -----------------------------------------------------------------------------
+# Investable universe (all prices are split- and dividend-adjusted)
+# -----------------------------------------------------------------------------
 universe:
   traded_assets:
     us_equities:
       ticker: SPY
       role: equity_growth
-
     intermediate_treasuries:
       ticker: IEF
       role: intermediate_duration_bonds
-
     gold:
       ticker: GLD
       role: gold_diversification
-
     short_treasuries:
       ticker: SHY
       role: short_duration_defensive
 
-# ------------------------------------------------------------
-# FREQUENCY AND DATA
-# ------------------------------------------------------------
-
-frequency:
-  raw_market_data: daily
-  macro_data: native
-  strategy: weekly
-  rebalance: weekly
-
+# -----------------------------------------------------------------------------
+# Data sources and validation
+# -----------------------------------------------------------------------------
 data:
   start_date: "2004-01-01"
-  end_date: null
+  end_date: null                # null: use every observation stored in data/raw
 
   market_source:
     provider: yfinance
-    auto_adjust: true
+    auto_adjust: true           # Open/High/Low/Close adjusted for splits and dividends
 
   macro_source:
     provider: FRED
 
-  # Candidate macro data for Level B
+  # Conventional publication lags (calendar days) for monthly series: a value
+  # is used only after the date on which it would have been released.
+  release_lags_days:
+    CPIAUCSL: 45
+    CPILFESL: 45
+    FEDFUNDS: 35
+
   rates:
     policy_rate: FEDFUNDS
     treasury_3m: DGS3MO
@@ -75,244 +66,167 @@ data:
   stress:
     equity_implied_volatility: VIXCLS
 
-# ------------------------------------------------------------
-# FEATURES AND SIGNALS
-# ------------------------------------------------------------
+  # A daily adjusted return beyond this bound is treated as a possible
+  # unadjusted split or data error and stops the pipeline.
+  validation:
+    max_abs_daily_return: 0.25
 
-features:
-  return_frequency: daily
-  macro_point_in_time_verified: false
-
+# -----------------------------------------------------------------------------
+# Signal convention
+# -----------------------------------------------------------------------------
 signals:
   allowed_values: [-1, 0, 1]
-
   convention:
     long: 1
     flat: 0
     short: -1
 
-# ------------------------------------------------------------
-# PORTFOLIO CONSTRAINTS
-# ------------------------------------------------------------
-
-portfolio:
-  long_only: true
-  fully_invested: true
-  allow_short: false
-  leverage: 1.0
-
-# ------------------------------------------------------------
-# LEVEL A1 - BENCHMARKS
-# ------------------------------------------------------------
-
-benchmarks:
-  spy_buy_and_hold:
-    weights:
-      SPY: 1.0
-      IEF: 0.0
-      GLD: 0.0
-      SHY: 0.0
-    rebalance: none
-
-  sixty_forty:
-    weights:
-      SPY: 0.60
-      IEF: 0.40
-      GLD: 0.0
-      SHY: 0.0
-    rebalance: weekly
-
-  equal_weight:
-    weights:
-      SPY: 0.25
-      IEF: 0.25
-      GLD: 0.25
-      SHY: 0.25
-    rebalance: weekly
-
-  equal_weight_buy_and_hold:
-    weights:
-      SPY: 0.25
-      IEF: 0.25
-      GLD: 0.25
-      SHY: 0.25
-    rebalance: none
-
-# ------------------------------------------------------------
-# LEVEL A2 - VOLATILITY CONTROL
-# ------------------------------------------------------------
-
-strategies:
-  A1:
-    enabled: true
-    method: static_benchmarks
-
-  A2:
-    enabled: true
-    method: volatility_constrained_allocation
-
-    reference_portfolio: equal_weight
-    covariance_window: 126
-    annualization_factor: 252
-    target_volatility: 0.08
-
-    objective: minimum_squared_distance
-    optimizer: cvxpy
-    solver: CLARABEL
-
-    fallback: minimum_variance
-
-  # ----------------------------------------------------------
-  # LEVEL B - MACRO-FINANCIAL REGIMES
-  # ----------------------------------------------------------
-
-  B:
-    enabled: true
-    method: regime_based_allocation
-
-    research_mode: exploratory_training_only
-    position_mode: long_short
-
-    annual_borrow_rate: 0.01
-    additional_margin_rate: 0.50
-    cash_interest_rate: 0.0
-
-    regime_dimensions:
-      - inflation_pressure
-      - financial_stress
-
-    regime_model: null
-    regime_thresholds: null
-    allocation_rules: null
-
-    # Il modulo src/regime_clustering.py produce i regimi, ma NON sono
-    # ancora usati da alcuna allocazione: clustering_enabled resta false.
-    clustering_enabled: false
-    clustering_method: gaussian_mixture
-
-    # Configurazione congelata (vedi decision log): non modificare dopo
-    # aver osservato risultati di strategia.
-    clustering:
-      n_clusters: 3
-      covariance_type: diag      # varianza per variabile, senza correlazioni
-      unknown_quantile: 0.02     # meno verosimile del 2% del training -> non riconosciuta
-      order_by: treasury_2y_change_13w
-      change_weeks: 13
-      volatility_weeks: 13
-      zscore_weeks: 156          # 3 anni
-      zscore_min_weeks: 104
-      features:
-        - treasury_2y_change_13w
-        - curve_10y_2y_change_13w
-        - rate_volatility_13w
-        - treasury_2y_zscore_3y
-        - curve_10y_2y_zscore_3y
-
-  # ----------------------------------------------------------
-  # LEVEL C - ML AND AI AGENTS
-  # ----------------------------------------------------------
-
-  C:
-    enabled: false
-    method: machine_learning_allocation
-
-    prediction_target: null
-    forecasting_model: null
-    sentiment_enabled: false
-
-    # Agente SVM (src/agents/SVM_agent.py): segnali walk-forward annuali
-    # out-of-fold per ogni ETF, usati dall'orchestratore (src/agents/train.py).
-    svm_agent:
-      horizon_weeks: 4           # previsione: il prezzo sarà più alto tra 4 settimane?
-      first_test_year: 2010      # primo anno con previsioni out-of-fold (almeno 3 anni di storia)
-      min_train_weeks: 156
-      cv_splits: 4               # TimeSeriesSplit interno, gap = horizon_weeks
-      C_values: [0.1, 1.0, 10.0]
-      gamma_values: [scale, 0.01, 0.1]
-      class_weight: none         # 'balanced' forzava troppi segnali -1 (vedi decision log)
-      neutral_band: 0.25         # |punteggio scalato| <= 0.25 -> segnale 0
-      long_only: false           # true: i segnali -1 diventano 0
-      use_macro_features: true   # variazioni 2Y e curva, volatilità tassi
-
-# ------------------------------------------------------------
-# TEMPORAL VALIDATION
-# ------------------------------------------------------------
-
+# -----------------------------------------------------------------------------
+# Temporal split
+#
+# In-sample (IS): every model is trained and every parameter is selected with
+#   observations up to train_end only. Agent hyperparameters are chosen by
+#   walk-forward validation inside the IS period.
+# Validation: the final sub-window of the IS period, used exclusively to select
+#   the portfolio-allocation parameters (see `allocation.grid`).
+# Out-of-sample (OOS): used once, for the final evaluation only.
+# -----------------------------------------------------------------------------
 validation:
   method: chronological
-
   train_start: "2005-05-20"
   train_end: "2020-12-31"
-
+  validation_start: "2016-01-01"
+  validation_end: "2020-12-31"
   oos_start: "2021-01-01"
+  oos_end: null                 # null: last common trading session in the data
 
-  walk_forward: true
-  development_only: true
+# -----------------------------------------------------------------------------
+# Agent training (walk-forward inside the IS period)
+# -----------------------------------------------------------------------------
+agents:
+  objective_metric: sharpe_mdd
+  walk_forward_train_years: 5
+  orchestrator_method: ga
 
-# ------------------------------------------------------------
-# EXECUTION AND TRANSACTION COSTS
-# ------------------------------------------------------------
+  sma_ema:                      # weekly windows
+    sma_windows: [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100]
+    ema_windows: [5, 10, 15, 20, 25, 30, 35, 40, 45, 50]
 
+  zscore:
+    windows: [15, 20, 25, 30, 40, 50, 60]
+    thresholds: [0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+    modes: [momentum, mean_reversion]
+
+  random_forest:
+    depth_candidates: [2, 3, 4, 5, 6]
+    min_leaf_candidates: [10, 15, 20, 30, 50]
+    threshold_candidates: [0.48, 0.50, 0.51, 0.52, 0.53, 0.54, 0.55]
+    n_estimators_candidates: [100, 200]
+
+  svm:
+    horizon_weeks: 4            # target: is the price higher in 4 weeks?
+    first_test_year: 2010       # first year with out-of-fold predictions
+    min_train_weeks: 156
+    cv_splits: 4                # inner TimeSeriesSplit, gap = horizon_weeks
+    C_values: [0.1, 1.0, 10.0]
+    gamma_values: [scale, 0.01, 0.1]
+    class_weight: none
+    neutral_band: 0.25          # |scaled score| <= 0.25 -> signal 0
+    long_only: false
+    use_macro_features: true
+
+  orchestrator:                 # genetic algorithm
+    population_size: 100
+    n_generations: 40
+    walk_forward_min_train_years: 3       # expanding window; first test year = first OOF year + 3
+    threshold_range: [0.10, 0.50, 0.02]   # used only by the alternative grid method
+
+  # Interest-rate features consumed by the SVM agent (weekly windows).
+  rate_features:
+    change_weeks: 13
+    volatility_weeks: 13
+    zscore_weeks: 156
+    zscore_min_weeks: 104
+
+# -----------------------------------------------------------------------------
+# Portfolio construction (multi-asset allocation of the Orchestrator signals)
+#
+# An asset is "active long" when its Orchestrator signal is +1 with confidence
+# >= min_confidence, and "active short" when the signal is -1 with confidence
+# >= min_confidence and allow_short is true. If spy_default_long is true, SPY
+# is held long unless a confirmed short signal is present. Capital is split
+# equally across active positions, each capped at max_weight_per_asset; gross
+# exposure never exceeds 100% (no leverage). Unallocated capital is held as
+# cash with zero return.
+#
+# `selected` holds the combination chosen on the validation window by step 4
+# of main.py; it is never chosen by looking at OOS results.
+# -----------------------------------------------------------------------------
+allocation:
+  spy_default_long: true
+  rebalance_threshold: 0.05     # minimum weight change that triggers a new target
+  selection_metric: sharpe_ratio
+  grid:
+    min_confidence: [0.10, 0.20, 0.30, 0.40, 0.50]
+    max_weight_per_asset: [0.35, 0.50, 0.70, 1.00]
+    allow_short: [false, true]
+
+# -----------------------------------------------------------------------------
+# Baseline strategies used for comparison
+# -----------------------------------------------------------------------------
+baselines:
+  sixty_forty:
+    SPY: 0.60
+    IEF: 0.40
+  equal_weight:
+    SPY: 0.25
+    IEF: 0.25
+    GLD: 0.25
+    SHY: 0.25
+  volatility_control:
+    covariance_window: 126
+    target_volatility: 0.08
+  macro_regime:
+    regime_window_weeks: 52
+    covariance_window: 126
+    target_volatility: 0.08
+
+# -----------------------------------------------------------------------------
+# Execution and costs
+#
+# Signals are computed after the close of the last trading session of each
+# week and executed at the open of the next trading session.
+# -----------------------------------------------------------------------------
 execution:
   signal_frequency: weekly
   execution_rule: next_available_trading_open
-
   initial_capital: 100000.0
+  commission_bps: 0             # transaction costs are optional in the project specification
+  slippage_bps: 0
+  annual_borrow_rate: 0.01      # borrowing cost of short positions
+  additional_margin_rate: 0.50  # collateral required beyond the short proceeds
 
-  commission_bps: 2
-  slippage_bps: 1
-
-  cost_basis: traded_notional
-
-# ------------------------------------------------------------
-# PERFORMANCE EVALUATION
-# ------------------------------------------------------------
-
+# -----------------------------------------------------------------------------
+# Evaluation
+# -----------------------------------------------------------------------------
 evaluation:
   annualization_factor: 252
-  risk_free_rate: 0.0
-  evaluate_oos: false
+  risk_free_rate: 0.0           # annual; Sharpe and Sortino use excess returns
+  primary_benchmark: "SPY Buy & Hold"
 
-  metrics:
-    - CAGR
-    - annualized_volatility
-    - sharpe_ratio
-    - sortino_ratio
-    - maximum_drawdown
-    - turnover
-    - transaction_costs
-
-# ------------------------------------------------------------
-# AI AGENTS
-# ------------------------------------------------------------
-
-agents:
-  planned: true
-  enabled: false
-
-  roles:
-    - orchestrator
-    - macro_agent
-    - regime_agent
-    - strategy_agent
-    - risk_agent
-    - critic_agent
-
-# ------------------------------------------------------------
-# PATHS
-# ------------------------------------------------------------
-
+# -----------------------------------------------------------------------------
+# Paths (relative to the repository root)
+# -----------------------------------------------------------------------------
 paths:
   raw_data: data/raw
   processed_data: data/processed
   signals: data/signals
   results: data/results
+  models: src/agents/config
 
-# ------------------------------------------------------------
-# PIPELINE
-# ------------------------------------------------------------
-
+# -----------------------------------------------------------------------------
+# Pipeline switches
+# -----------------------------------------------------------------------------
 pipeline:
-  active_level: A1
-  run_data_acquisition: false
-  legacy_treasury_enabled: false
+  download_data: false          # true: re-download raw data (requires internet)
+  train_agents: false           # true: retrain every agent on the IS period
