@@ -4,13 +4,13 @@ multi-asset project (SPY, IEF, GLD, SHY).
 For each ETF and each weekly decision date, the agent predicts whether the
 price will be higher in ``horizon_weeks`` weeks (binary classification) and,
 like the other agents, produces a signal in {-1, 0, +1} and a confidence in
-[0, 1]. Settings are defined in ``config.yaml`` (``strategies.C.svm_agent``).
+[0, 1]. Settings are defined in ``config.yaml`` (``agents.svm``).
 
 Methodological safeguards
 -------------------------
 1. Backward-looking variables only (``src/features.build_asset_features``):
    ETF returns and momentum, momentum of the other ETFs and, if requested,
-   Treasury rate changes from the regime module. No backward filling:
+   Treasury rate changes (``src/rate_features.py``). No backward filling:
    incomplete rows are neither used nor predicted.
 2. Annual walk-forward: predictions for year Y use a model trained only on
    weeks whose label is known before the start of Y (purge equal to the
@@ -26,8 +26,7 @@ Methodological safeguards
 6. The final model (for dates after the training period) is trained only up
    to the cutoff passed to ``SVMWalkForwardTrainer.run``.
 
-Usage through the central training pipeline:
-    python3 -m src.agents.train SPY
+The agent is trained by ``src/agents/train.py`` (step 3 of main.py).
 """
 
 from __future__ import annotations
@@ -49,6 +48,7 @@ from sklearn.svm import SVC
 from src.agents.base_agent import BaseAgent
 from src.data_loader import load_weekly_yields
 from src.features import build_asset_features, build_cluster_features
+from src.rate_features import align_to_decision_dates, get_rate_feature_settings
 from src.utils import ASSETS, ROOT_DIR, load_config
 
 
@@ -64,17 +64,17 @@ MACRO_FEATURE_COLUMNS = (
 # =============================================================================
 
 def get_svm_settings(config: dict) -> dict:
-    """Read ``strategies.C.svm_agent`` from config.yaml and check its keys."""
-    settings = config.get("strategies", {}).get("C", {}).get("svm_agent")
+    """Read ``agents.svm`` from config.yaml and check its keys."""
+    settings = config.get("agents", {}).get("svm")
     if not isinstance(settings, dict):
-        raise KeyError("Sezione 'strategies.C.svm_agent' mancante nel config.yaml.")
+        raise KeyError("Section 'agents.svm' is missing from config.yaml.")
     required = (
         "horizon_weeks", "first_test_year", "min_train_weeks", "cv_splits",
         "C_values", "gamma_values", "neutral_band", "long_only", "use_macro_features",
     )
     missing = [key for key in required if key not in settings]
     if missing:
-        raise KeyError("Impostazioni dell'agente SVM mancanti: " + ", ".join(missing))
+        raise KeyError("Missing SVM agent settings: " + ", ".join(missing))
     return dict(settings)
 
 
@@ -86,11 +86,11 @@ def weekly_closes_from_panel(df: pd.DataFrame) -> pd.DataFrame:
         or not df.index.is_monotonic_increasing
         or not df.index.is_unique
     ):
-        raise ValueError("Indice temporale non valido: date ordinate e univoche richieste.")
+        raise ValueError("Invalid time index: sorted and unique dates are required.")
     columns = [f"{asset}_close" for asset in ASSETS]
     missing = [c for c in columns if c not in df.columns]
     if missing:
-        raise KeyError(f"Prezzi mancanti per l'agente SVM: {missing}")
+        raise KeyError(f"Missing prices for the SVM agent: {missing}")
     closes = df[columns].astype(float).copy()
     closes.columns = list(ASSETS)
     return closes
@@ -101,12 +101,9 @@ def load_macro_features(
     config: dict,
     root_dir: Path,
 ) -> pd.DataFrame:
-    """Rate changes from the regime module, aligned to the decision dates."""
-    # Local import: regime_clustering sets the matplotlib backend.
-    from src.regime_clustering import align_to_decision_dates, get_clustering_settings
-
+    """Treasury rate changes aligned to the decision dates."""
     weekly = build_cluster_features(
-        load_weekly_yields(config, root_dir), get_clustering_settings(config)
+        load_weekly_yields(config, root_dir), get_rate_feature_settings(config)
     )
     # One-week lag prevents Thursday decisions from using Friday macro releases.
     return align_to_decision_dates(
@@ -394,9 +391,9 @@ class SVMAgent(BaseAgent):
         usable = features.notna().all(axis=1) & label.notna()
         X, y = features.loc[usable], label.loc[usable].astype(int)
         if y.nunique() != 2:
-            raise ValueError("Il training SVM richiede entrambe le classi del target.")
+            raise ValueError("SVM training requires both target classes.")
         if len(X) < int(self.settings["min_train_weeks"]):
-            raise ValueError(f"Campione di training insufficiente ({len(X)} settimane).")
+            raise ValueError(f"Insufficient training sample ({len(X)} weeks).")
 
         candidate, cv_score = select_candidate(
             X, y, build_candidates(self.settings),
@@ -434,7 +431,7 @@ class SVMAgent(BaseAgent):
             return scores
         if self.predictions is not None:
             return self.predictions["z_score"].reindex(df.index)
-        raise ValueError(f"[{self.name}] Modello non allenato: eseguire fit_final() o fit_walk_forward().")
+        raise ValueError(f"[{self.name}] Model not trained: call fit_final() or fit_walk_forward().")
 
     def predict(self, df: pd.DataFrame) -> pd.Series:
         """Return the discrete trading signals {-1, 0, +1}."""
@@ -457,7 +454,7 @@ class SVMAgent(BaseAgent):
         """Save the parameters to JSON and the final model to a .joblib file alongside it.
         """
         if self.model is None:
-            raise ValueError("Nessun modello finale da salvare: eseguire fit_final().")
+            raise ValueError("No final model to save: call fit_final() first.")
         path = Path(filepath)
         path.parent.mkdir(parents=True, exist_ok=True)
         joblib_path = path.with_suffix(".joblib")
@@ -471,7 +468,7 @@ class SVMAgent(BaseAgent):
         """
         path = Path(filepath)
         if not path.exists():
-            raise FileNotFoundError(f"File parametri non trovato: {path}")
+            raise FileNotFoundError(f"Parameter file not found: {path}")
         with open(path, "r", encoding="utf-8") as handle:
             params = json.load(handle)
         self.params = params
@@ -533,7 +530,7 @@ class SVMWalkForwardTrainer:
         closes = closes.loc[closes.index.year <= int(max_year)]
         first_year = int(self.settings["first_test_year"])
         if closes.empty or first_year > int(max_year):
-            raise ValueError("Periodo insufficiente per il walk-forward SVM.")
+            raise ValueError("Insufficient period for the SVM walk-forward.")
 
         oof_agent = SVMAgent(self.target_asset, self.settings, root_dir=self.root_dir)
         macro = oof_agent._macro_for(closes.index)
@@ -542,7 +539,7 @@ class SVMWalkForwardTrainer:
         scores = oof_agent.predictions["z_score"]
         scores = scores.loc[(scores.index.year >= first_year) & scores.notna()]
         if scores.empty:
-            raise ValueError("Nessuna previsione out-of-fold SVM disponibile.")
+            raise ValueError("No SVM out-of-fold prediction is available.")
         signals, confidence = scores_to_signals(
             scores, float(self.settings["neutral_band"]), bool(self.settings["long_only"]),
         )
@@ -554,11 +551,11 @@ class SVMWalkForwardTrainer:
         self.final_agent = final_agent
 
         counts = self.oof_signals["signal"].value_counts(normalize=True)
-        print(f"\n[{self.target_asset}] >>> SVM walk-forward annuale (purge {self.settings['horizon_weeks']} sett.)")
+        print(f"\n[{self.target_asset}] SVM yearly walk-forward (purge: {self.settings['horizon_weeks']} weeks)")
         for record in self.history:
             print(f"  {record['year']}: {record['kernel']:<6} C={record['C']:<5} gamma={record['gamma']!s:<6} "
                   f"CV bal.acc={record['cv_balanced_accuracy']:.3f}  hit rate={record['year_hit_rate']}")
-        print(f"  Segnali OOF: Long {counts.get(1, 0):.0%} | Flat {counts.get(0, 0):.0%} | Short {counts.get(-1, 0):.0%}")
+        print(f"  Out-of-fold signals: Long {counts.get(1, 0):.0%} | Flat {counts.get(0, 0):.0%} | Short {counts.get(-1, 0):.0%}")
 
         self.selected_params = {
             "target_asset": self.target_asset,
@@ -574,5 +571,5 @@ class SVMWalkForwardTrainer:
     def save_final_agent_config(self, filepath: Union[str, Path]) -> None:
         """Save the parameters and the model of the final agent."""
         if self.final_agent is None:
-            raise ValueError("Nessun agente addestrato. Esegui prima .run().")
+            raise ValueError("No trained agent: call .run() first.")
         self.final_agent.save_params(filepath)

@@ -112,9 +112,9 @@ class BaseAgent(ABC):
             return close_like[0]
 
         raise KeyError(
-            f"[{self.name}] Impossibile determinare la colonna del prezzo nel DataFrame. "
-            f"Candidato cercato: '{candidate_col}', target_asset: '{asset}'. "
-            f"Colonne disponibili: {list(df.columns)}"
+            f"[{self.name}] Unable to determine the price column in the DataFrame. "
+            f"Candidate: '{candidate_col}', target_asset: '{asset}'. "
+            f"Available columns: {list(df.columns)}"
         )
 
     # =====================================================================
@@ -159,7 +159,7 @@ class BaseAgent(ABC):
         """
         path = Path(filepath)
         if not path.exists():
-            raise FileNotFoundError(f"File parametri non trovato: {path}")
+            raise FileNotFoundError(f"Parameter file not found: {path}")
 
         with open(path, "r", encoding="utf-8") as f:
             params = json.load(f)
@@ -201,8 +201,8 @@ class BaseAgent(ABC):
         observed = set(formatted.unique())
         if not observed.issubset(valid_values):
             raise ValueError(
-                f"[{self.name}] Valori non ammessi rilevati nei segnali: {observed}. "
-                f"I valori devono appartenere a {-1, 0, 1}."
+                f"[{self.name}] Inadmissible signal values detected: {observed}. "
+                f"Values must belong to {-1, 0, 1}."
             )
 
         if self.output_format == "string":

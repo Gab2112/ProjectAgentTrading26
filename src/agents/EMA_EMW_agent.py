@@ -86,7 +86,7 @@ class SMAEMAAgent(BaseAgent):
         """
         if self.sma_window is None or self.ema_window is None:
             raise ValueError(
-                "Parametri non impostati. Inizializzali nel costruttore o usa .load_params()."
+                "Parameters are not set. Initialise them in the constructor or call .load_params()."
             )
 
         price_column = self.resolve_price_col(df, price_col=self.price_col, target_asset=self.target_asset)
@@ -139,9 +139,6 @@ class SMAEMAAgent(BaseAgent):
         return signals, confidence
 
 
-# Alias kept for backward compatibility.
-EMA_EMW_Agent = SMAEMAAgent
-
 
 # =====================================================================
 # 2. SINGLE-WINDOW OPTIMISER (in-sample training + out-of-sample validation)
@@ -193,7 +190,7 @@ class SMAEMAOptimizer:
             or not full_df.index.is_monotonic_increasing
             or not full_df.index.is_unique
         ):
-            raise ValueError("Warm-up, training e validation devono essere ordinati e senza date duplicate.")
+            raise ValueError("Warm-up, training and validation data must be sorted and free of duplicate dates.")
 
         price_col_resolved = self.price_col
         if price_col_resolved not in full_df.columns:
@@ -203,7 +200,7 @@ class SMAEMAOptimizer:
                     break
             if price_col_resolved not in full_df.columns:
                 raise KeyError(
-                    f"Colonna '{self.price_col}' non presente nei dati di train/validation. Colonne: {list(full_df.columns)}"
+                    f"Column '{self.price_col}' is not present in the train/validation data. Columns: {list(full_df.columns)}"
                 )
 
         train_indices = train_df.index
@@ -291,7 +288,7 @@ class SMAEMAOptimizer:
                 best_is_metrics = is_metrics
 
         if best_sma is None or best_ema is None:
-            raise RuntimeError("Nessuna combinazione valida trovata durante l'ottimizzazione.")
+            raise RuntimeError("No valid combination was found during the optimisation.")
 
         # Out-of-sample metrics of the selected parameters.
         best_oos_metrics = None
@@ -342,7 +339,7 @@ class SMAEMAOptimizer:
     def save_params(self, filepath: Union[str, Path]) -> None:
         """Save the optimal parameters to a JSON file."""
         if self.best_params is None:
-            raise ValueError("Nessun parametro trovato. Esegui prima .fit().")
+            raise ValueError("No parameter found. Call .fit() first.")
         path = Path(filepath)
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
@@ -381,11 +378,11 @@ class WalkForwardTrainer:
 
         Args:
             df: Historical DataFrame with a DatetimeIndex.
-            max_year: Latest year allowed (e.g. 2021 to respect the OOS lock).
+            max_year: Latest calendar year that may be used (the year of validation.train_end).
         """
         data = df.copy()
         if not isinstance(data.index, pd.DatetimeIndex):
-            raise TypeError("L'indice del DataFrame deve essere un pd.DatetimeIndex.")
+            raise TypeError("The DataFrame index must be a pd.DatetimeIndex.")
 
         data["year"] = data.index.year
         years = sorted(data["year"].unique())
@@ -395,7 +392,7 @@ class WalkForwardTrainer:
 
         if len(years) <= self.train_window_years:
             raise ValueError(
-                f"Servono almeno {self.train_window_years + 1} anni di dati. Presenti: {len(years)}."
+                f"At least {self.train_window_years + 1} years of data are required. Available: {len(years)}."
             )
 
         self.history = []
@@ -403,8 +400,8 @@ class WalkForwardTrainer:
         param_tuples = []
 
         print(
-            f"\nInizio Walk-Forward SMA/EMA: {len(years)} anni ({years[0]} - {years[-1]}) | "
-            f"Metrica: '{self.optimizer.objective_metric}'"
+            f"\nSMA/EMA walk-forward: {len(years)} years ({years[0]} - {years[-1]}) | "
+            f"Objective: '{self.optimizer.objective_metric}'"
         )
         print("-" * 115)
 
@@ -466,8 +463,8 @@ class WalkForwardTrainer:
             overfit_alert = " [OVERFIT]" if (is_sh > 0.4 and oos_sh is not None and oos_sh < 0) else ""
 
             print(
-                f"Finestra {i+1:02d} | Train: [{res['train_years']}] -> Test: {res['val_year']} | "
-                f"Ottimo: SMA={res['sma_window']:2d}, EMA={res['ema_window']:2d} | "
+                f"Window {i+1:02d} | Train: [{res['train_years']}] -> Test: {res['val_year']} | "
+                f"Best: SMA={res['sma_window']:2d}, EMA={res['ema_window']:2d} | "
                 f"IS (5y): Ret={res['is_return_pct']:+6.1f}%, Sh={res['is_sharpe']:+.2f}, MDD={res['is_mdd_pct']:4.1f}% | "
                 f"OOS (1y): Ret={res['oos_return_pct']:+6.1f}%, Sh={res['oos_sharpe']:+.2f}, MDD={res['oos_mdd_pct']:4.1f}%{overfit_alert}"
             )
@@ -497,7 +494,7 @@ class WalkForwardTrainer:
             "ema_window": most_common_pair[1],
             "dead_band": self.optimizer.dead_band,
             "price_col": self.price_col,
-            "frequency": f"{freq}/{len(param_tuples)} finestre",
+            "frequency": f"{freq}/{len(param_tuples)} windows",
             "all_combinations_tested": len(param_tuples),
             "total_combination_evaluations": len(self.all_combinations_history),
             "objective_metric": self.optimizer.objective_metric,
@@ -515,15 +512,15 @@ class WalkForwardTrainer:
         }
 
         print("\n" + "=" * 65)
-        print("          RIEPILOGO OTTIMIZZAZIONE & DIAGNOSTICA OVERFITTING")
+        print("          OPTIMISATION SUMMARY AND OVERFITTING DIAGNOSTICS")
         print("=" * 65)
-        print(f"Parametri selezionati (Moda): SMA={self.selected_params['sma_window']}, EMA={self.selected_params['ema_window']}")
-        print(f"Frequenza di apparizione    : {self.selected_params['frequency']}")
-        print(f"Combinazioni totali loggate : {len(self.all_combinations_history):,} record")
-        print(f"Rendimento medio cumulato   : In-Sample={mean_is_ret:+.1f}% (5y)  | Out-Of-Sample={mean_oos_ret:+.1f}% (1y)")
-        print(f"Sharpe Ratio medio          : In-Sample={mean_is_sharpe:+.2f}       | Out-Of-Sample={mean_oos_sharpe:+.2f}")
-        print(f"Max Drawdown medio          : In-Sample={mean_is_mdd:.1f}%          | Out-Of-Sample={mean_oos_mdd:.1f}%")
-        print(f"Anni OOS con rendimento > 0 : {oos_positive_years}/{len(oos_rets)} ({oos_win_rate}%)")
+        print(f"Selected parameters (mode): SMA={self.selected_params['sma_window']}, EMA={self.selected_params['ema_window']}")
+        print(f"Selection frequency         : {self.selected_params['frequency']}")
+        print(f"Logged combinations         : {len(self.all_combinations_history):,} records")
+        print(f"Mean cumulative return      : In-Sample={mean_is_ret:+.1f}% (5y)  | Out-Of-Sample={mean_oos_ret:+.1f}% (1y)")
+        print(f"Mean Sharpe ratio           : In-Sample={mean_is_sharpe:+.2f}       | Out-Of-Sample={mean_oos_sharpe:+.2f}")
+        print(f"Mean maximum drawdown       : In-Sample={mean_is_mdd:.1f}%          | Out-Of-Sample={mean_oos_mdd:.1f}%")
+        print(f"Test years with return > 0  : {oos_positive_years}/{len(oos_rets)} ({oos_win_rate}%)")
         print("=" * 65)
 
         return self.selected_params
@@ -578,26 +575,26 @@ class WalkForwardTrainer:
         """Export the full list of tested combinations to CSV."""
         df_log = self.get_combinations_dataframe()
         if df_log.empty:
-            raise ValueError("Nessun dato di combinazioni presente. Esegui prima .run().")
+            raise ValueError("No combination data available. Call .run() first.")
         path = Path(filepath)
         path.parent.mkdir(parents=True, exist_ok=True)
         df_log.to_csv(path, index=False)
-        print(f"Log dettagliato combinazioni salvato in: {path} ({len(df_log)} righe)")
+        print(f"Detailed combination log saved to: {path} ({len(df_log)} rows)")
 
     def save_combinations_summary(self, filepath: Union[str, Path]) -> None:
         """Export the aggregated summary of each combination to CSV."""
         df_sum = self.get_combinations_summary()
         if df_sum.empty:
-            raise ValueError("Nessun dato presente. Esegui prima .run().")
+            raise ValueError("No data available. Call .run() first.")
         path = Path(filepath)
         path.parent.mkdir(parents=True, exist_ok=True)
         df_sum.to_csv(path, index=False)
-        print(f"Riepilogo combinazioni aggregato salvato in: {path} ({len(df_sum)} righe)")
+        print(f"Aggregated combination summary saved to: {path} ({len(df_sum)} rows)")
 
     def save_final_agent_config(self, filepath: Union[str, Path]) -> None:
         """Save the final (modal) parameters to a JSON file readable by SMAEMAAgent."""
         if self.selected_params is None:
-            raise ValueError("Nessun parametro selezionato. Esegui prima .run().")
+            raise ValueError("No parameter selected. Call .run() first.")
         path = Path(filepath)
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
@@ -611,4 +608,4 @@ class WalkForwardTrainer:
                 f,
                 indent=4,
             )
-        print(f"Configurazione salvata con successo in: {path}")
+        print(f"Configuration saved to: {path}")

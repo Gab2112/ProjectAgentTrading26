@@ -9,22 +9,22 @@
     "total_windows": 11,
     "max_train_year": 2020,
     "final_in_sample_metrics": {
-        "cumulative_return": 7898.360317834024,
-        "annualized_return": 0.7716419529409524,
-        "annualized_volatility": 0.14984811920122035,
-        "sharpe_ratio": 5.149493747764491,
-        "max_drawdown": 0.18181655338314717,
-        "profit_factor": 5.06101568187529,
-        "calmar_ratio": 4.244068752721593
+        "cumulative_return": 7987.5477668944495,
+        "annualized_return": 0.7729099437083062,
+        "annualized_volatility": 0.14982102832190783,
+        "sharpe_ratio": 5.158888257312049,
+        "max_drawdown": 0.18181655338314695,
+        "profit_factor": 5.066000081796192,
+        "calmar_ratio": 4.251042764404032
     },
     "feature_importances": {
-        "curve_10y_2y": 0.1316,
+        "curve_10y_2y": 0.1315,
         "GLD_momentum_63d": 0.113,
         "vix_level": 0.1123,
-        "cpi_yoy": 0.1087,
+        "cpi_yoy": 0.1089,
         "GLD_return_1w": 0.1063,
         "breakeven_5y_change_1w": 0.0979,
-        "GLD_momentum_21d": 0.0973,
+        "GLD_momentum_21d": 0.0972,
         "treasury_10y_change_1w": 0.0891,
         "treasury_2y_change_1w": 0.0807,
         "curve_10y_2y_change_1w": 0.0631

@@ -24,7 +24,7 @@
         "gamma": "scale",
         "cv_balanced_accuracy": 0.5466
     },
-    "score_scale": 0.7445886210031375,
+    "score_scale": 0.7445886210031912,
     "trained_features": [
         "ret_1w",
         "mom_4w",

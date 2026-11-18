@@ -1,59 +1,55 @@
 {
     "best_params": {
         "weights": {
-            "SMA_EMA_Agent": 0.8,
-            "ZScore_Agent": 0.8,
-            "Macro_YieldCurve_Agent": 0.8,
-            "RandomForest_Agent": 0.8,
-            "SVM_Agent": 0.8,
-            "FinBERT_Agent": 0.8
+            "SMA_EMA_Agent": 0.2473185557153803,
+            "ZScore_Agent": 0.30159991050650226,
+            "Macro_YieldCurve_Agent": 0.19596928641454248,
+            "RandomForest_Agent": 0.19810084982560383,
+            "SVM_Agent": 0.05701139753797121
         },
         "alphas": {
-            "SMA_EMA_Agent": 1.1850037158529203,
+            "SMA_EMA_Agent": 2.067116097178869,
             "ZScore_Agent": 0.1,
-            "Macro_YieldCurve_Agent": 0.2762166717280574,
-            "RandomForest_Agent": 2.955599352583794,
-            "SVM_Agent": 2.986184576114257,
-            "FinBERT_Agent": 0.1433226506489357
+            "Macro_YieldCurve_Agent": 0.19200597572276512,
+            "RandomForest_Agent": 2.7611318070005195,
+            "SVM_Agent": 2.9442087307274347
         },
-        "threshold_long": 0.8498858580792914,
-        "threshold_short": 0.5741702046246591,
-        "threshold": 0.7120280313519752,
-        "objective_score": 0.3536,
-        "sharpe_ratio": 0.5976,
-        "max_drawdown": 0.087,
-        "cumulative_return": 0.4462,
-        "annualized_return": 0.034,
-        "profit_factor": 1.7026,
-        "trades": 135
+        "threshold_long": 0.85,
+        "threshold_short": 0.5053222220580069,
+        "threshold": 0.6776611110290034,
+        "objective_score": 0.6681,
+        "sharpe_ratio": 0.7643,
+        "max_drawdown": 0.1107,
+        "cumulative_return": 0.9466,
+        "annualized_return": 0.0622,
+        "profit_factor": 1.7442,
+        "trades": 153
     },
     "in_sample_metrics": {
         "weights": {
-            "SMA_EMA_Agent": 0.8,
-            "ZScore_Agent": 0.8,
-            "Macro_YieldCurve_Agent": 0.8,
-            "RandomForest_Agent": 0.8,
-            "SVM_Agent": 0.8,
-            "FinBERT_Agent": 0.8
+            "SMA_EMA_Agent": 0.2473185557153803,
+            "ZScore_Agent": 0.30159991050650226,
+            "Macro_YieldCurve_Agent": 0.19596928641454248,
+            "RandomForest_Agent": 0.19810084982560383,
+            "SVM_Agent": 0.05701139753797121
         },
         "alphas": {
-            "SMA_EMA_Agent": 1.1850037158529203,
+            "SMA_EMA_Agent": 2.067116097178869,
             "ZScore_Agent": 0.1,
-            "Macro_YieldCurve_Agent": 0.2762166717280574,
-            "RandomForest_Agent": 2.955599352583794,
-            "SVM_Agent": 2.986184576114257,
-            "FinBERT_Agent": 0.1433226506489357
+            "Macro_YieldCurve_Agent": 0.19200597572276512,
+            "RandomForest_Agent": 2.7611318070005195,
+            "SVM_Agent": 2.9442087307274347
         },
-        "threshold_long": 0.8498858580792914,
-        "threshold_short": 0.5741702046246591,
-        "threshold": 0.7120280313519752,
-        "objective_score": 0.3536,
-        "sharpe_ratio": 0.5976,
-        "max_drawdown": 0.087,
-        "cumulative_return": 0.4462,
-        "annualized_return": 0.034,
-        "profit_factor": 1.7026,
-        "trades": 135
+        "threshold_long": 0.85,
+        "threshold_short": 0.5053222220580069,
+        "threshold": 0.6776611110290034,
+        "objective_score": 0.6681,
+        "sharpe_ratio": 0.7643,
+        "max_drawdown": 0.1107,
+        "cumulative_return": 0.9466,
+        "annualized_return": 0.0622,
+        "profit_factor": 1.7442,
+        "trades": 153
     },
     "objective_metric": "sharpe_mdd",
     "max_train_year": 2020,

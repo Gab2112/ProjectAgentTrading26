@@ -8,10 +8,15 @@ expectations about monetary policy, the business cycle and inflation.
 The agent analyses:
 1. Curve slope (10Y-2Y and 10Y-3M spreads): inverted versus steep curve.
 2. The four curve-change regimes:
-   - Bull flattening: falling rates led by the 10-year yield -> long TLT (+1)
-   - Bull steepening: rapidly falling short-term rates (Fed cuts) -> long duration / TLT (+1)
-   - Bear flattening: rising short-term rates due to monetary tightening -> short TLT (-1), long SHY (+1)
-   - Bear steepening: rising long-term rates due to inflation or term premium -> short TLT (-1)
+   - Bull flattening: falling rates led by the 10-year yield -> long duration (+1)
+   - Bull steepening: rapidly falling short-term rates (Fed cuts) -> long duration (+1)
+   - Bear flattening: rising short-term rates due to monetary tightening -> short duration (-1), long SHY (+1)
+   - Bear steepening: rising long-term rates due to inflation or term premium -> short duration (-1)
+4. Mapping to the traded ETFs: IEF follows the duration view, SHY is held when
+   rates rise, SPY is held only in accommodative regimes with a positive curve,
+   and GLD is held when the macro score is positive.
+
+The agent has no fitted parameters: its thresholds are fixed economic rules.
 3. Inflation dynamics (CPI YoY or breakeven): accelerating inflation penalises duration.
 """
 
@@ -87,7 +92,7 @@ class MacroYieldCurveAgent(BaseAgent):
         Returns:
             pd.Series with the continuous score:
             - large positive values: environment favourable to falling yields and
-              long duration (TLT);
+              long duration;
             - large negative values: environment hostile to duration, with rising
               rates or high inflation.
         """
@@ -104,7 +109,7 @@ class MacroYieldCurveAgent(BaseAgent):
         for col in [self.slope_col, self.rate_change_col]:
             if col not in df.columns:
                 raise KeyError(
-                    f"Colonna '{col}' non trovata nel DataFrame. Colonne disponibili: {list(df.columns)}"
+                    f"Column '{col}' not found in the DataFrame. Available columns: {list(df.columns)}"
                 )
 
         slope = df[self.slope_col].astype(float)
@@ -124,7 +129,7 @@ class MacroYieldCurveAgent(BaseAgent):
 
         # Curve regime logic:
         # If rate_component > 0 (falling rates):
-        # - delta_slope < 0 (bull flattening): maximum reward for long duration (TLT)
+        # - delta_slope < 0 (bull flattening): maximum reward for long duration
         # - delta_slope >= 0 (bull steepening): positive for duration
         # If rate_component < 0 (rising rates):
         # - delta_slope < 0 (bear flattening): Fed tightening, strongly negative for duration
@@ -187,7 +192,6 @@ class MacroYieldCurveAgent(BaseAgent):
     ) -> pd.DataFrame:
         """Generate signals for every requested asset (default: SPY, IEF, GLD, SHY).
 
-        Full compatibility with the original universe (SHY, IEF, TLT) is preserved.
         """
         score = self.calculate_macro_score(df)
         multi = pd.DataFrame(index=df.index)
@@ -213,10 +217,6 @@ class MacroYieldCurveAgent(BaseAgent):
                 # Short duration / cash proxy: long when rates rise (safe haven), flat in bull regimes.
                 multi.loc[bear_mask, sig_col] = 1
                 multi.loc[bull_mask, sig_col] = 0
-            elif asset == "TLT":
-                # Long duration (historical universe): maximum sensitivity to falling rates.
-                multi.loc[bull_mask, sig_col] = 1
-                multi.loc[bear_mask, sig_col] = -1
             elif asset == "SPY":
                 # US equities: favoured by accommodative conditions with a positive curve, cautious on curve inversion.
                 multi.loc[bull_mask & (slope >= 0), sig_col] = 1

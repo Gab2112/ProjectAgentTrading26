@@ -1,7 +1,7 @@
 """Quantitative machine-learning agent based on a Random Forest (an ensemble of decision trees).
 
 The agent inherits from BaseAgent for full architectural consistency with the
-other agents of ProjectAgentTrading26 (SMA/EMA, Z-Score, Macro Yield Curve, FinBERT).
+other agents of ProjectAgentTrading26 (SMA/EMA, Z-Score, Macro Yield Curve, SVM).
 
 Quantitative and methodological rationale:
 - It overcomes the limits of purely linear relationships by capturing
@@ -62,7 +62,7 @@ class RandomForestAgent(BaseAgent):
     """Inference agent based on a Random Forest classifier.
 
     Workflow:
-    1. Receives the macroeconomic and market features (features_weekly.csv).
+    1. Receives the macroeconomic and market features of each weekly decision date.
     2. Uses an ensemble of shallow decision trees (max_depth 2-4) with large
        leaves (min_samples_leaf >= 15) to avoid fitting noise.
     3. At time t, predicts the directional probability for t+1:
@@ -196,7 +196,7 @@ class RandomForestAgent(BaseAgent):
 
         if not active_features:
             raise ValueError(
-                f"Nessuna feature specificata trovata nel DataFrame. Feature richieste: {self.feature_cols}"
+                f"None of the requested features is present in the DataFrame. Requested features: {self.feature_cols}"
             )
 
         X = df[active_features].copy()
@@ -216,8 +216,8 @@ class RandomForestAgent(BaseAgent):
     ) -> "RandomForestAgent":
         """Train the Random Forest on in-sample data (up to ``max_year``).
 
-        The project OOS lock is strictly respected: data from 2022 onwards is never
-        used during fitting.
+        Observations dated after ``max_year`` are rejected, so out-of-sample data
+        never enter the fit.
         """
         if (
             not isinstance(df.index, pd.DatetimeIndex)
@@ -225,7 +225,7 @@ class RandomForestAgent(BaseAgent):
             or not df.index.is_monotonic_increasing
             or not df.index.is_unique
         ):
-            raise ValueError("Indice temporale del training non valido.")
+            raise ValueError("Invalid training time index.")
 
         train_df = (
             df.loc[df.index.year <= max_year].copy()
@@ -240,10 +240,10 @@ class RandomForestAgent(BaseAgent):
         y_train = y.loc[valid_mask].astype(int)
 
         if len(X_train) < 50:
-            raise ValueError(f"Campione di training insufficiente: {len(X_train)} righe valide.")
+            raise ValueError(f"Insufficient training sample: {len(X_train)} valid rows.")
 
         if y_train.nunique() != 2:
-            raise ValueError("Il training RF richiede entrambe le classi del target.")
+            raise ValueError("Random Forest training requires both target classes.")
         self.model = RandomForestClassifier(
             n_estimators=self.n_estimators,
             max_depth=self.max_depth,
@@ -276,14 +276,14 @@ class RandomForestAgent(BaseAgent):
         """
         if self.model is None:
             raise ValueError(
-                f"[{self.name}] Modello Random Forest non addestrato. "
-                "Esegui prima .fit() o carica i parametri con .load_params()."
+                f"[{self.name}] Random Forest model not trained. "
+                "Call .fit() first or load the parameters with .load_params()."
             )
 
         features = self.trained_features if self.trained_features else self.feature_cols
         missing_cols = [c for c in features if c not in df.columns]
         if missing_cols:
-            raise KeyError(f"Colonne feature mancanti nel DataFrame per l'inferenza: {missing_cols}")
+            raise KeyError(f"Feature columns missing from the inference DataFrame: {missing_cols}")
 
         X = df[features].copy()
         valid_mask = X.notna().all(axis=1)
@@ -363,7 +363,7 @@ class RandomForestAgent(BaseAgent):
         """Load the optimal parameters from JSON and the serialised model (.joblib)."""
         path = Path(filepath)
         if not path.exists():
-            raise FileNotFoundError(f"File parametri non trovato: {path}")
+            raise FileNotFoundError(f"Parameter file not found: {path}")
 
         with open(path, "r", encoding="utf-8") as f:
             params = json.load(f)
@@ -429,7 +429,7 @@ class RandomForestOptimizer:
         """
         dfs_to_concat = [df for df in [warmup_df, train_df, val_df] if df is not None and not df.empty]
         if not dfs_to_concat:
-            raise ValueError("Nessun DataFrame fornito per l'ottimizzazione.")
+            raise ValueError("No DataFrame was supplied for the optimisation.")
 
         full_df = pd.concat(dfs_to_concat)
         full_df = full_df[~full_df.index.duplicated(keep="last")].sort_index()
@@ -497,7 +497,7 @@ class RandomForestOptimizer:
                             best_is_metrics = is_metrics
 
         if best_combo is None or best_agent is None:
-            raise RuntimeError(f"[{self.target_asset}] Nessuna combinazione valida trovata in grid search.")
+            raise RuntimeError(f"[{self.target_asset}] No valid combination was found in the grid search.")
 
         # Out-of-sample (validation) evaluation.
         oos_metrics = None
@@ -548,7 +548,7 @@ class RandomForestOptimizer:
     def save_params(self, filepath: Union[str, Path]) -> None:
         """Save the optimal parameters to a JSON file."""
         if self.best_params is None:
-            raise ValueError("Nessun parametro trovato. Esegui prima .fit().")
+            raise ValueError("No parameter found. Call .fit() first.")
         path = Path(filepath)
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
@@ -584,7 +584,7 @@ class RandomForestWalkForwardTrainer:
     def run(self, df: pd.DataFrame, max_year: int) -> Dict[str, Any]:
         """Run the complete walk-forward cycle."""
         if not isinstance(df.index, pd.DatetimeIndex):
-            raise TypeError("L'indice del DataFrame deve essere di tipo DatetimeIndex.")
+            raise TypeError("The DataFrame index must be a DatetimeIndex.")
 
         all_years = sorted(df.index.year.unique())
         if max_year is not None:
@@ -593,14 +593,14 @@ class RandomForestWalkForwardTrainer:
         total_needed = self.train_window_years + 1
         if len(all_years) < total_needed:
             raise ValueError(
-                f"Anni insufficienti ({len(all_years)}) per la finestra richiesta ({total_needed})."
+                f"Insufficient years ({len(all_years)}) for the requested window ({total_needed})."
             )
 
         print(
-            f"\n[{self.target_asset}] >>> Avvio Walk-Forward Random Forest: "
-            f"finestra {self.train_window_years} anni Train -> 1 anno Validation"
+            f"\n[{self.target_asset}] Random Forest walk-forward: "
+            f"{self.train_window_years}-year training window -> 1-year test"
         )
-        print(f"{'Periodo Train':<14} | {'Val':<5} | {'IS Sharpe':<10} | {'OOS Sharpe':<10} | {'Parametri (d, l, th)':<24}")
+        print(f"{'Train period':<14} | {'Val':<5} | {'IS Sharpe':<10} | {'OOS Sharpe':<10} | {'Parameters (d, l, th)':<24}")
         print("-" * 75)
 
         self.history = []
@@ -616,11 +616,11 @@ class RandomForestWalkForwardTrainer:
 
             res = self.optimizer.fit(train_df=train_df, val_df=val_df)
             if train_df.index.max() >= val_df.index.min():
-                raise ValueError("Fold OOF non cronologico.")
+                raise ValueError("Out-of-fold split is not chronological.")
 
             fold_agent = self.optimizer.best_agent
             if fold_agent is None:
-                raise RuntimeError("Modello RF del fold non disponibile.")
+                raise RuntimeError("Random Forest model of the fold is not available.")
 
             sig, conf = fold_agent.predict_with_confidence(val_df)
             oof_chunks.append(pd.DataFrame(
@@ -703,18 +703,18 @@ class RandomForestWalkForwardTrainer:
 
         print("-" * 75)
         print(
-            f"Parametri finali consolidati: max_depth={sel_depth}, min_samples_leaf={sel_leaf}, "
+            f"Final parameters: max_depth={sel_depth}, min_samples_leaf={sel_leaf}, "
             f"prob_threshold={sel_th:.2f}, n_estimators={sel_nest} "
-            f"(scelti in {freq}/{len(self.history)} finestre)"
+            f"(selected in {freq}/{len(self.history)} windows)"
         )
-        print(f"In-Sample Sharpe finale: {final_metrics['sharpe_ratio']:.2f} | Cum Ret: {final_metrics['cumulative_return']*100:.1f}%\n")
+        print(f"Final in-sample Sharpe: {final_metrics['sharpe_ratio']:.2f} | Cum Ret: {final_metrics['cumulative_return']*100:.1f}%\n")
 
         return self.selected_params
 
     def save_final_agent_config(self, filepath: Union[str, Path]) -> None:
         """Save the consolidated parameters and serialise the final model."""
         if self.final_agent is None or self.selected_params is None:
-            raise ValueError("Nessun agente finale addestrato. Esegui prima .run().")
+            raise ValueError("No final agent trained. Call .run() first.")
 
         path = Path(filepath)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -727,5 +727,5 @@ class RandomForestWalkForwardTrainer:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(self.selected_params, f, indent=4)
 
-        print(f"[{self.target_asset}] Configurazione salvata in: {path}")
-        print(f"[{self.target_asset}] Modello serializzato salvato in: {joblib_file}")
+        print(f"[{self.target_asset}] Configuration saved to: {path}")
+        print(f"[{self.target_asset}] Serialised model saved to: {joblib_file}")

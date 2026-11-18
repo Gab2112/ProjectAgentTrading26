@@ -6,12 +6,13 @@ Architectural components:
    calibration and dynamic position sizing (2D and 3D).
 2. PortfolioFitnessEvaluator: net performance evaluation (52 periods per year),
    turnover costs and anti-overfitting constraints.
-3. GeneticMetaOptimizer: real-coded GA with BLX-alpha crossover, adaptive
+3. GeneticMetaOptimizer: real-coded GA with BLX-alpha crossover, Gaussian
+   mutation with decaying variance, tournament selection and elitism.
 4. WalkForwardEngine: rolling out-of-sample validation without data leakage,
    with tracking of parameter drift.
 5. OrchestratorAgent: operational inference agent compatible with BaseAgent.
-6. OrchestratorOptimizer and WalkForwardOrchestrator: unified interfaces for
-   training and validation on the production assets.
+6. OrchestratorOptimizer: training interface on the traded assets;
+   ``walk_forward_orchestrator`` re-estimates it in a yearly expanding window.
 """
 
 from __future__ import annotations
@@ -54,11 +55,11 @@ def validate_signal_dataframe(df: pd.DataFrame, source_name: str = "SignalSource
     """Check and normalise the 'signal' ({-1, 0, 1}) and 'confidence' ([0.0, 1.0]) columns.
     """
     if not isinstance(df, pd.DataFrame):
-        raise TypeError(f"[{source_name}] Atteso pd.DataFrame, ricevuto: {type(df)}")
+        raise TypeError(f"[{source_name}] Expected a pd.DataFrame, received: {type(df)}")
 
     cols_map = {str(col).lower(): col for col in df.columns}
     if "signal" not in cols_map or "confidence" not in cols_map:
-        raise KeyError(f"[{source_name}] Colonne richieste: 'signal', 'confidence'. Presenti: {list(df.columns)}")
+        raise KeyError(f"[{source_name}] Required columns: 'signal', 'confidence'. Found: {list(df.columns)}")
 
     clean_df = pd.DataFrame(index=df.index)
     clean_df["signal"] = np.sign(df[cols_map["signal"]].fillna(0).astype(float)).astype(int)
@@ -79,7 +80,7 @@ def align_signals(
 ) -> Tuple[Dict[str, pd.DataFrame], pd.DatetimeIndex]:
     """Align a dictionary of signals on a common, sorted time index."""
     if not signals_dict:
-        raise ValueError("Il dizionario dei segnali in input è vuoto.")
+        raise ValueError("The input signal dictionary is empty.")
 
     validated = {k: validate_signal_dataframe(v, source_name=k) for k, v in signals_dict.items()}
     first_idx = validated[list(validated.keys())[0]].index
@@ -138,7 +139,7 @@ class WeeklySignalAggregator:
         if self.objective_metric not in {
             "sharpe_mdd", "sharpe", "calmar", "return", "profit_oriented", "profit"
         }:
-            raise ValueError(f"Obiettivo fitness non valido: {self.objective_metric}")
+            raise ValueError(f"Invalid fitness objective: {self.objective_metric}")
 
         w_sum = np.sum(raw_w)
         if w_sum > self.epsilon:
@@ -288,7 +289,7 @@ class PortfolioFitnessEvaluator:
             "sharpe_mdd", "sharpe", "calmar", "return", "profit_oriented", "profit"
         }:
             raise ValueError(
-                f"Funzione obiettivo non riconosciuta: {self.objective_metric}"
+                f"Unknown objective function: {self.objective_metric}"
             )
 
     def evaluate_single(
@@ -496,11 +497,10 @@ class GeneticMetaOptimizer:
         self.lower_bounds = np.zeros(self.chromosome_len, dtype=np.float64)
         self.upper_bounds = np.ones(self.chromosome_len, dtype=np.float64)
 
-        # Upper bound of the weights in the search space:
-        for i, name in enumerate(self.agent_names):
-            self.upper_bounds[i] = 0.80
-
+        # Search bounds: raw agent weights in [0, 0.8] (normalised when decoded),
+        # calibration exponents in [0.1, 3.0], decision thresholds in [0.05, 0.85].
         self.lower_bounds[: self.n_agents] = 0.0
+        self.upper_bounds[: self.n_agents] = 0.80
         self.lower_bounds[self.n_agents: 2 * self.n_agents] = 0.1
         self.upper_bounds[self.n_agents: 2 * self.n_agents] = 3.0
         self.lower_bounds[2 * self.n_agents:] = 0.05
@@ -509,42 +509,17 @@ class GeneticMetaOptimizer:
         self.rng = np.random.default_rng(self.random_seed)
 
     def decode_chromosome(self, chromosome: np.ndarray) -> Dict[str, Any]:
-        """Decode a chromosome, applying clipping and iterative rescaling.
+        """Decode a chromosome into normalised weights, calibration exponents and thresholds.
 
-        The decoding guarantees that no agent exceeds its weight cap (1% for
+        The raw weights are clipped to their search bounds and normalised to
+        sum to one, which is exactly the transformation applied inside the
+        fitness evaluation (``aggregate_3d_population``). The decoded agent is
+        therefore identical to the individual whose fitness was measured.
         """
         c = np.asarray(chromosome, dtype=np.float64).flatten()
-        w_raw = c[: self.n_agents].copy()
-
-        # 1. Apply the individual upper bounds to the raw weights.
-        for i, name in enumerate(self.agent_names):
-            w_raw[i] = np.clip(w_raw[i], 0.0, 0.80)
-
-        # 2. Iterative normalisation with clipping to respect the caps after summing.
-        w = w_raw.copy()
-        w_sum = np.sum(w)
-        if w_sum > 1e-12:
-            w /= w_sum
-        else:
-            w = np.full(self.n_agents, 1.0 / self.n_agents)
-
-        # Safety correction (at most 5 projection iterations).
-        for _ in range(5):
-            excess = 0.0
-            for i, name in enumerate(self.agent_names):
-                limit =  0.80
-                excess += (w[i] - limit)
-                w[i] = limit
-
-            # Redistribute the excess across the agents that have not reached their cap.
-            if excess > 1e-12:
-                free_mask = np.array([ 0.80 for n in self.agent_names]) > w
-                free_sum = np.sum(w[free_mask])
-                if free_sum > 1e-12:
-                    w[free_mask] += excess * (w[free_mask] / free_sum)
-                else:
-                    w = np.clip(w, 0.0, [ 0.80 for n in self.agent_names])
-                    w /= np.sum(w)
+        w_raw = np.clip(c[: self.n_agents], self.lower_bounds[: self.n_agents], self.upper_bounds[: self.n_agents])
+        w_sum = float(np.sum(w_raw))
+        w = w_raw / w_sum if w_sum > 1e-12 else np.full(self.n_agents, 1.0 / self.n_agents)
 
         return {
             "weights": w,
@@ -555,16 +530,8 @@ class GeneticMetaOptimizer:
         }
 
     def initialize_population(self) -> np.ndarray:
-        """Draw the initial population uniformly within the bounds and enforce the weight caps.
-        """
-        pop = self.rng.uniform(self.lower_bounds, self.upper_bounds, size=(self.population_size, self.chromosome_len))
-
-        # Ensure that each initial individual also respects the constraints through decode_chromosome.
-        for idx in range(self.population_size):
-            decoded = self.decode_chromosome(pop[idx])
-            pop[idx, : self.n_agents] = decoded["weights"]
-
-        return pop
+        """Draw the initial population uniformly within the search bounds."""
+        return self.rng.uniform(self.lower_bounds, self.upper_bounds, size=(self.population_size, self.chromosome_len))
 
     def tournament_selection(self, population: np.ndarray, fitnesses: np.ndarray) -> np.ndarray:
         """k-way tournament selection."""
@@ -710,7 +677,7 @@ class WalkForwardEngine:
 
         if common_idx.empty:
             raise ValueError(
-                "Nessuna data comune disponibile tra i segnali degli agenti."
+                "No common date is available across the agent signals."
             )
         agent_names = list(aligned.keys())
         self.n_agents = len(agent_names)
@@ -723,7 +690,7 @@ class WalkForwardEngine:
         conf_mat = np.column_stack([aligned[name]["confidence"].to_numpy(dtype=float) for name in agent_names])
 
         if T < self.train_window_weeks + self.test_window_weeks:
-            raise ValueError(f"Campione di {T} settimane insufficiente per Walk-Forward.")
+            raise ValueError(f"A sample of {T} weeks is insufficient for walk-forward validation.")
 
         folds_records, oos_records = [], []
         start_train, fold_id = 0, 1
@@ -732,8 +699,8 @@ class WalkForwardEngine:
         if self.verbose:
             print("\n" + "=" * 92)
             print(
-                f"  AVVIO WALK-FORWARD VALIDATION ({self.train_window_weeks}w Train -> {self.test_window_weeks}w OOS Test)")
-            print(f"  Agenti: {self.n_agents} ({', '.join(agent_names)}) | Settimane Totali: {T}")
+                f"  WALK-FORWARD VALIDATION ({self.train_window_weeks}w train -> {self.test_window_weeks}w test)")
+            print(f"  Agents: {self.n_agents} ({', '.join(agent_names)}) | Total weeks: {T}")
             print("=" * 92)
 
         while start_train + self.train_window_weeks + self.test_window_weeks <= T:
@@ -758,7 +725,7 @@ class WalkForwardEngine:
             best_c, is_m, _ = ga.optimize(signals_mat[tr_idx], conf_mat[tr_idx], ret_np[tr_idx])
             dec = ga.decode_chromosome(best_c)
 
-            # 2. Frozen application to the out-of-sample window.
+            # 2. Application of the fitted parameters, unchanged, to the test window.
             agg = WeeklySignalAggregator(dec["weights"], dec["alphas"], dec["theta_long"], dec["theta_short"])
             _, S_te, C_te, P_te = agg.aggregate_2d(signals_mat[te_idx], conf_mat[te_idx])
 
@@ -859,6 +826,87 @@ class WalkForwardEngine:
         }
 
 
+def walk_forward_orchestrator(
+        signals_dict: Dict[str, pd.DataFrame],
+        returns: pd.Series,
+        last_test_year: int,
+        min_train_years: int,
+        objective_metric: str,
+        population_size: int,
+        n_generations: int,
+        random_seed: int,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Yearly expanding-window walk-forward of the Orchestrator.
+
+    For every test year Y, the genetic algorithm is fitted on all weeks of
+    the signal pool dated before 1 January of Y (at least ``min_train_years``
+    calendar years), and the fitted parameters are applied, unchanged, to the
+    weeks of Y. The concatenated test-year outputs are therefore
+    out-of-sample with respect to the Orchestrator parameters.
+
+    Returns (weekly signal and confidence, one row of parameters per fold).
+    """
+    aligned, common_idx = align_signals(signals_dict, fill_method="inner")
+    names = list(aligned.keys())
+    s_mat = np.column_stack([aligned[n]["signal"].to_numpy(dtype=float) for n in names])
+    c_mat = np.column_stack([aligned[n]["confidence"].to_numpy(dtype=float) for n in names])
+    r_np = returns.reindex(common_idx).to_numpy(dtype=float)
+    if not np.isfinite(r_np).all():
+        raise ValueError("Missing or invalid returns in the walk-forward sample.")
+
+    years = common_idx.year
+    first_test_year = int(years.min()) + int(min_train_years)
+    if first_test_year > last_test_year:
+        raise ValueError("The signal pool is too short for the requested walk-forward.")
+
+    outputs, folds = [], []
+    for year in range(first_test_year, int(last_test_year) + 1):
+        train = years < year
+        test = years == year
+        if not test.any():
+            continue
+        evaluator = PortfolioFitnessEvaluator(objective_metric=objective_metric)
+        ga = GeneticMetaOptimizer(
+            n_agents=len(names),
+            agent_names=names,
+            population_size=population_size,
+            n_generations=n_generations,
+            evaluator=evaluator,
+            random_seed=int(random_seed) + year,
+        )
+        best, train_metrics, _ = ga.optimize(s_mat[train], c_mat[train], r_np[train])
+        decoded = ga.decode_chromosome(best)
+        aggregator = WeeklySignalAggregator(
+            decoded["weights"], decoded["alphas"], decoded["theta_long"], decoded["theta_short"]
+        )
+        _, signal, confidence, _ = aggregator.aggregate_2d(s_mat[test], c_mat[test])
+        outputs.append(pd.DataFrame(
+            {"signal": signal.astype(int), "confidence": np.clip(confidence, 0.0, 1.0)},
+            index=common_idx[test],
+        ))
+
+        # Weekly test-year return of the signal, held from the following week.
+        held = pd.Series(signal, index=common_idx[test]).shift(1).fillna(0.0).to_numpy()
+        test_metrics = calculate_performance_metrics(pd.Series(held * r_np[test]))
+        record = {
+            "test_year": year,
+            "train_start": str(common_idx[train].min().date()),
+            "train_end": str(common_idx[train].max().date()),
+            "train_fitness": float(train_metrics["fitness"]),
+            "train_sharpe": float(train_metrics["sharpe_ratio"]),
+            "test_sharpe": float(test_metrics["sharpe_ratio"]),
+            "test_return": float(test_metrics["cumulative_return"]),
+            "theta_long": float(decoded["theta_long"]),
+            "theta_short": float(decoded["theta_short"]),
+        }
+        for i, name in enumerate(names):
+            record[f"w_{name}"] = float(decoded["weights"][i])
+            record[f"alpha_{name}"] = float(decoded["alphas"][i])
+        folds.append(record)
+
+    return pd.concat(outputs).sort_index(), pd.DataFrame(folds)
+
+
 def _validate_training_provenance(config_path: Path, root: Path) -> None:
     """Check the temporal compatibility of a saved model."""
 
@@ -868,7 +916,7 @@ def _validate_training_provenance(config_path: Path, root: Path) -> None:
     windows = get_time_windows(config)
 
     if windows["train_start"] is None:
-        raise ValueError("train_start non definito in config.yaml.")
+        raise ValueError("train_start is not defined in config.yaml.")
 
     calendar_path = root / "data/processed/weekly_decision_dates.csv"
 
@@ -884,7 +932,7 @@ def _validate_training_provenance(config_path: Path, root: Path) -> None:
         ]
 
     if train_dates.empty:
-        raise ValueError("Calendario di training vuoto.")
+        raise ValueError("The training calendar is empty.")
 
     expected = {
         "start_date": train_dates.min().date().isoformat(),
@@ -900,16 +948,16 @@ def _validate_training_provenance(config_path: Path, root: Path) -> None:
 
     if recorded != expected:
         raise ValueError(
-            f"Provenienza temporale non valida per {config_path.name}.\n"
-            f"Attesa: {expected}\n"
-            f"Registrata: {recorded}"
+            f"Invalid training provenance for {config_path.name}.\n"
+            f"Expected: {expected}\n"
+            f"Recorded: {recorded}"
         )
 
     model_path = config_path.with_suffix(".joblib")
 
     if not model_path.is_file():
         raise FileNotFoundError(
-            f"Modello serializzato assente: {model_path}"
+            f"Serialised model not found: {model_path}"
         )
 
 
@@ -996,7 +1044,7 @@ class OrchestratorAgent(BaseAgent):
         signals_dict = {f"agent_{i + 1}": df for i, df in enumerate(signals_input)} if isinstance(signals_input,
                                                                                                   list) else signals_input
         if not signals_dict:
-            raise ValueError("Nessun segnale fornito all'Orchestratore.")
+            raise ValueError("No signal was supplied to the Orchestrator.")
 
         aligned, common_idx = align_signals(signals_dict, fill_method="zeros")
         names = list(aligned.keys())
@@ -1029,7 +1077,7 @@ class OrchestratorAgent(BaseAgent):
             s, c = agent_fn()
             result = pd.DataFrame({"signal": s, "confidence": c}, index=df.index)
             if result[["signal", "confidence"]].isna().any().any():
-                raise ValueError("Segnali o confidenze non validi.")
+                raise ValueError("Invalid signals or confidences.")
             return result
 
         # 1. SMA/EMA
@@ -1076,12 +1124,12 @@ class OrchestratorAgent(BaseAgent):
                 rf = RandomForestAgent(target_asset=asset, max_depth=3, n_estimators=100, min_samples_leaf=20)
                 cfg = cfg_dir / f"random_forest_params_{asset.lower()}.json"
                 if not cfg.exists():
-                    raise FileNotFoundError(f"Configurazione Random Forest assente: {cfg}.")
+                    raise FileNotFoundError(f"Random Forest configuration not found: {cfg}.")
                 try:
                     _validate_training_provenance(cfg, root)
                     rf.load_params(cfg)
                 except Exception as exc:
-                    raise RuntimeError(f"Impossibile caricare Random Forest da {cfg}.") from exc
+                    raise RuntimeError(f"Unable to load the Random Forest model from {cfg}.") from exc
                 return rf.predict_with_confidence(df)
 
             pool["RandomForest_Agent"] = _get_signal(_make_rf)
@@ -1092,12 +1140,12 @@ class OrchestratorAgent(BaseAgent):
                 svm = SVMAgent(target_asset=asset)
                 cfg = cfg_dir / f"svm_params_{asset.lower()}.json"
                 if not cfg.exists():
-                    raise FileNotFoundError(f"Configurazione SVM assente: {cfg}.")
+                    raise FileNotFoundError(f"SVM configuration not found: {cfg}.")
                 try:
                     _validate_training_provenance(cfg, root)
                     svm.load_params(cfg)
                 except Exception as exc:
-                    raise RuntimeError(f"Impossibile caricare SVM da {cfg}.") from exc
+                    raise RuntimeError(f"Unable to load the SVM model from {cfg}.") from exc
                 return svm.predict_with_confidence(df)
 
             pool["SVM_Agent"] = _get_signal(_make_svm)
@@ -1110,7 +1158,7 @@ class OrchestratorAgent(BaseAgent):
                                                                                                               index=df.index))
                 pool[name] = pd.DataFrame({"signal": s, "confidence": c}, index=df.index)
             except Exception as e:
-                print(f"  [AVVISO] Impossibile caricare agente registrato '{name}': {e}")
+                print(f"  [WARNING] Unable to load the registered agent '{name}': {e}")
 
         return pool
 
@@ -1174,7 +1222,7 @@ class OrchestratorOptimizer:
         self.objective_metric = objective_metric
         if max_train_year is None:
             raise ValueError(
-                "Il cutoff temporale deve essere fornito esplicitamente dalla pipeline."
+                "The training cut-off year must be supplied explicitly by the pipeline."
             )
         self.max_train_year = int(max_train_year)
         self.annualization_factor = int(annualization_factor)
@@ -1204,7 +1252,7 @@ class OrchestratorOptimizer:
         aligned, common_idx = align_signals(signals_dict, fill_method="inner")
         if common_idx.empty:
             raise ValueError(
-                "Nessuna data comune disponibile tra i segnali degli agenti."
+                "No common date is available across the agent signals."
             )
         names = list(aligned.keys())
         k = len(names)
@@ -1218,14 +1266,14 @@ class OrchestratorOptimizer:
                 ret_s.to_numpy(dtype=float)
         ).all():
             raise ValueError(
-                "Rendimenti mancanti o non validi nelle date di ottimizzazione."
+                "Missing or invalid returns on the optimisation dates."
             )
 
         is_mask = (common_idx.year <= self.max_train_year) if hasattr(common_idx, "year") else np.ones(len(common_idx),
                                                                                                        dtype=bool)
         if not np.any(is_mask):
             raise ValueError(
-                "Nessuna osservazione nel periodo di training autorizzato."
+                "No observation falls inside the training period."
             )
 
         is_idx = common_idx[is_mask]
@@ -1234,14 +1282,14 @@ class OrchestratorOptimizer:
         r_np = ret_s.loc[is_idx].to_numpy(dtype=float)
 
         print(
-            f"\n{'=' * 88}\n  OTTIMIZZAZIONE ORCHESTRATORE - ASSET: {asset_name.upper()} | METODO: {method.upper()} | OOS LOCK <= {self.max_train_year}\n  Agenti ({k}): {', '.join(names)} | Campione IS: {len(is_idx)} settimane\n{'=' * 88}")
+            f"\n{'=' * 88}\n  ORCHESTRATOR OPTIMISATION - ASSET: {asset_name.upper()} | METHOD: {method.upper()} | DATA <= {self.max_train_year}\n  Agents ({k}): {', '.join(names)} | In-sample: {len(is_idx)} weeks\n{'=' * 88}")
 
         # In-sample benchmark of the individual agents.
         for n in names:
             bm_strat = (aligned[n]["signal"].loc[is_idx].shift(1).fillna(0.0)) * ret_s.loc[is_idx]
             bm_m = calculate_performance_metrics(bm_strat, annualization_factor=self.annualization_factor)
             print(
-                f"  [Agente {n:<22}] Sharpe: {bm_m['sharpe_ratio']:>5.2f} | CumRet: {bm_m['cumulative_return'] * 100:>+6.1f}% | MDD: {bm_m['max_drawdown'] * 100:>4.1f}%")
+                f"  [Agent {n:<22}] Sharpe: {bm_m['sharpe_ratio']:>5.2f} | CumRet: {bm_m['cumulative_return'] * 100:>+6.1f}% | MDD: {bm_m['max_drawdown'] * 100:>4.1f}%")
 
         if method.lower() == "ga":
             evaluator = PortfolioFitnessEvaluator(
@@ -1348,11 +1396,11 @@ class OrchestratorOptimizer:
         self.in_sample_metrics = best_combo
 
         print(
-            f"\n{'-' * 88}\n  ORCHESTRATORE OTTIMIZZATO ({method.upper()}) | Sharpe IS: {best_combo['sharpe_ratio']:>5.2f} | CumRet: {best_combo['cumulative_return'] * 100:>+6.1f}% | MDD: {best_combo['max_drawdown'] * 100:>4.1f}%\n{'-' * 88}")
+            f"\n{'-' * 88}\n  OPTIMISED ORCHESTRATOR ({method.upper()}) | IS Sharpe: {best_combo['sharpe_ratio']:>5.2f} | CumRet: {best_combo['cumulative_return'] * 100:>+6.1f}% | MDD: {best_combo['max_drawdown'] * 100:>4.1f}%\n{'-' * 88}")
         for n, w_val in best_combo["weights"].items():
             a_val = best_combo.get("alphas", {}).get(n, 1.0)
-            print(f"  - {n:<24}: Peso={w_val * 100:5.1f}% | Alpha={a_val:.2f}")
-        print(f"  - Soglia Decisionale : {best_combo.get('threshold_long', best_combo.get('threshold')):.2f}")
+            print(f"  - {n:<24}: Weight={w_val * 100:5.1f}% | Alpha={a_val:.2f}")
+        print(f"  - Decision threshold: {best_combo.get('threshold_long', best_combo.get('threshold')):.2f}")
 
         return best_agent, df_summary
 
@@ -1369,151 +1417,4 @@ class OrchestratorOptimizer:
         }
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=4)
-        print(f"Configurazione Orchestratore salvata in: {path}")
-
-
-# =====================================================================
-# SECTION 8: WALK-FORWARD COMPATIBILITY WRAPPER
-# =====================================================================
-class WalkForwardOrchestrator:
-    """Wrapper around WalkForwardEngine kept for backward compatibility."""
-
-    def __init__(self, optimizer: OrchestratorOptimizer, train_window_years: int = 5, test_window_years: int = 1):
-        self.optimizer = optimizer
-        self.train_window_years = train_window_years
-        self.test_window_years = test_window_years
-        self.fold_results: List[Dict[str, Any]] = []
-
-    def run(self, signals_dict: Dict[str, pd.DataFrame],
-            returns_or_prices: Union[pd.Series, pd.DataFrame]) -> pd.DataFrame:
-        """Run the walk-forward validation and return the per-fold results."""
-        engine = WalkForwardEngine(
-            n_agents=len(signals_dict),
-            train_window_weeks=self.train_window_years * 52,
-            test_window_weeks=self.test_window_years * 52,
-            step_weeks=self.test_window_years * 52,
-            population_size=self.optimizer.population_size,
-            n_generations=self.optimizer.n_generations,
-            random_seed=self.optimizer.random_seed,
-            verbose=True,
-        )
-        res = engine.run(signals_dict, returns_or_prices)
-        self.fold_results = res["folds_df"].to_dict("records")
-        return res["folds_df"]
-
-
-# =====================================================================
-# SECTION 9: SYNTHETIC SIMULATION AND ENTRY POINT
-# =====================================================================
-def generate_synthetic_market_data(
-        T: int = 520,
-        random_seed: int = 42,
-) -> Tuple[pd.DataFrame, Dict[str, pd.DataFrame]]:
-    """Generate 520 weeks with multiple regimes (bull, bear, choppy) and 4 realistic agents.
-    """
-    rng = np.random.default_rng(random_seed)
-    returns = np.zeros(T, dtype=float)
-    regimes = []
-
-    lengths = [int(round(f * T)) for f in [0.30, 0.10, 0.20, 0.20, 0.10, 0.10]]
-    lengths[-1] = T - sum(lengths[:-1])
-
-    cur = 0
-    returns[cur: cur + lengths[0]] = rng.normal(0.12 / 52, 0.14 / np.sqrt(52), size=lengths[0])
-    regimes.extend(["Bull_1"] * lengths[0])
-    cur += lengths[0]
-
-    returns[cur: cur + lengths[1]] = rng.normal(-0.25 / 52, 0.28 / np.sqrt(52), size=lengths[1])
-    regimes.extend(["Bear_1"] * lengths[1])
-    cur += lengths[1]
-
-    for t in range(cur, cur + lengths[2]):
-        returns[t] = -0.35 * (returns[t - 1] if t > cur else 0.0) + rng.normal(0.0005, 0.15 / np.sqrt(52))
-    regimes.extend(["Choppy_1"] * lengths[2])
-    cur += lengths[2]
-
-    returns[cur: cur + lengths[3]] = rng.normal(0.20 / 52, 0.15 / np.sqrt(52), size=lengths[3])
-    regimes.extend(["Bull_2"] * lengths[3])
-    cur += lengths[3]
-
-    for t in range(cur, cur + lengths[4]):
-        returns[t] = -0.30 * (returns[t - 1] if t > cur else 0.0) + rng.normal(-0.001, 0.22 / np.sqrt(52))
-    regimes.extend(["Choppy_2"] * lengths[4])
-    cur += lengths[4]
-
-    returns[cur: cur + lengths[5]] = rng.normal(0.09 / 52, 0.15 / np.sqrt(52), size=lengths[5])
-    regimes.extend(["Bull_3"] * lengths[5])
-
-    prices = 100.0 * np.cumprod(1.0 + returns)
-    dates = pd.date_range("2014-01-03", periods=T, freq="W-FRI")
-    df_market = pd.DataFrame({"close": prices, "return_1w": returns, "regime": regimes}, index=dates)
-
-    diff = (df_market["close"].ewm(span=8).mean() - df_market["close"].ewm(span=24).mean()) / df_market["close"]
-    s_trend = np.where(diff > 0.004, 1, np.where(diff < -0.004, -1, 0))
-    c_trend = np.clip(np.abs(diff) * 16.0, 0.35, 0.95)
-
-    z = (df_market["close"] - df_market["close"].rolling(16, min_periods=1).mean()) / (
-                df_market["close"].rolling(16, min_periods=1).std().fillna(1.0) + 1e-6)
-    s_mr = np.where(z < -1.15, 1, np.where(z > 1.15, -1, 0))
-    c_mr = np.clip(np.abs(z) / 2.5, 0.40, 0.95)
-
-    s_macro = np.sign(df_market["return_1w"].rolling(26, min_periods=1).mean()).fillna(0).to_numpy(dtype=int, copy=True)
-    flip_mask = rng.random(T) < 0.35
-    s_macro[flip_mask] = rng.choice([-1, 0, 1], size=int(np.sum(flip_mask)))
-    c_macro = rng.uniform(0.80, 0.98, size=T)
-
-    s_noise = rng.choice([-1, 0, 1], p=[0.35, 0.30, 0.35], size=T)
-    c_noise = rng.uniform(0.15, 0.85, size=T)
-
-    signals_pool = {
-        "Trend_Follower": pd.DataFrame({"signal": s_trend, "confidence": c_trend}, index=dates),
-        "Mean_Reverting": pd.DataFrame({"signal": s_mr, "confidence": c_mr}, index=dates),
-        "Sentiment_Macro": pd.DataFrame({"signal": s_macro, "confidence": c_macro}, index=dates),    }
-    return df_market, signals_pool
-
-
-def run_end_to_end_simulation() -> None:
-    """Run the full walk-forward simulation on synthetic data and print the quantitative report.
-    """
-    print("\n" + "#" * 94)
-    print("### SIMULAZIONE END-TO-END META-DECISORE GENETICO (WEEKLY TIMEFRAME - 10 ANNI) ###")
-    print("#" * 94)
-
-    df_market, pool = generate_synthetic_market_data(T=520, random_seed=42)
-    engine = WalkForwardEngine(n_agents=len(pool), train_window_weeks=156, test_window_weeks=52, step_weeks=52,
-                               verbose=True)
-    res = engine.run(pool, df_market["return_1w"])
-
-    df_folds, summary, names = res["folds_df"], res["summary_metrics"], res["agent_names"]
-
-    print("\n" + "=" * 94)
-    print("  REPORT COMPARATIVO: IN-SAMPLE (IS) vs OUT-OF-SAMPLE (OOS)")
-    print("=" * 94)
-    print(f"{'Metrica Finanziaria':<36} | {'In-Sample (Media)':<24} | {'Out-of-Sample (Cucito)':<24}")
-    print("-" * 94)
-    print(
-        f"{'Sharpe Ratio Netto Annualizzato':<36} | {summary['mean_is_sharpe']:>24.2f} | {summary['annualized_sharpe_ratio']:>24.2f}")
-    print(f"{'Rendimento Cumulato Netto Totale':<36} | {'-':>24} | {summary['cumulative_net_return'] * 100:>23.1f}%")
-    print(f"{'Rendimento Netto Annualizzato':<36} | {'-':>24} | {summary['annualized_net_return'] * 100:>23.1f}%")
-    print(f"{'Volatilità Netta Annualizzata':<36} | {'-':>24} | {summary['annualized_volatility'] * 100:>23.1f}%")
-    print(
-        f"{'Maximum Drawdown (MDD)':<36} | {df_folds['is_max_dd'].mean() * 100:>23.1f}% | {summary['max_drawdown'] * 100:>23.1f}%")
-    print(f"{'Profit Factor Netto':<36} | {'-':>24} | {summary['profit_factor']:>24.2f}")
-    print(f"{'Win Rate Settimanale (% > 0)':<36} | {'-':>24} | {summary['win_rate'] * 100:>23.1f}%")
-    print(f"{'Turnover Medio Settimanale (|Delta P|)':<36} | {'-':>24} | {summary['average_turnover']:>24.4f}")
-    print(
-        f"{'Percentuale Tempo Attivo a Mercato':<36} | {df_folds['is_active_ratio'].mean() * 100:>23.1f}% | {summary['active_time_ratio'] * 100:>23.1f}%")
-    print(f"{'Settimane Totali Valutate OOS':<36} | {'-':>24} | {summary['total_oos_weeks']:>24d}")
-    print("=" * 94)
-
-    print("\n" + "-" * 94 + "\n  EVOLUZIONE DEI PESI STRUTTURALI (w_i %) ATTRAVERSO I FOLD\n" + "-" * 94)
-    print(f"{'Fold':<6} | {'Periodo OOS Test':<23} | " + " | ".join([f"{n[:14]:<14}" for n in names]))
-    print("-" * 94)
-    for _, r in df_folds.iterrows():
-        print(f"{int(r['fold']):<6} | {r['test_dates']:<23} | " + " | ".join(
-            [f"{r[f'w_{n}'] * 100:>13.1f}%" for n in names]))
-    print("-" * 94)
-
-
-if __name__ == "__main__":
-    run_end_to_end_simulation()
+        print(f"Orchestrator configuration saved to: {path}")
