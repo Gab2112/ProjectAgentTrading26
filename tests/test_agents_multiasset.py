@@ -248,12 +248,12 @@ class TestIndividualAgentsMultiAsset(unittest.TestCase):
             def predict(self, df):
                 return pd.Series(1, index=df.index)
 
-        orch.register_agent("CustomSentimentAgent", DummyAgent(name="Dummy"))
+        orch.register_agent("CustomAgent", DummyAgent(name="Dummy"))
         pool = orch._build_signals_pool_from_df(self.df)
 
-        self.assertIn("CustomSentimentAgent", pool)
-        self.assertEqual(len(pool["CustomSentimentAgent"]), len(self.df))
-        self.assertEqual(int(pool["CustomSentimentAgent"]["signal"].iloc[0]), 1)
+        self.assertIn("CustomAgent", pool)
+        self.assertEqual(len(pool["CustomAgent"]), len(self.df))
+        self.assertEqual(int(pool["CustomAgent"]["signal"].iloc[0]), 1)
 
 
 if __name__ == "__main__":

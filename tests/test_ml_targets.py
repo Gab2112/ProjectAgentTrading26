@@ -120,7 +120,7 @@ class TestMLFutureReturnTargets(unittest.TestCase):
         )
         for agent_type in self._agent_classes():
             with self.subTest(agent=agent_type.__name__):
-                with self.assertRaisesRegex(ValueError, "classi del target"):
+                with self.assertRaisesRegex(ValueError, "both target classes"):
                     self._new_agent(agent_type).fit(rising, max_year=None)
 
     def test_training_rejects_unsorted_or_duplicate_dates(self):
@@ -130,7 +130,7 @@ class TestMLFutureReturnTargets(unittest.TestCase):
         for agent_type in self._agent_classes():
             for invalid in (broken, duplicate):
                 with self.subTest(agent=agent_type.__name__, rows=len(invalid)):
-                    with self.assertRaisesRegex(ValueError, "Indice temporale"):
+                    with self.assertRaisesRegex(ValueError, "time index"):
                         self._new_agent(agent_type).fit(invalid, max_year=None)
 
 

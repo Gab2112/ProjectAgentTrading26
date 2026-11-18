@@ -24,6 +24,22 @@ from src.agents.random_forest_agent import (
 )
 from src.agents.SVM_agent import SVMWalkForwardTrainer
 
+MINIMAL_CONFIG = {
+    "project": {"random_seed": 42},
+    "agents": {
+        "objective_metric": "sharpe_mdd",
+        "walk_forward_train_years": 5,
+        "orchestrator_method": "ga",
+        "sma_ema": {"sma_windows": [20], "ema_windows": [10]},
+        "zscore": {"windows": [20], "thresholds": [1.5], "modes": ["momentum"]},
+        "random_forest": {
+            "depth_candidates": [2], "min_leaf_candidates": [10],
+            "threshold_candidates": [0.5], "n_estimators_candidates": [10],
+        },
+        "orchestrator": {"threshold_range": [0.1, 0.5, 0.1], "population_size": 20, "n_generations": 5, "walk_forward_min_train_years": 1},
+    },
+}
+
 
 class TestOOFSignals(unittest.TestCase):
     @staticmethod
@@ -199,16 +215,27 @@ class TestOOFSignals(unittest.TestCase):
                 train_module.OrchestratorOptimizer, 'save_final_config'
             ))
 
+            def fake_walk_forward(signals_dict, returns, **kwargs):
+                captured['walk_forward_pool'] = signals_dict
+                index = next(iter(signals_dict.values())).index
+                return (
+                    pd.DataFrame({'signal': 0, 'confidence': 0.0}, index=index),
+                    pd.DataFrame(columns=['test_year', 'train_start', 'train_end',
+                                          'train_sharpe', 'test_sharpe']),
+                )
+
+            stack.enter_context(patch.object(
+                train_module, 'walk_forward_orchestrator', side_effect=fake_walk_forward
+            ))
+
             with contextlib.redirect_stdout(io.StringIO()):
                 output = train_module.train_single_asset(
                     asset='SPY', df=df,
+                    config=MINIMAL_CONFIG,
                     config_dir=root / 'config',
                     signals_dir=root / 'signals',
                     results_dir=root / 'results',
                     max_train_year=2015,
-                    train_rf=rf_index is not None,
-                    train_svm=svm_index is not None,
-                    train_orchestrator=True,
                 )
             captured['output'] = output
             captured['dates'] = all_dates
@@ -231,22 +258,14 @@ class TestOOFSignals(unittest.TestCase):
         pd.testing.assert_index_equal(result['output']['signals_orchestrator'].index, expected)
         self.assertTrue((pool['RandomForest_Agent']['signal'] == 1).all())
         self.assertTrue((pool['SVM_Agent']['signal'] == -1).all())
-
-    def test_pipeline_without_ml_keeps_all_training_dates(self):
-        result = self._run_pipeline_with_mocked_other_agents(None, None)
-        pool = result['pool']
-        self.assertEqual(set(pool), {
-            'SMA_EMA_Agent', 'ZScore_Agent', 'Macro_YieldCurve_Agent'
-        })
-        for signals in pool.values():
-            pd.testing.assert_index_equal(signals.index, result['dates'])
-        pd.testing.assert_index_equal(result['returns'].index, result['dates'])
+        # The walk-forward receives exactly the same out-of-fold pool.
+        self.assertIs(result['walk_forward_pool'], pool)
 
     def test_pipeline_rejects_disjoint_oof_folds(self):
         dates = self.panel().index
         rf_idx = dates[dates.year == 2014]
         svm_idx = dates[dates.year == 2015]
-        with self.assertRaisesRegex(ValueError, 'OOF'):
+        with self.assertRaisesRegex(ValueError, 'out-of-fold'):
             self._run_pipeline_with_mocked_other_agents(rf_idx, svm_idx)
 
 

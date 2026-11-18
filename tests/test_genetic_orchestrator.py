@@ -12,8 +12,23 @@ from src.agents.orchestrator_agent import (
     GeneticMetaOptimizer,
     WalkForwardEngine,
     OrchestratorAgent,
-    generate_synthetic_market_data,
 )
+
+
+def generate_synthetic_market_data(T: int, random_seed: int):
+    """Weekly returns with a persistent trend and three agents of different quality."""
+    rng = np.random.default_rng(random_seed)
+    dates = pd.date_range("2014-01-03", periods=T, freq="W-FRI")
+    returns = rng.normal(0.001, 0.02, T) + 0.004 * np.sign(np.sin(np.arange(T) / 15.0))
+    close = pd.Series(100.0 * np.cumprod(1.0 + returns), index=dates)
+    trend = np.sign(close.ewm(span=8).mean() - close.ewm(span=24).mean()).fillna(0).astype(int)
+    noise = pd.Series(rng.choice([-1, 0, 1], size=T), index=dates)
+    momentum = np.sign(close.pct_change(4)).fillna(0).astype(int)
+    pool = {
+        name: pd.DataFrame({"signal": sig, "confidence": rng.uniform(0.4, 0.9, T)}, index=dates)
+        for name, sig in (("Trend", trend), ("Noise", noise), ("Momentum", momentum))
+    }
+    return pd.DataFrame({"return_1w": returns}, index=dates), pool
 
 
 class TestWeeklySignalAggregator(unittest.TestCase):
@@ -227,3 +242,30 @@ class TestWalkForwardEngine(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestOrchestratorWalkForward(unittest.TestCase):
+    def setUp(self):
+        from src.agents.orchestrator_agent import walk_forward_orchestrator
+        self.run_wf = walk_forward_orchestrator
+        market, self.pool = generate_synthetic_market_data(T=260, random_seed=3)
+        self.returns = market["return_1w"]
+
+    def fit(self, returns):
+        return self.run_wf(self.pool, returns, last_test_year=2018, min_train_years=2,
+                           objective_metric="sharpe_mdd", population_size=20, n_generations=5, random_seed=1)
+
+    def test_each_fold_trains_only_on_earlier_years(self):
+        signals, folds = self.fit(self.returns)
+        self.assertEqual(folds["test_year"].tolist(), [2016, 2017, 2018])
+        for fold in folds.itertuples():
+            self.assertLess(pd.Timestamp(fold.train_end).year, fold.test_year)
+        self.assertEqual(signals.index.min().year, 2016)
+
+    def test_future_returns_do_not_change_earlier_outputs(self):
+        base, _ = self.fit(self.returns)
+        altered_returns = self.returns.copy()
+        altered_returns[altered_returns.index.year == 2018] *= -5.0
+        altered, _ = self.fit(altered_returns)
+        early = base.index.year < 2018
+        pd.testing.assert_frame_equal(base.loc[early], altered.loc[early])

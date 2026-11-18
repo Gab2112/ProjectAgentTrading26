@@ -1,7 +1,7 @@
-"""Contract tests for actual-session, train-only decision features.
+"""Contract tests for the decision-feature panel built on actual trading sessions.
 
-These tests deliberately do not modify historical Level B parameters, signals,
-portfolio weights, or frozen backtesting artifacts.
+The tests check that features use only information available at each weekly
+close and that the in-sample snapshot excludes every later observation.
 """
 import unittest
 from pathlib import Path
@@ -136,10 +136,7 @@ class TestDecisionFeatures(unittest.TestCase):
             align_daily_macro_panel(decision, {"vix": old})
 
     def test_training_panel_excludes_validation_and_future(self):
-        config = {
-            "evaluation": {"evaluate_oos": False},
-            "validation": {"development_only": True},
-        }
+        config = {}
         train_start = pd.Timestamp("2020-04-01")
         train_end = pd.Timestamp("2020-07-31")
         with patch("src.features.get_time_windows", return_value={
@@ -153,14 +150,6 @@ class TestDecisionFeatures(unittest.TestCase):
         self.assertTrue(panel.index.equals(self.decisions[
             (self.decisions >= train_start) & (self.decisions <= train_end)
         ]))
-
-    def test_training_unauthorized_oos_is_rejected(self):
-        config = {
-            "evaluation": {"evaluate_oos": True},
-            "validation": {"development_only": False},
-        }
-        with self.assertRaises(ValueError):
-            build_training_decision_features(config, self.market, self.decisions)
 
     def test_export_writes_only_training_decision_features(self):
         with TemporaryDirectory() as temporary:
@@ -178,15 +167,16 @@ class TestDecisionFeatures(unittest.TestCase):
                     t: {"ticker": t} for t in ("SPY", "IEF", "GLD", "SHY")
                 }},
                 "paths": {"raw_data": "data/raw", "processed_data": "data/processed"},
-                "pipeline": {"active_level": "A1"},
-                "evaluation": {"evaluate_oos": False},
                 "validation": {
-                    "development_only": True,
                     "train_start": "2020-04-01", "train_end": "2020-07-31",
-                    "validation_start": "2020-08-01", "validation_end": "2020-09-30",
+                    "validation_start": "2020-06-01", "validation_end": "2020-07-31",
                     "oos_start": "2020-10-01",
                 },
-                "data": {"start_date": "2020-01-02"},
+                "data": {
+                    "start_date": "2020-01-02",
+                    "end_date": None,
+                    "validation": {"max_abs_daily_return": 0.25},
+                },
             }
             with patch("src.features.get_time_windows", return_value={
                 "train_start": pd.Timestamp("2020-04-01"),

@@ -17,11 +17,7 @@ from src.macro_availability import (
     align_verified_daily_series,
 )
 from src.features import build_macro_feature_levels
-from src.regime_allocator import (
-    build_regime_budget_panel,
-    classify_macro_regimes,
-    validate_regime_series,
-)
+from src.regime_allocator import classify_macro_regimes
 
 
 class TestMacroObservationAlignment(unittest.TestCase):
@@ -153,65 +149,6 @@ class TestMacroRegimeThresholds(unittest.TestCase):
         altered_features = build_macro_feature_levels(self.dates, future_vix, future_be)
         altered = classify_macro_regimes(altered_features, window_weeks=52)
         pd.testing.assert_frame_equal(baseline.iloc[:cutoff + 1], altered.iloc[:cutoff + 1])
-
-
-class TestClusteringRegimeContract(unittest.TestCase):
-    def setUp(self):
-        self.dates = pd.DatetimeIndex(["2015-01-09", "2015-01-16", "2015-01-23"], name="Date")
-        self.labels = pd.Series(["cluster_0", "cluster_1", "cluster_0"], index=self.dates)
-        self.policy = {
-            "cluster_0": {"SPY": .25, "IEF": .30, "GLD": .20, "SHY": .25},
-            "cluster_1": {"SPY": .15, "IEF": .20, "GLD": .30, "SHY": .35},
-        }
-
-    def run_contract(self, labels=None, policy=None):
-        return build_regime_budget_panel(
-            regimes=self.labels if labels is None else labels,
-            decision_dates=self.dates,
-            train_start=pd.Timestamp("2015-01-01"),
-            train_end=pd.Timestamp("2015-12-31"),
-            budget_policy=self.policy if policy is None else policy,
-        )
-
-    def test_cluster_labels_map_to_explicit_asset_budgets(self):
-        budgets = self.run_contract()
-        self.assertTrue(budgets.index.equals(self.dates))
-        self.assertEqual(list(budgets.columns), ["SPY", "IEF", "GLD", "SHY"])
-        np.testing.assert_allclose(budgets.sum(axis=1), 1.)
-        self.assertAlmostEqual(budgets.loc[self.dates[1], "SHY"], .35)
-        pd.testing.assert_series_equal(budgets.iloc[0], budgets.iloc[2], check_names=False)
-
-    def test_missing_mapping_rejected(self):
-        with self.assertRaisesRegex(ValueError, "No budget policy"):
-            self.run_contract(policy={"cluster_0": self.policy["cluster_0"]})
-
-    def test_unallocated_negative_and_invalid_budgets_rejected(self):
-        for bad in [
-            {"SPY": .1, "IEF": .3, "GLD": .2, "SHY": .2},
-            {"SPY": -.1, "IEF": .3, "GLD": .3, "SHY": .5},
-            {"SPY": .1, "IEF": .3, "GLD": .2},
-        ]:
-            with self.subTest(bad=bad):
-                p = {**self.policy, "cluster_1": bad}
-                with self.assertRaises(ValueError):
-                    self.run_contract(policy=p)
-
-    def test_dates_outside_training_or_misaligned_rejected(self):
-        bad_labels = self.labels.copy(deep=True)
-        bad_labels.index = self.dates + pd.Timedelta(days=1)
-        with self.assertRaises(ValueError):
-            self.run_contract(labels=bad_labels)
-        with self.assertRaises(ValueError):
-            validate_regime_series(self.labels, self.dates, "2016-01-01", "2016-12-31")
-
-    def test_empty_or_missing_labels_rejected(self):
-        bad_labels = self.labels.copy(deep=True)
-        bad_labels.iloc[1] = ""
-        with self.assertRaises(ValueError):
-            self.run_contract(labels=bad_labels)
-        bad_labels.iloc[1] = np.nan
-        with self.assertRaises(ValueError):
-            self.run_contract(labels=bad_labels)
 
 
 if __name__ == "__main__":

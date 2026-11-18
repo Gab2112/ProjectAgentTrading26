@@ -214,7 +214,7 @@ class TestTrainerAndFinalModel(unittest.TestCase):
 
     def test_rejects_unsorted_or_duplicate_dates(self):
         for broken in (self.panel.iloc[::-1], pd.concat([self.panel, self.panel.iloc[[-1]]])):
-            with self.assertRaisesRegex(ValueError, "Indice temporale"):
+            with self.assertRaisesRegex(ValueError, "time index"):
                 self.run_trainer(broken)
 
     def test_single_class_is_rejected(self):
@@ -222,7 +222,7 @@ class TestTrainerAndFinalModel(unittest.TestCase):
         rising["SPY_close"] = 100.0 + np.arange(len(rising))
         agent = SVMAgent("SPY", self.settings)
         closes = rising.rename(columns=lambda c: c.replace("_close", ""))
-        with self.assertRaisesRegex(ValueError, "classi del target"):
+        with self.assertRaisesRegex(ValueError, "both target classes"):
             agent.fit_final(closes, None)
 
     def test_missing_features_give_neutral_signal_not_backfill(self):
@@ -250,9 +250,9 @@ class TestTrainerAndFinalModel(unittest.TestCase):
 
 class TestSettings(unittest.TestCase):
     def test_missing_settings_are_rejected(self):
-        config = {"strategies": {"C": {"svm_agent": make_settings()}}}
+        config = {"agents": {"svm": make_settings()}}
         get_svm_settings(config)
-        del config["strategies"]["C"]["svm_agent"]["horizon_weeks"]
+        del config["agents"]["svm"]["horizon_weeks"]
         with self.assertRaises(KeyError):
             get_svm_settings(config)
 
